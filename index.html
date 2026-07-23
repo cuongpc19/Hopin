@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <title>Pixel Flow</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        /* Match the game's base color so the FIT letterbox bars (top/bottom on
+           tall screens) blend in instead of showing as a bare white strip. */
+        background: #bfe3a0;
+        overflow: hidden;
+        overscroll-behavior: none;
+        touch-action: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+      /* Fill the viewport and let Phaser's CENTER_BOTH do the centering.
+         (Using flex here as well would double-center and shift the canvas.) */
+      #game {
+        position: absolute;
+        inset: 0;
+      }
+      #game canvas {
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="game"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,1089 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Pixel Flow — Level Designer</title>
+<style>
+  :root {
+    --bg: #14141c;
+    --panel: #1e1e2b;
+    --panel-2: #262636;
+    --line: #33334a;
+    --text: #e8e8f2;
+    --muted: #9a9ab5;
+    --accent: #ffd45e;
+    --good: #18b58a;
+    --bad: #e82817;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    padding: 18px;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1 { font-size: 18px; margin: 0 0 2px; letter-spacing: .3px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin: 0 0 12px; }
+  .sub { color: var(--muted); font-size: 12px; margin: 0 0 16px; }
+  .layout { display: grid; grid-template-columns: 1fr 340px; gap: 16px; align-items: start; }
+  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
+  .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .row + .row { margin-top: 10px; }
+  label { font-size: 12px; color: var(--muted); }
+  input[type=number] {
+    width: 58px; background: var(--panel-2); border: 1px solid var(--line);
+    color: var(--text); border-radius: 6px; padding: 5px 7px; font-size: 13px;
+  }
+  button {
+    background: var(--panel-2); border: 1px solid var(--line); color: var(--text);
+    padding: 6px 11px; border-radius: 7px; font-size: 12px; cursor: pointer;
+    transition: background .12s, border-color .12s;
+  }
+  button:hover { background: #30304a; }
+  button.primary { background: var(--accent); color: #1a1a10; border-color: var(--accent); font-weight: 600; }
+  button.primary:hover { filter: brightness(1.08); }
+  button.danger:hover { border-color: var(--bad); color: #ff8a7d; }
+
+  /* palette swatches */
+  .palette { display: flex; gap: 8px; flex-wrap: wrap; }
+  .swatch {
+    width: 34px; height: 34px; border-radius: 8px; cursor: pointer;
+    border: 3px solid transparent; position: relative;
+  }
+  .swatch.sel { border-color: #fff; box-shadow: 0 0 0 2px var(--accent); }
+  .swatch .idx { position: absolute; bottom: 1px; right: 3px; font-size: 9px; color: rgba(255,255,255,.85); text-shadow: 0 1px 1px #000; }
+  .swatch.eraser { background: repeating-linear-gradient(45deg, #444 0 6px, #222 6px 12px); display: grid; place-items: center; font-size: 13px; }
+
+  /* board */
+  .board-wrap { margin-top: 14px; display: inline-block; background: #fff; padding: 14px; border-radius: 12px; border: 4px solid #6d5a86; }
+  #board { display: grid; gap: 2px; user-select: none; touch-action: none; }
+  .cell {
+    width: 30px; height: 30px; border-radius: 5px; cursor: pointer;
+    /* empty cells get a faint hatch so filled tiles — even white ones — clearly stand out */
+    background: repeating-linear-gradient(45deg, #dedee8 0 3px, #eeeef4 3px 6px);
+    border: 1px solid #cfcfda; transition: transform .05s;
+  }
+  .cell.filled { background-image: none; box-shadow: inset 0 0 0 1px rgba(0,0,0,.06); }
+  .cell:hover { transform: scale(1.08); z-index: 1; }
+
+  /* chest grid (mirrors in-game 4-per-row layout) */
+  #chestGrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .ctile {
+    aspect-ratio: 1; border-radius: 9px; cursor: pointer; position: relative;
+    display: grid; place-items: center; border: 2px solid rgba(0,0,0,.25);
+    box-shadow: inset 0 -4px 0 rgba(0,0,0,.18); transition: transform .06s;
+  }
+  .ctile:hover { transform: translateY(-2px); }
+  .ctile.sel { outline: 3px solid var(--accent); outline-offset: 1px; }
+  .ctile .num { font-size: 20px; font-weight: 800; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.55); }
+  .ctile .ord { position: absolute; top: 2px; left: 5px; font-size: 9px; color: rgba(255,255,255,.75); }
+  .ctile.hidden-play::after {
+    content: ""; position: absolute; inset: 0; border-radius: 7px;
+    background: repeating-linear-gradient(45deg, rgba(20,20,28,.0) 0 6px, rgba(20,20,28,.16) 6px 12px);
+  }
+  /* full-width divider marking the in-game visible boundary */
+  .play-divider { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+  .play-divider .ln { flex: 1; height: 0; border-top: 2px dashed #55556f; }
+  .play-divider .lbl { font-size: 10px; color: var(--muted); white-space: nowrap; }
+  .chest-edit { margin-top: 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; }
+  .chest-edit select, .chest-edit input { background: var(--bg); border: 1px solid var(--line); color: var(--text); border-radius: 6px; padding: 4px 6px; font-size: 12px; }
+
+  /* image-import box */
+  .imp { margin: 12px 0 4px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 11px 13px; }
+  .imp .row + .row { margin-top: 8px; }
+  .imp select, .imp input[type=number] { background: var(--bg); border: 1px solid var(--line); color: var(--text); border-radius: 6px; padding: 4px 6px; font-size: 12px; }
+  .imp input[type=file] { font-size: 12px; color: var(--muted); max-width: 210px; }
+  .imp label.chk { display: inline-flex; align-items: center; gap: 5px; color: var(--text); }
+  .imp .prev { width: 52px; height: 52px; border-radius: 7px; border: 1px solid var(--line); object-fit: contain; background: #0d0d14; display: none; }
+
+  /* validation table */
+  table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 6px; }
+  th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 500; }
+  .ok { color: var(--good); }
+  .no { color: var(--bad); }
+  .pill { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-right: 5px; }
+
+  .status { font-size: 13px; margin-top: 10px; padding: 8px 10px; border-radius: 7px; }
+  .status.ok { background: rgba(24,181,138,.12); color: #4fe0b6; }
+  .status.no { background: rgba(232,40,23,.12); color: #ff8a7d; }
+
+  textarea {
+    width: 100%; min-height: 120px; background: var(--bg); color: #b8ffcf;
+    border: 1px solid var(--line); border-radius: 8px; padding: 10px;
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; resize: vertical;
+  }
+  .tabs { display: flex; gap: 4px; margin-bottom: 8px; }
+  .tabs button.active { background: var(--accent); color: #1a1a10; border-color: var(--accent); }
+  .hint { font-size: 11px; color: var(--muted); margin-top: 6px; line-height: 1.5; }
+  .spacer { flex: 1; }
+  .levelbar { margin-bottom: 16px; padding: 12px 16px; border-color: var(--accent); border-left-width: 3px; }
+  .levelbar input, .levelbar select { background: var(--panel-2); border: 1px solid var(--line); color: var(--text); border-radius: 6px; padding: 5px 8px; font-size: 13px; }
+  .levelbar select { max-width: 180px; }
+</style>
+</head>
+<body>
+  <h1>Pixel Flow — Level Designer</h1>
+  <p class="sub">Thiết kế Khu vực 1 (bảng chìa khoá) &amp; Khu vực 3 (kho rương). Xuất ra JSON / template dán thẳng vào <code>src/game/level.ts</code>.</p>
+
+  <!-- ============ LEVEL MANAGER ============ -->
+  <div class="panel levelbar">
+    <div class="row">
+      <label>Đang design:</label>
+      <input id="lvName" placeholder="Tên level" style="width:150px" />
+      <select id="lvPick"></select>
+      <button id="lvSave" class="primary">💾 Lưu level</button>
+      <button id="lvNew">＋ Level mới</button>
+      <button id="lvDup">⧉ Nhân bản</button>
+      <button id="lvDel" class="danger">Xoá level</button>
+      <div class="spacer"></div>
+      <span id="lvStatus" class="hint"></span>
+    </div>
+    <!-- direct save into the game (only when opened via `npm run dev` → /editor) -->
+    <div class="row" id="gameRow" style="margin-top:10px; display:none; border-top:1px dashed var(--line); padding-top:10px;">
+      <label>▶ Vào game — Level số:</label>
+      <input id="gameNum" type="number" min="1" value="1" style="width:64px" />
+      <select id="gamePick"><option value="">— level game đã có —</option></select>
+      <button id="gameSave" class="primary">💾 Lưu vào game</button>
+      <button id="gameDel" class="danger">Xoá khỏi game</button>
+      <div class="spacer"></div>
+      <span id="gameStatus" class="hint"></span>
+    </div>
+  </div>
+
+  <div class="layout">
+    <!-- ============ ZONE 1 ============ -->
+    <div class="panel">
+      <h2>Khu vực 1 — Bảng chìa khoá</h2>
+
+      <div class="row">
+        <span class="hint">Lưới cố định <b>25×25</b> cho mọi level (ảnh tự căn giữa, chừa lề tới đường ray).</span>
+        <input id="cols" type="hidden" value="25" />
+        <input id="rows" type="hidden" value="25" />
+        <div class="spacer"></div>
+        <button id="clear" class="danger">Xoá sạch</button>
+      </div>
+
+      <!-- ---- Tạo bảng từ ảnh ---- -->
+      <div class="imp">
+        <div class="row">
+          <label>🖼 Ảnh mẫu:</label>
+          <input id="imgFile" type="file" accept="image/*" />
+          <img id="imgPrev" class="prev" alt="" />
+        </div>
+        <div class="row">
+          <label>Màu</label>
+          <select id="imgMode" title="Nguồn màu để vẽ lại ảnh">
+            <option value="game">Màu game (đúng art xe)</option>
+            <option value="image">Màu ảnh (chỉ xem thử)</option>
+          </select>
+          <label class="chk" title="Gán màu game RỰC RỠ cho từng cụm ảnh (bỏ qua trắng/xám) thay vì chọn màu gần ảnh nhất"><input id="imgVivid" type="checkbox" /> Màu tươi</label>
+          <label>Số màu</label><input id="imgK" type="number" min="2" max="24" value="8" title="Số màu dùng để vẽ lại ảnh — Màu game tối đa 11" />
+          <label>Nền</label>
+          <select id="imgBgMode" title="Cách xử lý nền ảnh">
+            <option value="bo">Bỏ (ô trống)</option>
+            <option value="keep">Giữ nguyên (lấp đầy)</option>
+            <option value="flat">Gộp thành 1 màu</option>
+          </select>
+          <label class="chk"><input id="imgCrop" type="checkbox" checked /> Cắt sát</label>
+          <button id="imgBuild" class="primary">Tạo slime từ ảnh</button>
+        </div>
+        <p class="hint">
+          <b>Màu game</b> (mặc định, BẮT BUỘC để xe có art khớp): ép ảnh về K màu game khớp nhất (tối đa 11). <b>Màu ảnh</b>: chỉ để xem thử độ nét — palette lúc đó KHÔNG phải màu game nên xe sẽ thiếu art, đừng xuất level từ chế độ này.
+          <b>Nền</b>: <i>Bỏ</i> (mặc định) = tách nền, để ô trống → nhân vật nổi trên nền cỏ game (silhouette). <i>Giữ nguyên</i> = quantize cả ảnh, lấp đầy bảng cả nền. <i>Gộp 1 màu</i> = nền gộp thành 1 tile. Bỏ/Gộp dò nền (lan từ mép) → đẹp với tranh phẳng viền rõ.
+          <b>Cắt sát</b> tự crop vào chủ thể rồi căn giữa trong lưới 25×25. Ảnh chụp: tăng <b>Số màu</b> (12–16) cho nét hơn.
+        </p>
+      </div>
+
+      <div class="row" style="margin-top:14px;">
+        <label>Màu vẽ:</label>
+        <div class="palette" id="palette"></div>
+      </div>
+
+      <div class="board-wrap"><div id="board"></div></div>
+      <p class="hint">Click hoặc kéo để vẽ ô chìa. Chọn ô tẩy (⌫) để xoá ô về trống. Mỗi ô màu = 1 chìa khoá.</p>
+    </div>
+
+    <!-- ============ ZONE 3 ============ -->
+    <div class="panel">
+      <h2>Khu vực 3 — Kho rương</h2>
+
+      <div class="row">
+        <button id="autogen" class="primary">Tự tạo từ bảng</button>
+        <button id="addChest">+ Thêm rương</button>
+        <button id="clearChests" class="danger">Xoá hết</button>
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <label>Số xe</label><input id="carN" type="number" min="1" max="99" value="8" title="Số xe muốn tạo — tool chia đều tile theo màu, đảm bảo giải được" />
+        <button id="genCars" class="primary">Tạo N xe mẫu</button>
+        <span class="hint" id="carHint"></span>
+      </div>
+      <p class="hint">Rương xếp <b>4 cột/hàng</b> theo thứ tự, có thể nhiều hàng. Lúc chơi chỉ hiện 2 hàng đầu + ló hàng 3; khi design hiện hết. Click 1 rương để sửa. “Tạo N xe mẫu” chia tile của bảng thành đúng N xe (tối thiểu = số màu) — chỉnh lại sau tuỳ ý.</p>
+
+      <div id="chestGrid" style="margin-top:12px;"></div>
+
+      <!-- edit bar for the selected chest -->
+      <div id="chestEdit" class="chest-edit" style="display:none;">
+        <span id="ceLabel" class="hint"></span>
+        <div class="row" style="margin-top:6px;">
+          <label>màu</label><select id="ceColor"></select>
+          <label>số</label><input id="ceCount" type="number" min="1" max="99" style="width:52px" />
+          <button id="ceLeft" title="Chuyển trái">◀</button>
+          <button id="ceRight" title="Chuyển phải">▶</button>
+          <div class="spacer"></div>
+          <button id="ceDel" class="danger">Xoá ✕</button>
+        </div>
+      </div>
+
+      <h2 style="margin-top:18px;">Kiểm tra tính giải được</h2>
+      <table id="validTable"></table>
+      <div id="status" class="status"></div>
+    </div>
+  </div>
+
+  <!-- ============ EXPORT ============ -->
+  <div class="panel" style="margin-top:16px;">
+    <h2>Xuất / Nhập</h2>
+    <div class="tabs" id="tabs">
+      <button data-tab="json" class="active">Level JSON</button>
+      <button data-tab="template">TEMPLATE (level.ts)</button>
+    </div>
+    <textarea id="output" spellcheck="false"></textarea>
+    <div class="row" style="margin-top:10px;">
+      <button id="copy" class="primary">Copy</button>
+      <button id="importBtn">Nhập từ ô này</button>
+      <div class="spacer"></div>
+      <button id="download">Tải file .json</button>
+    </div>
+    <p class="hint">
+      <b>Level JSON</b>: đúng interface <code>Level</code> — dùng để nạp runtime.
+      <b>TEMPLATE</b>: mảng string dán vào <code>const TEMPLATE</code> trong <code>src/game/level.ts</code> (mỗi ký tự = color id, <code>.</code> = trống).
+    </p>
+  </div>
+
+<script>
+// ---- Palette (6 màu gốc khớp src/game/palette.ts, có thể thêm màu mới) ----
+const BASE_COLORS = [
+  { hex: "#fe4038", name: "đỏ" },       // 0
+  { hex: "#fe8f28", name: "cam" },      // 1
+  { hex: "#fed734", name: "vàng" },     // 2
+  { hex: "#37cb5c", name: "xanh lá" },  // 3
+  { hex: "#2ac0cc", name: "xanh ngọc" },// 4
+  { hex: "#408afa", name: "xanh dương" },// 5
+  { hex: "#9756fd", name: "tím" },      // 6
+  { hex: "#fd55a5", name: "hồng" },     // 7
+  { hex: "#ffffff", name: "trắng" },    // 8
+  { hex: "#cbcbcb", name: "xám nhạt" }, // 9
+  { hex: "#4a4a4a", name: "xám đậm" },  // 10
+  { hex: "#985828", name: "nâu" },          // 11 (car-11)
+  { hex: "#262630", name: "đen" },          // 12 (car-12)
+  { hex: "#3050a0", name: "xanh dương đậm" },// 13 (car-13)
+  { hex: "#e0b888", name: "be" },           // 14 (car-14)
+  { hex: "#98d0f0", name: "xanh da trời" }, // 15 (car-15)
+  { hex: "#208038", name: "xanh lá đậm" },  // 16 (car-16)
+  { hex: "#f8c0c8", name: "hồng phấn" },     // 17 (car-17)
+  { hex: "#902030", name: "đỏ đô" },        // 18 (car-18)
+];
+let COLORS = BASE_COLORS.map(c => ({ ...c }));
+const BASE_N = BASE_COLORS.length;
+const EMPTY = -1;
+const PER_ROW = 4;        // rương xếp 4 cột (khớp GameScene)
+const PLAY_ROWS = 2;      // lúc chơi hiện 2 hàng + ló hàng 3
+const BOARD_SIZE = 25;    // MỌI level là lưới vuông 25×25 cố định
+const IMG_INNER = 25;     // chủ thể fit CẠNH DÀI = full 25 (lề tới đường ray do game lo)
+
+// ---- State ----
+let cols = BOARD_SIZE, rows = BOARD_SIZE;
+let board = [];        // length cols*rows, values = color id or -1
+let chests = [];       // { color, count }
+let paintColor = 0;    // selected color id, or EMPTY for eraser
+let painting = false;
+let fullPalette = false; // true when the palette is a bespoke image-derived set (export it whole)
+
+// ---- Init board ----
+function newBoard(c, r, fill = EMPTY) {
+  cols = c; rows = r;
+  board = new Array(c * r).fill(fill);
+}
+
+// Default: an empty fixed 25×25 canvas (all levels use this square).
+function loadDefault() {
+  newBoard(BOARD_SIZE, BOARD_SIZE, EMPTY);
+}
+
+// ---- Palette UI ----
+function restorePalette(pal, full) {
+  fullPalette = !!full;
+  if (full && Array.isArray(pal)) {                  // bespoke image palette → replace wholesale
+    COLORS = pal.map((hex, i) => ({ hex, name: "ảnh" + i }));
+    return;
+  }
+  COLORS = BASE_COLORS.map(c => ({ ...c }));
+  if (Array.isArray(pal)) {
+    pal.forEach((hex, i) => {
+      if (i < BASE_N) COLORS[i].hex = hex;           // override base if changed
+      else COLORS.push({ hex, name: "màu" + i });     // custom colors
+    });
+  }
+}
+function colorUsed(id) {
+  return board.includes(id) || chests.some(c => c.color === id);
+}
+function renderPalette() {
+  const el = document.getElementById("palette");
+  el.innerHTML = "";
+  COLORS.forEach((col, i) => {
+    const s = document.createElement("div");
+    s.className = "swatch" + (paintColor === i ? " sel" : "");
+    s.style.background = col.hex;
+    s.innerHTML = `<span class="idx">${i}</span>`;
+    const editable = i >= BASE_N || fullPalette;   // custom + image-palette swatches are tweakable
+    s.title = `${i} — ${col.name}` + (editable ? " (double-click để đổi/xoá)" : "");
+    s.onclick = () => { paintColor = i; renderPalette(); };
+    // double-click to recolor or remove (only if it's the last & unused)
+    if (editable) {
+      s.ondblclick = (e) => {
+        e.preventDefault();
+        const isLast = i === COLORS.length - 1;
+        if (isLast && !colorUsed(i) && confirm(`Xoá màu ${i}? (OK = xoá, Cancel = đổi màu)`)) {
+          COLORS.pop(); if (paintColor === i) paintColor = 0;
+          renderPalette(); renderChests(); refresh(); return;
+        }
+        const hex = prompt("Mã màu mới (hex):", col.hex);
+        if (hex && /^#?[0-9a-fA-F]{6}$/.test(hex.trim())) {
+          COLORS[i].hex = hex.trim().startsWith("#") ? hex.trim() : "#" + hex.trim();
+          renderPalette(); renderBoard(); renderChests(); refresh();
+        }
+      };
+    }
+    el.appendChild(s);
+  });
+  // "+ màu" button
+  const add = document.createElement("div");
+  add.className = "swatch";
+  add.style.cssText = "background:#2a2a3a;display:grid;place-items:center;font-size:20px;color:#9a9ab5;border-style:dashed;border-color:#55556f";
+  add.textContent = "+";
+  add.title = "Thêm màu mới";
+  add.onclick = () => {
+    const id = COLORS.length;
+    const fallback = ["#ff8c1a","#00c2d1","#7bd320","#c724b1","#ffe14d","#4d5bff","#ff4d6d","#1fae5a"];
+    COLORS.push({ hex: fallback[id % fallback.length], name: "màu" + id });
+    paintColor = id; renderPalette(); refresh();
+  };
+  el.appendChild(add);
+  // eraser
+  const er = document.createElement("div");
+  er.className = "swatch eraser" + (paintColor === EMPTY ? " sel" : "");
+  er.textContent = "⌫";
+  er.title = "Tẩy (ô trống)";
+  er.onclick = () => { paintColor = EMPTY; renderPalette(); };
+  el.appendChild(er);
+}
+
+// ---- Board UI ----
+function renderBoard() {
+  const el = document.getElementById("board");
+  // shrink cells for large boards so a 40×40 grid still fits on screen
+  const px = Math.max(9, Math.min(30, Math.floor(560 / Math.max(cols, rows))));
+  el.style.gridTemplateColumns = `repeat(${cols}, ${px}px)`;
+  el.innerHTML = "";
+  for (let i = 0; i < board.length; i++) {
+    const cell = document.createElement("div");
+    cell.className = "cell";
+    cell.style.width = px + "px"; cell.style.height = px + "px";
+    const v = board[i];
+    if (v >= 0) { cell.classList.add("filled"); cell.style.background = COLORS[v].hex; cell.style.borderColor = "rgba(0,0,0,.15)"; }
+    cell.dataset.i = i;
+    const paint = () => {
+      if (board[i] === paintColor) return;
+      board[i] = paintColor;
+      if (paintColor >= 0) { cell.classList.add("filled"); cell.style.background = COLORS[paintColor].hex; cell.style.borderColor = "rgba(0,0,0,.15)"; }
+      else { cell.classList.remove("filled"); cell.style.background = ""; cell.style.borderColor = ""; }
+      refresh();
+    };
+    cell.addEventListener("mousedown", (e) => { e.preventDefault(); painting = true; paint(); });
+    cell.addEventListener("mouseenter", () => { if (painting) paint(); });
+    // touch
+    cell.addEventListener("touchstart", (e) => { e.preventDefault(); painting = true; paint(); }, { passive: false });
+    el.appendChild(cell);
+  }
+}
+window.addEventListener("mouseup", () => painting = false);
+window.addEventListener("touchend", () => painting = false);
+document.getElementById("board").addEventListener("touchmove", (e) => {
+  const t = e.touches[0];
+  const el = document.elementFromPoint(t.clientX, t.clientY);
+  if (el && el.classList.contains("cell") && painting) {
+    const i = +el.dataset.i;
+    if (board[i] !== paintColor) {
+      board[i] = paintColor;
+      if (paintColor >= 0) { el.classList.add("filled"); el.style.background = COLORS[paintColor].hex; el.style.borderColor = "rgba(0,0,0,.15)"; }
+      else { el.classList.remove("filled"); el.style.background = ""; el.style.borderColor = ""; }
+      refresh();
+    }
+  }
+}, { passive: false });
+
+// ---- Chests UI (grid, 4 per row, all rows shown; play boundary marked) ----
+let selected = -1; // index of selected chest, -1 = none
+
+function renderChests() {
+  const grid = document.getElementById("chestGrid");
+  grid.innerHTML = "";
+  if (chests.length === 0) grid.innerHTML = '<p class="hint" style="grid-column:1/-1">Chưa có rương nào — bấm “Tự tạo từ bảng” hoặc “+ Thêm rương”.</p>';
+  const visibleCount = PLAY_ROWS * PER_ROW; // chests visible during play (before peek row)
+
+  chests.forEach((ch, idx) => {
+    // insert the "play boundary" divider right before the first hidden row
+    if (idx === visibleCount) {
+      const d = document.createElement("div");
+      d.className = "play-divider";
+      d.innerHTML = `<div class="ln"></div><div class="lbl">▼ dưới đây bị ẩn lúc chơi (hàng ${PLAY_ROWS+1} chỉ ló ra)</div><div class="ln"></div>`;
+      grid.appendChild(d);
+    }
+    if (idx === visibleCount + PER_ROW) {
+      // second divider after the peek row (fully hidden below)
+      const d = document.createElement("div");
+      d.className = "play-divider";
+      d.innerHTML = `<div class="ln"></div><div class="lbl">▼ ẩn hẳn (cuộn mới thấy)</div><div class="ln"></div>`;
+      grid.appendChild(d);
+    }
+
+    const t = document.createElement("div");
+    t.className = "ctile" + (selected === idx ? " sel" : "") + (idx >= visibleCount ? " hidden-play" : "");
+    t.style.background = COLORS[ch.color] ? COLORS[ch.color].hex : "#888";
+    t.innerHTML = `<span class="ord">${idx+1}</span><span class="num">${ch.count}</span>`;
+    t.onclick = () => { selected = (selected === idx ? -1 : idx); renderChests(); renderEditBar(); };
+    grid.appendChild(t);
+  });
+  renderEditBar();
+}
+
+function renderEditBar() {
+  const bar = document.getElementById("chestEdit");
+  if (selected < 0 || selected >= chests.length) { bar.style.display = "none"; return; }
+  bar.style.display = "block";
+  const ch = chests[selected];
+  document.getElementById("ceLabel").textContent = `Rương #${selected+1} — hàng ${Math.floor(selected/PER_ROW)+1}, cột ${selected%PER_ROW+1}`;
+  const sel = document.getElementById("ceColor");
+  sel.innerHTML = COLORS.map((c, i) => `<option value="${i}" ${i===ch.color?"selected":""}>${i} — ${c.name}</option>`).join("");
+  document.getElementById("ceCount").value = ch.count;
+}
+
+// ---- Auto-generate chests (mirror generateChests in level.ts, but deterministic 4s) ----
+function autoGenerate() {
+  const counts = new Map();
+  for (const id of board) if (id >= 0) counts.set(id, (counts.get(id) || 0) + 1);
+  chests = [];
+  for (const [color, total] of [...counts.entries()].sort((a,b)=>a[0]-b[0])) {
+    let rem = total;
+    while (rem > 0) { const c = Math.min(rem, 6); chests.push({ color, count: c }); rem -= c; }
+  }
+  renderChests(); refresh();
+}
+
+// ================= Tạo bảng từ ảnh =================
+function hexToRgb(hex) {
+  const h = hex.replace("#", "");
+  return [parseInt(h.slice(0,2),16), parseInt(h.slice(2,4),16), parseInt(h.slice(4,6),16)];
+}
+function rgbToHex(c) {
+  return "#" + c.map(v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0")).join("");
+}
+function dist2(a, b) { const dr=a[0]-b[0], dg=a[1]-b[1], db=a[2]-b[2]; return dr*dr+dg*dg+db*db; }
+// index of the nearest colour in a [r,g,b][] list
+function nearestIdx(rgb, list) {
+  let best = 0, bd = Infinity;
+  for (let i = 0; i < list.length; i++) { const d = dist2(rgb, list[i]); if (d < bd) { bd = d; best = i; } }
+  return best;
+}
+
+// --- median cut: split samples into K colour boxes, return their average colours ---
+function medianCut(samples, K) {
+  if (samples.length === 0) return [];
+  let boxes = [samples.slice()];
+  while (boxes.length < K) {
+    let bi = -1, bspread = -1, bch = 0;   // pick the box with the widest channel
+    for (let i = 0; i < boxes.length; i++) {
+      const b = boxes[i]; if (b.length < 2) continue;
+      const mn = [255,255,255], mx = [0,0,0];
+      for (const p of b) for (let k=0;k<3;k++){ if(p[k]<mn[k])mn[k]=p[k]; if(p[k]>mx[k])mx[k]=p[k]; }
+      const sp = [mx[0]-mn[0], mx[1]-mn[1], mx[2]-mn[2]];
+      const m = Math.max(sp[0], sp[1], sp[2]);
+      if (m > bspread) { bspread = m; bi = i; bch = sp.indexOf(m); }
+    }
+    if (bi < 0) break;
+    const box = boxes[bi];
+    box.sort((a,b) => a[bch] - b[bch]);
+    const mid = box.length >> 1;
+    boxes.splice(bi, 1, box.slice(0, mid), box.slice(mid));
+  }
+  return boxes.map(b => {
+    const s=[0,0,0]; for (const p of b) { s[0]+=p[0]; s[1]+=p[1]; s[2]+=p[2]; }
+    return [s[0]/b.length, s[1]/b.length, s[2]/b.length];
+  });
+}
+
+// --- k-means (deterministic: median-cut seed + a few Lloyd iterations) ---
+function kmeans(samples, K, iters) {
+  let centers = medianCut(samples, K);
+  if (centers.length === 0) return centers;
+  for (let it = 0; it < iters; it++) {
+    const sums = centers.map(() => [0,0,0,0]);
+    for (const p of samples) {
+      const j = nearestIdx(p, centers);
+      sums[j][0]+=p[0]; sums[j][1]+=p[1]; sums[j][2]+=p[2]; sums[j][3]++;
+    }
+    for (let j = 0; j < centers.length; j++)
+      if (sums[j][3] > 0) centers[j] = [sums[j][0]/sums[j][3], sums[j][1]/sums[j][3], sums[j][2]/sums[j][3]];
+  }
+  return centers;
+}
+
+// --- background = border-connected cells that MATCH the background colour ---
+// The bg colour is the 4-corner average. A cell joins the background only if it is
+// close to THAT colour (not merely to its neighbour), so the flood stops at anything
+// off-colour — including the subject's grey shading. This preserves an enclosed
+// same-as-bg interior (e.g. Doraemon's WHITE belly on a white background), which a
+// neighbour-continuity flood would creep into via grey and erase.
+function backgroundMask(px, alpha, cw, rh, tol) {
+  const N = cw*rh, mask = new Array(N).fill(false), TOL2 = (tol||62)*(tol||62);
+  const corners = [0, cw-1, (rh-1)*cw, N-1];
+  const bg = [0,0,0];
+  for (const c of corners) { bg[0]+=px[c][0]; bg[1]+=px[c][1]; bg[2]+=px[c][2]; }
+  bg[0]/=4; bg[1]/=4; bg[2]/=4;
+  const isBg = i => alpha[i] < 128 || dist2(px[i], bg) < TOL2;
+  const q = [];
+  const seed = i => { if (!mask[i] && isBg(i)) { mask[i] = true; q.push(i); } };
+  for (let x=0;x<cw;x++){ seed(x); seed((rh-1)*cw+x); }   // top & bottom rows
+  for (let y=0;y<rh;y++){ seed(y*cw); seed(y*cw+cw-1); }  // left & right cols
+  while (q.length) {
+    const i = q.pop(), x = i%cw, y = (i/cw)|0;
+    for (const [nx,ny] of [[x+1,y],[x-1,y],[x,y+1],[x,y-1]]) {
+      if (nx<0||ny<0||nx>=cw||ny>=rh) continue;
+      const ni = ny*cw+nx;
+      if (!mask[ni] && isBg(ni)) { mask[ni] = true; q.push(ni); }
+    }
+  }
+  for (let i=0;i<N;i++) if (alpha[i] < 128) mask[i] = true;  // transparent = always empty
+  return mask;
+}
+
+// downsample a source rect of the image into a tw×th grid → {px, alpha} per cell
+function sampleGrid(img, sx, sy, sw, sh, tw, th) {
+  const cv = document.createElement("canvas");
+  cv.width = tw; cv.height = th;
+  const ctx = cv.getContext("2d", { willReadFrequently: true });
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+  ctx.clearRect(0, 0, tw, th);
+  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, tw, th);
+  const d = ctx.getImageData(0, 0, tw, th).data, n = tw*th;
+  const px = new Array(n), alpha = new Array(n);
+  for (let i = 0; i < n; i++) { px[i] = [d[i*4], d[i*4+1], d[i*4+2]]; alpha[i] = d[i*4+3]; }
+  return { px, alpha };
+}
+
+function buildFromImage(img) {
+  const mode = document.getElementById("imgMode").value;   // "image" | "game"
+  const vivid = document.getElementById("imgVivid").checked; // game mode: map clusters to bright colours
+  const kMax = mode === "game" ? BASE_N : 24;
+  const K = Math.max(2, Math.min(kMax, +document.getElementById("imgK").value|0));
+  const maxSide = IMG_INNER;   // subject fits in 23×23, then centred in the 25×25 canvas
+  const bgOpt = document.getElementById("imgBgMode").value;   // "flat" | "bo" | "keep"
+  const autoCrop = document.getElementById("imgCrop").checked;
+  const iw = img.naturalWidth, ih = img.naturalHeight;
+
+  // ---- crop region (default = whole image) ----
+  let rx = 0, ry = 0, rw = iw, rhi = ih;
+  if (autoCrop) {
+    // hi-res working pass → find the subject's bounding box, then crop the image to it
+    // (used for framing in EVERY mode, incl. "keep" — the mask here only locates the subject)
+    const LW = 140;
+    let ww, wh;
+    if (iw >= ih) { ww = LW; wh = Math.max(2, Math.round(LW * ih / iw)); }
+    else { wh = LW; ww = Math.max(2, Math.round(LW * iw / ih)); }
+    const wk = sampleGrid(img, 0, 0, iw, ih, ww, wh);
+    const wbg = backgroundMask(wk.px, wk.alpha, ww, wh, 46);
+    let minx = ww, miny = wh, maxx = -1, maxy = -1;
+    for (let y = 0; y < wh; y++) for (let x = 0; x < ww; x++) {
+      const i = y*ww+x;
+      if (!wbg[i] && wk.alpha[i] >= 128) { if(x<minx)minx=x; if(x>maxx)maxx=x; if(y<miny)miny=y; if(y>maxy)maxy=y; }
+    }
+    if (maxx >= minx) {
+      const padX = Math.round((maxx-minx+1)*0.02)+1, padY = Math.round((maxy-miny+1)*0.02)+1; // tight crop → subject hugs the board edge
+      minx = Math.max(0, minx-padX); miny = Math.max(0, miny-padY);
+      maxx = Math.min(ww-1, maxx+padX); maxy = Math.min(wh-1, maxy+padY);
+      rx = minx/ww*iw; ry = miny/wh*ih; rw = (maxx-minx+1)/ww*iw; rhi = (maxy-miny+1)/wh*ih;
+    }
+  }
+
+  // ---- segment the crop at HIGH resolution (thin outlines survive here) ----
+  const HS = Math.min(320, Math.max(128, maxSide * 8)); // ≥8 hi-res px per final cell
+  let hw, hh;
+  if (rw >= rhi) { hw = HS; hh = Math.max(2, Math.round(HS * rhi / rw)); }
+  else { hh = HS; hw = Math.max(2, Math.round(HS * rw / rhi)); }
+  const hi = sampleGrid(img, rx, ry, rw, rhi, hw, hh);
+  const hmask = bgOpt === "keep" ? hi.alpha.map(a => a < 128)   // keep: only transparent is "bg"
+                                 : backgroundMask(hi.px, hi.alpha, hw, hh, 46);
+
+  // ---- final grid from the crop's aspect (board hard-capped at 20) ----
+  let cw, rh;
+  if (rw >= rhi) { cw = maxSide; rh = Math.max(2, Math.round(maxSide * rhi / rw)); }
+  else { rh = maxSide; cw = Math.max(2, Math.round(maxSide * rw / rhi)); }
+  cw = Math.min(40, cw); rh = Math.min(40, rh);
+
+  // downsample the hi-res mask+colour to each final cell by majority vote
+  const N = cw * rh;
+  const kind = new Array(N).fill("empty");   // "sub" | "bg" | "empty"
+  const cellCol = new Array(N);
+  for (let fy = 0; fy < rh; fy++) for (let fx = 0; fx < cw; fx++) {
+    const hx0 = Math.floor(fx*hw/cw), hx1 = Math.max(hx0+1, Math.floor((fx+1)*hw/cw));
+    const hy0 = Math.floor(fy*hh/rh), hy1 = Math.max(hy0+1, Math.floor((fy+1)*hh/rh));
+    let subN = 0, bgN = 0; const ss = [0,0,0], bs = [0,0,0];
+    for (let hy = hy0; hy < hy1; hy++) for (let hx = hx0; hx < hx1; hx++) {
+      const h = hy*hw+hx;
+      if (hi.alpha[h] < 128) continue;                       // transparent → ignore
+      if (hmask[h]) { bgN++; bs[0]+=hi.px[h][0]; bs[1]+=hi.px[h][1]; bs[2]+=hi.px[h][2]; }
+      else          { subN++; ss[0]+=hi.px[h][0]; ss[1]+=hi.px[h][1]; ss[2]+=hi.px[h][2]; }
+    }
+    const fi = fy*cw+fx;
+    if (subN + bgN === 0) continue;                          // fully transparent → EMPTY
+    if (subN >= bgN) { kind[fi] = "sub"; cellCol[fi] = [ss[0]/subN, ss[1]/subN, ss[2]/subN]; }
+    else if (bgOpt === "flat") { kind[fi] = "bg"; cellCol[fi] = [bs[0]/bgN, bs[1]/bgN, bs[2]/bgN]; }
+    // else ("bo"): background cell stays EMPTY
+  }
+
+  const fg = [], bgFlat = [];
+  for (let i = 0; i < N; i++) { if (kind[i] === "sub") fg.push(i); else if (kind[i] === "bg") bgFlat.push(i); }
+  if (fg.length === 0) { alert("Không tìm thấy chủ thể — thử Nền = Giữ nguyên, tắt “Cắt sát”, hoặc đổi ảnh."); return; }
+
+  const avgCol = cells => {
+    const s = [0,0,0]; for (const i of cells) { s[0]+=cellCol[i][0]; s[1]+=cellCol[i][1]; s[2]+=cellCol[i][2]; }
+    return [s[0]/cells.length, s[1]/cells.length, s[2]/cells.length];
+  };
+
+  newBoard(cw, rh, EMPTY);
+
+  if (mode === "game" && vivid) {
+    // VIVID: cluster the subject (k-means), then SPREAD the saturated palette across the
+    // clusters by brightness — brightest cluster → brightest vivid, darkest → darkest vivid.
+    // Ignores the image's (often muted) hue, so a pale image (Doraemon) gets punchy,
+    // high-contrast colours while the light/dark structure stays readable.
+    const baseRgb = COLORS.slice(0, BASE_N).map(c => hexToRgb(c.hex));
+    // A PLEASANT, easy-on-the-eyes set: no muddy darks, but also no glaring colours
+    // (red / yellow / hot-pink dropped) — soft-bright hues only: orange, green, teal,
+    // blue, purple, sky, peach.
+    const VIVID = [1,3,4,5,6,15,17].filter(id => id < BASE_N);
+    const lum = c => 0.299*c[0] + 0.587*c[1] + 0.114*c[2];
+    const vSorted = VIVID.slice().sort((a, b) => lum(baseRgb[b]) - lum(baseRgb[a])); // bright→dark
+    let centers = kmeans(fg.map(i => cellCol[i]), K, 10);
+    const used = new Array(centers.length).fill(0);
+    for (const i of fg) used[nearestIdx(cellCol[i], centers)]++;
+    centers = centers.filter((_, j) => used[j] > 0);
+    const M = centers.length;
+    const order = centers.map((c, j) => j).sort((a, b) => lum(centers[b]) - lum(centers[a])); // bright→dark
+    const clusterId = new Array(M);
+    order.forEach((j, rank) => {
+      const vi = M <= 1 ? 0 : Math.round(rank * (vSorted.length - 1) / (M - 1)); // spread across full palette
+      clusterId[j] = vSorted[vi];
+    });
+    for (const i of fg) board[i] = clusterId[nearestIdx(cellCol[i], centers)];
+    if (bgFlat.length) {
+      const bg = avgCol(bgFlat), vi = Math.round((1 - Math.min(1, lum(bg)/255)) * (vSorted.length - 1));
+      const bgId = vSorted[vi]; for (const i of bgFlat) board[i] = bgId;
+    }
+    fullPalette = false;
+    COLORS = BASE_COLORS.map(c => ({ ...c }));
+    paintColor = clusterId[0] ?? 0;
+  } else if (mode === "game") {
+    // snap subject to the K most-representative GAME colours (keeps real car art)
+    const baseRgb = COLORS.slice(0, BASE_N).map(c => hexToRgb(c.hex));
+    const cov = new Array(BASE_N).fill(0);
+    for (const i of fg) cov[nearestIdx(cellCol[i], baseRgb)]++;
+    const chosen = baseRgb.map((_, i) => i).filter(i => cov[i] > 0)
+                          .sort((a,b) => cov[b] - cov[a]).slice(0, K);
+    const chosenRgb = chosen.map(id => baseRgb[id]);
+    for (const i of fg) board[i] = chosen[nearestIdx(cellCol[i], chosenRgb)];
+    if (bgFlat.length) { const bgId = nearestIdx(avgCol(bgFlat), baseRgb); for (const i of bgFlat) board[i] = bgId; }
+    fullPalette = false;
+    COLORS = BASE_COLORS.map(c => ({ ...c }));
+    paintColor = chosen[0];
+  } else {
+    // bespoke K-colour palette from the subject, +1 flat colour for the background
+    const samples = fg.map(i => cellCol[i]);
+    let centers = kmeans(samples, K, 10);
+    const used = new Array(centers.length).fill(0);   // drop empty clusters
+    for (const p of samples) used[nearestIdx(p, centers)]++;
+    centers = centers.filter((_, j) => used[j] > 0);
+    for (const i of fg) board[i] = nearestIdx(cellCol[i], centers);
+    const palette = centers.slice();
+    if (bgFlat.length) { const bgId = palette.length; palette.push(avgCol(bgFlat)); for (const i of bgFlat) board[i] = bgId; }
+    COLORS = palette.map((c, i) => ({ hex: rgbToHex(c), name: (i < centers.length ? "ảnh" : "nền") + i }));
+    fullPalette = true;
+    paintColor = 0;
+  }
+
+  // center the subject sub-grid (cw×rh, ≤23) into the fixed 25×25 square canvas
+  const sub = board, sw = cw, sh = rh;
+  newBoard(BOARD_SIZE, BOARD_SIZE, EMPTY);
+  const ox = Math.floor((BOARD_SIZE - sw) / 2), oy = Math.floor((BOARD_SIZE - sh) / 2);
+  for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) board[(oy + y) * BOARD_SIZE + (ox + x)] = sub[y * sw + x];
+
+  // For fill modes (Giữ nguyên / Gộp), extend the BACKGROUND colour into the centring
+  // margins so the whole 25×25 is filled — no grass gaps at the sides. "Bỏ" keeps the
+  // margins empty (silhouette). Background = the most common of the sub-grid's corners.
+  if (bgOpt !== "bo") {
+    const corners = [sub[0], sub[sw - 1], sub[(sh - 1) * sw], sub[sh * sw - 1]];
+    const tally = {};
+    for (const v of corners) if (v >= 0) tally[v] = (tally[v] || 0) + 1;
+    let fillId = -1, best = 0;
+    for (const k in tally) if (tally[k] > best) { best = tally[k]; fillId = +k; }
+    if (fillId >= 0) for (let i = 0; i < board.length; i++) if (board[i] === EMPTY) board[i] = fillId;
+  }
+
+  document.getElementById("cols").value = BOARD_SIZE;
+  document.getElementById("rows").value = BOARD_SIZE;
+  selected = -1;
+  renderPalette(); renderBoard(); refresh();
+}
+
+function loadImageFile(file) {
+  if (!file) return;
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    const p = document.getElementById("imgPrev");
+    p.src = url; p.style.display = "inline-block";
+    try { buildFromImage(img); } catch (err) { alert("Không đọc được ảnh: " + err); }
+  };
+  img.onerror = () => alert("File ảnh không hợp lệ.");
+  img.src = url;
+}
+
+// ================= Tạo N xe mẫu =================
+// Split the board's tiles into exactly N single-colour cars (>= number of colours),
+// covering every colour → guaranteed solvable. Fully editable afterwards.
+function generateNCars(N) {
+  const counts = keyCounts();
+  const colorsPresent = [...counts.keys()].sort((a,b) => a - b);
+  const carHint = document.getElementById("carHint");
+  if (colorsPresent.length === 0) { carHint.textContent = "⚠ Bảng trống."; return; }
+
+  const totalKeys = [...counts.values()].reduce((a,b) => a+b, 0);
+  const minCars = colorsPresent.length;           // >= 1 car per colour
+  let target = Math.max(minCars, Math.min(totalKeys, N|0));  // can't exceed total tiles
+  let note = "";
+  if (N < minCars) note = ` (nâng lên ${target} = số màu)`;
+  else if (N > totalKeys) note = ` (giảm còn ${target} = tổng tile)`;
+
+  // allocate cars per colour: 1 each, then hand out the rest by largest-remainder on key count
+  const alloc = new Map(colorsPresent.map(c => [c, 1]));
+  let extra = target - minCars;
+  // ideal share of the extra cars, capped so a colour never gets more cars than it has tiles
+  const rema = colorsPresent.map(c => {
+    const ideal = (counts.get(c) / totalKeys) * extra;
+    return { c, floor: Math.floor(ideal), frac: ideal - Math.floor(ideal) };
+  });
+  rema.forEach(r => { alloc.set(r.c, alloc.get(r.c) + r.floor); extra -= r.floor; });
+  rema.sort((a,b) => b.frac - a.frac);
+  for (const r of rema) {
+    if (extra <= 0) break;
+    if (alloc.get(r.c) < counts.get(r.c)) { alloc.set(r.c, alloc.get(r.c) + 1); extra--; }
+  }
+  // any leftover (from the cap) → give to whichever colour still has room
+  while (extra > 0) {
+    const room = colorsPresent.find(c => alloc.get(c) < counts.get(c));
+    if (room === undefined) break;
+    alloc.set(room, alloc.get(room) + 1); extra--;
+  }
+
+  // split each colour's tiles across its cars as evenly as possible → per-colour queues
+  const byColor = new Map();
+  for (const c of colorsPresent) {
+    const cars = alloc.get(c), keys = counts.get(c);
+    const base = Math.floor(keys / cars), rem = keys % cars;
+    const q = [];
+    for (let i = 0; i < cars; i++) q.push({ color: c, count: base + (i < rem ? 1 : 0) });
+    byColor.set(c, q);
+  }
+
+  // SPREAD colours so consecutive cars differ — greedy: always take the colour with the
+  // most cars left that ISN'T the one just placed. Reordering keeps each colour's total
+  // capacity unchanged, so the level stays solvable (the check table below still passes).
+  const total = [...byColor.values()].reduce((s, q) => s + q.length, 0);
+  chests = [];
+  let last = -1;
+  while (chests.length < total) {
+    let pick = -1, pn = -1;
+    for (const [col, q] of byColor) {
+      if (q.length === 0 || col === last) continue;
+      if (q.length > pn) { pn = q.length; pick = col; }
+    }
+    if (pick === -1) for (const [col, q] of byColor) if (q.length > 0) { pick = col; break; } // only 'last' left → unavoidable
+    if (pick === -1) break;
+    chests.push(byColor.get(pick).pop());
+    last = pick;
+  }
+
+  selected = -1;
+  let adj = 0;
+  for (let i = 1; i < chests.length; i++) if (chests[i].color === chests[i-1].color) adj++;
+  carHint.textContent = `✓ ${chests.length} xe / ${colorsPresent.length} màu` + note +
+    (adj ? ` · ${adj} chỗ buộc kề (màu quá nhiều)` : " · màu xen kẽ hết");
+  renderChests(); refresh();
+}
+
+// ---- Validation ----
+function keyCounts() {
+  const m = new Map();
+  for (const id of board) if (id >= 0) m.set(id, (m.get(id) || 0) + 1);
+  return m;
+}
+function capacityCounts() {
+  const m = new Map();
+  for (const ch of chests) m.set(ch.color, (m.get(ch.color) || 0) + ch.count);
+  return m;
+}
+function renderValidation() {
+  const keys = keyCounts(), caps = capacityCounts();
+  const allColors = new Set([...keys.keys(), ...caps.keys()]);
+  const tbl = document.getElementById("validTable");
+  let solvable = true, totalKeys = 0;
+  let html = "<tr><th>Màu</th><th>Chìa</th><th>Sức chứa</th><th></th></tr>";
+  [...allColors].sort((a,b)=>a-b).forEach(cid => {
+    const k = keys.get(cid) || 0, cap = caps.get(cid) || 0;
+    totalKeys += k;
+    const ok = cap >= k;
+    if (k > 0 && !ok) solvable = false;
+    html += `<tr>
+      <td><span class="pill" style="background:${(COLORS[cid]||{}).hex||'#888'}"></span>${cid} ${(COLORS[cid]||{}).name||'?'}</td>
+      <td>${k}</td><td>${cap}</td>
+      <td class="${ok?'ok':'no'}">${ok?'✓':'thiếu '+(k-cap)}</td></tr>`;
+  });
+  if (allColors.size === 0) html += '<tr><td colspan="4" class="hint">Bảng trống.</td></tr>';
+  tbl.innerHTML = html;
+
+  const st = document.getElementById("status");
+  if (totalKeys === 0) { st.className = "status no"; st.textContent = "⚠ Bảng chưa có chìa nào."; }
+  else if (solvable) { st.className = "status ok"; st.textContent = `✓ Giải được — ${totalKeys} chìa, ${chests.length} rương.`; }
+  else { st.className = "status no"; st.textContent = "✗ Chưa giải được: có màu thiếu sức chứa (xem bảng)."; }
+}
+
+// ---- Export ----
+let currentTab = "json";
+let levelName = "Level 1"; // which level we're currently designing
+function levelObject() {
+  const o = { name: levelName, cols, rows, board: [...board], chests: chests.map(c => ({ color: c.color, count: c.count })) };
+  // carry palette for image-derived (bespoke) sets, or when custom colours were added beyond the base
+  if (fullPalette) { o.palette = COLORS.map(c => c.hex); o.paletteFull = true; }
+  else if (COLORS.length > BASE_N) o.palette = COLORS.map(c => c.hex);
+  return o;
+}
+
+// ---- Level store (multiple named levels in localStorage) ----
+const STORE_KEY = "pf_levels_v1";
+function loadStore() { try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; } catch { return {}; } }
+function saveStore(s) { localStorage.setItem(STORE_KEY, JSON.stringify(s)); }
+function nextLevelName() {
+  const store = loadStore(); let n = 1;
+  while (store["Level " + n]) n++;
+  return "Level " + n;
+}
+function refreshPicker() {
+  const store = loadStore();
+  const names = Object.keys(store);
+  const pick = document.getElementById("lvPick");
+  pick.innerHTML = '<option value="">— chọn bản đã lưu —</option>' +
+    names.map(n => `<option value="${n}" ${n === levelName ? "selected" : ""}>${n}</option>`).join("");
+  document.getElementById("lvName").value = levelName;
+  const saved = names.includes(levelName);
+  document.getElementById("lvStatus").innerHTML =
+    `${names.length} level đã lưu · <b>${levelName}</b> ${saved ? "✓ đã lưu" : "• chưa lưu"}`;
+  // "Lưu vào game" defaults to the number of the level being designed ("Level 4" → 4)
+  const m = (levelName || "").match(/(\d+)/);
+  const gn = document.getElementById("gameNum");
+  if (m && gn) gn.value = m[1];
+}
+function applyLevel(obj) {
+  levelName = obj.name || levelName;
+  cols = obj.cols; rows = obj.rows; board = obj.board.slice();
+  chests = (obj.chests || []).map(c => ({ color: c.color, count: c.count }));
+  restorePalette(obj.palette, obj.paletteFull); selected = -1;
+  document.getElementById("cols").value = cols; document.getElementById("rows").value = rows;
+  renderPalette(); renderBoard(); renderChests(); refresh(); refreshPicker();
+}
+function toTemplate() {
+  const lines = [];
+  let over = false;
+  for (let r = 0; r < rows; r++) {
+    let line = "";
+    for (let c = 0; c < cols; c++) { const v = board[r*cols+c]; if (v >= 10) over = true; line += v < 0 ? "." : String(v); }
+    lines.push(`  "${line}",`);
+  }
+  const warn = over ? "// ⚠ Bảng có màu id ≥ 10 — format 1 ký tự/ô không biểu diễn được. Dùng tab \"Level JSON\" thay thế.\n" : "";
+  return warn + "const TEMPLATE = [\n" + lines.join("\n") + "\n];";
+}
+function renderOutput() {
+  const out = document.getElementById("output");
+  out.value = currentTab === "json" ? JSON.stringify(levelObject(), null, 2) : toTemplate();
+}
+
+// ---- Master refresh ----
+function refresh() { renderValidation(); renderOutput(); }
+
+// ---- Events ----
+document.getElementById("clear").onclick = () => { board.fill(EMPTY); renderBoard(); refresh(); };
+document.getElementById("autogen").onclick = autoGenerate;
+document.getElementById("addChest").onclick = () => { chests.push({ color: paintColor >= 0 ? paintColor : 0, count: 4 }); selected = chests.length - 1; renderChests(); refresh(); };
+document.getElementById("clearChests").onclick = () => { chests = []; selected = -1; renderChests(); refresh(); };
+document.getElementById("genCars").onclick = () => generateNCars(+document.getElementById("carN").value|0);
+
+// image import
+document.getElementById("imgFile").onchange = (e) => loadImageFile(e.target.files[0]);
+document.getElementById("imgBuild").onclick = () => {
+  const f = document.getElementById("imgFile").files[0];
+  if (!f) return alert("Chọn file ảnh trước đã.");
+  loadImageFile(f);
+};
+
+// chest edit bar
+document.getElementById("ceColor").onchange = (e) => { chests[selected].color = +e.target.value; renderChests(); refresh(); };
+document.getElementById("ceCount").onchange = (e) => { chests[selected].count = Math.max(1, +e.target.value|0); renderChests(); refresh(); };
+document.getElementById("ceDel").onclick = () => { chests.splice(selected, 1); selected = -1; renderChests(); refresh(); };
+document.getElementById("ceLeft").onclick = () => { if (selected > 0) { [chests[selected-1], chests[selected]] = [chests[selected], chests[selected-1]]; selected--; renderChests(); refresh(); } };
+document.getElementById("ceRight").onclick = () => { if (selected < chests.length - 1) { [chests[selected+1], chests[selected]] = [chests[selected], chests[selected+1]]; selected++; renderChests(); refresh(); } };
+
+document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("#tabs button").forEach(x => x.classList.remove("active"));
+  b.classList.add("active"); currentTab = b.dataset.tab; renderOutput();
+});
+
+document.getElementById("copy").onclick = () => {
+  navigator.clipboard.writeText(document.getElementById("output").value);
+  const b = document.getElementById("copy"); const t = b.textContent; b.textContent = "Đã copy ✓"; setTimeout(()=>b.textContent=t, 1200);
+};
+document.getElementById("importBtn").onclick = () => {
+  try {
+    const obj = JSON.parse(document.getElementById("output").value);
+    if (!obj.board || !Array.isArray(obj.board)) throw 0;
+    applyLevel(obj);
+  } catch { alert("JSON không hợp lệ (chỉ nhập được ở tab Level JSON)."); }
+};
+document.getElementById("download").onclick = () => {
+  const blob = new Blob([JSON.stringify(levelObject(), null, 2)], { type: "application/json" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+  a.download = (levelName || "level").replace(/[^a-z0-9_-]+/gi, "-").toLowerCase() + ".json"; a.click();
+};
+
+// ---- Level manager events ----
+document.getElementById("lvName").onchange = (e) => {
+  const v = e.target.value.trim(); if (v) levelName = v; refreshPicker();
+};
+document.getElementById("lvSave").onclick = () => {
+  const v = document.getElementById("lvName").value.trim();
+  if (!v) return alert("Đặt tên level trước đã.");
+  levelName = v;
+  const store = loadStore();
+  store[levelName] = levelObject();
+  saveStore(store); refreshPicker();
+  const b = document.getElementById("lvSave"); const t = b.textContent; b.textContent = "Đã lưu ✓"; setTimeout(() => b.textContent = t, 1200);
+};
+document.getElementById("lvNew").onclick = () => {
+  if (!confirm("Tạo level mới? (nhớ lưu level hiện tại nếu cần)")) return;
+  levelName = nextLevelName();
+  COLORS = BASE_COLORS.map(c => ({ ...c })); fullPalette = false;
+  loadDefault(); chests = []; selected = -1; paintColor = 0;
+  document.getElementById("cols").value = cols; document.getElementById("rows").value = rows;
+  renderPalette(); renderBoard(); renderChests(); refresh(); refreshPicker();
+};
+document.getElementById("lvDup").onclick = () => {
+  levelName = nextLevelName();
+  renderChests(); refresh(); refreshPicker();
+  alert("Đã nhân bản thành “" + levelName + "”. Bấm 💾 Lưu để giữ lại.");
+};
+document.getElementById("lvDel").onclick = () => {
+  const store = loadStore();
+  if (!store[levelName]) return alert("Level này chưa được lưu.");
+  if (!confirm("Xoá level “" + levelName + "” khỏi bản lưu?")) return;
+  delete store[levelName]; saveStore(store);
+  const rest = Object.keys(store);
+  if (rest.length) applyLevel(store[rest[0]]); else refreshPicker();
+};
+document.getElementById("lvPick").onchange = (e) => {
+  const n = e.target.value; if (!n) return;
+  const store = loadStore();
+  if (store[n]) applyLevel(store[n]);
+};
+
+// ---- Save straight into the game (only when served by `npm run dev` at /editor) ----
+let gameApi = false;
+async function initGameApi() {
+  try {
+    const r = await fetch("/api/levels", { cache: "no-store" });
+    if (!r.ok) return;                       // file:// or plain static host → stay hidden
+    gameApi = true;
+    document.getElementById("gameRow").style.display = "flex";
+    refreshGamePick(await r.json());
+  } catch { /* not running under the dev server */ }
+}
+function refreshGamePick(data) {
+  const nums = Object.keys(data || {}).map(Number).filter(n => n >= 1).sort((a, b) => a - b);
+  document.getElementById("gamePick").innerHTML =
+    '<option value="">— level game đã có —</option>' +
+    nums.map(n => `<option value="${n}">Level ${n}</option>`).join("");
+}
+async function fetchLevels() {
+  try { return await (await fetch("/api/levels", { cache: "no-store" })).json(); } catch { return {}; }
+}
+document.getElementById("gameSave").onclick = async () => {
+  const n = parseInt(document.getElementById("gameNum").value, 10);
+  if (!(n >= 1)) return alert("Nhập số level (≥ 1).");
+  if (fullPalette && !confirm(
+    "Level này đang dùng “Màu ảnh” (palette riêng, KHÔNG phải màu game) → trong game màu sẽ hiển thị sai. " +
+    "Nên tạo lại bằng “Màu game” trước khi lưu. Vẫn lưu?")) return;
+  const o = levelObject();
+  const level = { track: "square", cols: o.cols, rows: o.rows, board: o.board, chests: o.chests };
+  const st = document.getElementById("gameStatus");
+  try {
+    const r = await fetch("/api/save-level", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ number: n, level }),
+    });
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || "lỗi không rõ");
+    st.textContent = `✓ Đã lưu Level ${n} vào game (mở game → game tự reload).`;
+    refreshGamePick(await fetchLevels());
+  } catch (e) { st.textContent = ""; alert("Lưu vào game lỗi: " + e); }
+};
+document.getElementById("gameDel").onclick = async () => {
+  const n = parseInt(document.getElementById("gameNum").value, 10);
+  if (!(n >= 1) || !confirm(`Xoá Level ${n} khỏi game?`)) return;
+  try {
+    await fetch("/api/delete-level", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ number: n }),
+    });
+    document.getElementById("gameStatus").textContent = `✓ Đã xoá Level ${n} khỏi game.`;
+    refreshGamePick(await fetchLevels());
+  } catch (e) { alert("Xoá lỗi: " + e); }
+};
+document.getElementById("gamePick").onchange = async (e) => {
+  const n = e.target.value; if (!n) return;
+  const data = await fetchLevels();
+  const lv = data[n]; if (!lv) return;
+  document.getElementById("gameNum").value = n;
+  applyLevel({ name: "Level " + n, cols: lv.cols, rows: lv.rows, board: lv.board, chests: lv.chests });
+};
+
+// ---- Boot ----
+loadDefault();
+renderPalette(); renderBoard(); renderChests(); refresh(); refreshPicker();
+initGameApi();
+</script>
+</body>
+</html>
