@@ -105,7 +105,7 @@ const MAX_ON_TRACK = 5; // hard cap on cars travelling the ray at the same time
 //     colour and no other car of that colour is already handling it (track cap still 5).
 // Set to false to ROLL BACK to the old "park at end of every lap, tap to relaunch".
 const AUTO_CIRCLE = true;
-const SPEED = 13; // track nodes per second (car travel speed — +30%, user 2026-07-23)
+const SPEED = 15.6; // track nodes per second (car travel speed — +20% more, user 2026-07-24)
 const MIN_GAP = 5; // min spacing between cars, in nodes (bigger cars need more room)
 const TWIN_SPAWN_GAP = 5; // nodes between a twin pair on the ray (snug but the rope still shows)
 const TWIN_INTRO_LEVEL = 8; // the ONE level that introduces twin cars (skip if you're past it)
