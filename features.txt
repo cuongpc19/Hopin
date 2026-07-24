@@ -1,0 +1,243 @@
+================================================================================
+ HOP IN! (Pixel Flow) — GHI CHÚ TÍNH NĂNG
+ File này liệt kê các tính năng đã làm + chỗ chỉnh trong code + key localStorage.
+ (Cập nhật thủ công khi thêm/sửa tính năng.)
+================================================================================
+
+
+────────────────────────────────────────────────────────────────────────────
+0) XE TỰ LÁI 🚗 — CHẠY TIẾP / TỰ LÊN LẠI (MỚI NHẤT, có thể tắt)
+────────────────────────────────────────────────────────────────────────────
+Mục tiêu: người chơi KHÔNG phải bấm xe nhiều. Xe tự quản lý theo màu.
+• Chạy hết vòng mà màu của xe VẪN CÒN ĂN ĐƯỢC (có slime cùng màu đang "lộ" —
+  bắn tới được) -> xe cứ chạy tiếp, không về bãi. Chỉ về bãi khi không ăn được
+  (màu bị chặn trong hoặc đã hết). Track vẫn tối đa 5 xe.
+• Xe ở bãi TỰ NHẢY LÊN track khi màu của nó lộ trở lại (do xe khác bóc vòng
+  ngoài) VÀ trên track chưa có xe cùng màu (hoặc cùng màu nhưng count=0).
+• "Ăn được" = màu đang REACHABLE (ô đầu tiên tính từ mép hàng/cột là slime màu
+  đó), KHÔNG phải chỉ tồn tại — nếu dùng "tồn tại" sẽ kẹt cứng (xe màu-bị-chặn
+  chạy vòng vô ích, giữ chỗ). Reachability tính đúng như LOS thật (tia thẳng +
+  2 tia chéo) và chỉ từ các cạnh track thực sự chạy.
+• Nhóm xe liên kết (xe đôi=2, xe 3=3, …) CŨNG tự lái: cả nhóm chạy tiếp/lên lại
+  nếu MỘT thành viên còn ăn được (cần đủ N ô trống để lên). Chỉ xe búa/gỗ giữ
+  hành vi cũ (bấm tay).
+
+  ► XE 3 / NHÓM N XE: N chest cùng "pairId", XẾP LIÊN TIẾP trong mảng chests,
+    N ≤ 4 (perRow). Cả nhóm: phóng/chạy(khối cứng)/đỗ(N ô cạnh nhau)/rời cùng
+    lúc; nối dây giữa các thành viên. Code: ChestView.group (thay cho .twin).
+• Vẫn phải bấm để phóng xe LẦN ĐẦU từ hàng chờ (zone 3) — chỉ tự động phần
+  phóng-lại-từ-bãi.
+• ROLLBACK: đặt AUTO_CIRCLE = false trong GameScene.ts để về hành vi cũ.
+  Code: computeReachableColors / canKeepCircling / autoRelaunchBays (GameScene.ts).
+
+
+────────────────────────────────────────────────────────────────────────────
+1) LUCKY CLOVER 🍀 — SỰ KIỆN THU THẬP
+────────────────────────────────────────────────────────────────────────────
+Mục tiêu: khuyến khích người chơi vượt nhiều level. Thắng level -> nhận Clover.
+Tích đủ theo từng mốc -> tự nhận thưởng (Gold / Booster). Clover KHÔNG bị tiêu,
+chỉ là chỉ số tiến trình. (Trước tên là "Treasure Rock" — đã đổi thành Lucky Clover.)
+
+• Mở khoá: sau khi THẮNG Level 12 (event hiện tới khi nhận hết mọi mốc).
+  (Đổi mốc mở: EVENT_UNLOCK_LEVEL trong cloverEvent.ts.)
+• Clover mỗi lần thắng:
+    - Thắng ngay lần đầu (first clear + KHÔNG thua/không chơi lại lần đó) = 2 Clover
+    - Thắng kiểu khác (đã thua rồi thắng lại, hoặc chơi lại màn đã qua)     = 1 Clover
+    - Thua = 0 Clover
+• 30 mốc, ngưỡng Clover cộng dồn TĂNG DẦN:
+    - Mốc 1–10 : +10 mỗi mốc  (~5 lần thắng first-try)
+    - Mốc 11–20: +13 mỗi mốc  (~6–7 lần)
+    - Mốc 21–30: +17 mỗi mốc  (~8–10 lần)
+    (Tổng để hoàn thành ~400 Clover.)
+• Phần thưởng xen kẽ:
+    - Mốc lẻ  -> Gold (300, 400, 500, ... tăng 100 mỗi mốc gold)
+    - Mốc chẵn -> Booster (xoay vòng Add -> Shuffle -> Grab -> Magnet)
+    - Mốc 30  -> Grand Reward (3000 Gold + Magnet)
+• Booster nhận từ event: tự +1 vào kho VÀ mở khoá luôn (dùng được kể cả chưa tới
+  level mở khoá bình thường).
+• Home: thanh sự kiện kiểu "Sunny Banner" (thẻ xanh + ruy-băng vàng "LUCKY CLOVER",
+  huy hiệu 🍀, thanh chia đốt/pip, ô preview thưởng kế). Bấm vào thanh -> popup lộ
+  trình 30 mốc (✅ đã nhận / ➡️ mốc kế phát sáng / 🔒 khoá), icon thưởng thật.
+• Sau mỗi màn thắng: màn Victory hiện "+X 🍀 Lucky Clover", phần thưởng vừa mở (nếu
+  có), và "còn N nữa -> phần thưởng kế".
+
+CHỖ CHỈNH:
+  • Logic + số liệu:  src/game/cloverEvent.ts
+      - incrementFor()   -> đổi số Clover mỗi mốc
+      - MILESTONES       -> đổi phần thưởng từng mốc
+      - EVENT_UNLOCK_LEVEL = 10 ; EVENT_NAME = "Lucky Clover" ; CLOVER_ICON = "🍀"
+      - cloversForWin()  -> đổi 2/1 Clover
+  • Trao Clover + thưởng khi thắng: src/scenes/GameScene.ts -> win() (grantEventReward/grantEventBooster)
+  • Cờ "thua/chơi lại màn này":      GameScene.failedThisAttempt (reset ở create, set true ở lose)
+  • Thanh + popup ở Home:            src/scenes/LevelSelectScene.ts -> buildEventBar(), showEventRoadmap(),
+                                     drawCloverMedallion(), drawRewardIcon()
+
+KEY localStorage:
+  pf_event_rocks    = tổng Clover (giữ tên key cũ để không mất tiến trình đã lưu)
+  pf_event_claimed  = số mốc đã nhận
+  (mở khoá suy ra từ pf_progress > 10)
+
+
+────────────────────────────────────────────────────────────────────────────
+2) GOLD (tiền tệ)
+────────────────────────────────────────────────────────────────────────────
+• Bắt đầu = 0. Có reset-một-lần khi vào game (key pf_gold_reset) để dọn gold test cũ.
+• Thắng level LẦN ĐẦU  = +50 gold (chơi lại KHÔNG được nữa -> chống farm).
+• Nút "+" trên HUD     = +100 gold mỗi lần (đang mở, KHÔNG giới hạn — chỉ để test).
+  (Muốn giới hạn lại: xem buyGold() — trước có bản chặn 10 lần bằng key pf_freebuys.)
+• Icon coin: đĩa vàng viền vàng đậm, KHÔNG có chữ. Giống nhau ở Home và trong game.
+CHỖ CHỈNH: GameScene.ts -> addGold(), buyGold(), win() (reward=50); coin ở HUD (~dòng "coin").
+KEY: pf_gold, pf_gold_reset, pf_freebuys (nếu bật lại giới hạn)
+
+
+────────────────────────────────────────────────────────────────────────────
+3) BOOSTER
+────────────────────────────────────────────────────────────────────────────
+• 4 loại + mở khoá theo level + tặng free khi mở:
+    Add=300 (Lv6) · Grab=500 (Lv11) · Shuffle=600 (Lv16) · Magnet=600 (Lv21)
+    Tặng free (FREE_GIFT)=3 cái khi tới level mở khoá.
+• Hết hàng (badge đỏ 0) -> chạm vào hiện hộp "Buy?" -> mua bằng gold, +1 vào kho ->
+  chạm lần nữa để dùng (mua tách khỏi dùng, tránh mua hụt).
+• KHÔNG còn chữ tên dưới icon (chỉ còn badge số + giá khi hết).
+CHỖ CHỈNH: GameScene.ts -> BOOSTERS[] (giá/level), promptBuyBooster(), drawBoosters(),
+           runBooster(), consumeBooster/canUseBooster/affordToast.
+KEY: pf_boost_counts, pf_boost_gifted
+
+
+────────────────────────────────────────────────────────────────────────────
+4) BOOSTER MAGNET (cách chơi)
+────────────────────────────────────────────────────────────────────────────
+• Bấm Magnet -> chạm 1 slime -> hút CỤM slime cùng màu NỐI LIỀN theo cạnh
+  (flood-fill 4 hướng), KHÔNG hút hết mọi slime cùng màu trên bàn.
+• Chạm "rộng lượng": chạm gần là bắt ô gần nhất trong ~1.3 ô (slime nhỏ vẫn dễ chọn).
+• Đã BỎ zoom camera lúc chọn (từng gây kẹt/đơ game).
+CHỖ CHỈNH: GameScene.ts -> boosterMagnet(), nearestSlime(), connectedSameColor(),
+           confirmMagnet(), spawnVipCollector().
+
+
+────────────────────────────────────────────────────────────────────────────
+5) ÂM THANH
+────────────────────────────────────────────────────────────────────────────
+• Tiếng "pop" khi xe bật khỏi khay: pop bật LÊN (320->880Hz) + "ting" nhẹ. (playPop)
+• Nhạc nền đã bỏ; có SFX ăn slime (Audio.board) và xe đầy (Audio.finish).
+CHỖ CHỈNH: GameScene.ts -> playPop(); src/game/audio.ts.
+
+
+────────────────────────────────────────────────────────────────────────────
+6) SETTINGS: CHỌN LEVEL — TUẦN TỰ / TỰ DO
+────────────────────────────────────────────────────────────────────────────
+• Nút ⚙ ở Home mở popup Settings. Có option "Level Select":
+    - Sequential (MẶC ĐỊNH): chỉ chơi được các level đã tới; level chưa tới bị KHÓA
+      (node xám + 🔒, chạm vào báo "Locked — finish the levels in order").
+    - Any Level: chọn/chơi level bất kỳ.
+• Đổi option -> lưu + rebuild map ngay (khóa cập nhật liền).
+CHỖ CHỈNH: src/scenes/LevelSelectScene.ts -> openSettings(), freeSelect()/setFreeSelect(),
+           makeNode() (style khóa), tapAt() (chặn khóa).
+KEY: pf_freeselect ("1"=tự do, "0"/không có=tuần tự)
+
+
+────────────────────────────────────────────────────────────────────────────
+7) NGÔN NGỮ & RESET (dev/test)
+────────────────────────────────────────────────────────────────────────────
+• Toàn bộ chữ trong game = Tiếng Anh.
+• Reset máy đang test bằng URL:
+    ?reset=all  -> xoá HẾT (gold, tiến trình, booster, tutorial, event)
+    ?reset=1    -> chỉ bật lại tutorial (giữ gold + tiến trình)
+  (Xử lý trong src/main.ts; tự bỏ tham số khỏi URL sau khi chạy.)
+• (Remote reset "xoá mọi user khi online" đã LÀM RỒI XOÁ — không còn trong code.)
+
+
+────────────────────────────────────────────────────────────────────────────
+7b) VERSION TRÊN MÀN START (để biết đã load bản mới)
+────────────────────────────────────────────────────────────────────────────
+• Màn Splash (start) hiện ở đáy: "v0.0.<N> · <hash>".
+• TỰ TĂNG theo số commit git: version = 0.0.<git rev-list --count HEAD>, kèm short
+  commit hash. Mỗi lần commit/push (deploy) là số tự tăng — KHÔNG cần sửa tay.
+  Nếu không có git thì fallback về package.json version.
+• Netlify clone repo có git nên tính đúng lúc build. Sau deploy, mở lại trang thấy
+  số/hash đổi = đã load bản mới.
+CHỖ CHỈNH: vite.config.ts -> buildVersion() + define(__APP_VERSION__/__APP_BUILD__);
+           src/global.d.ts (khai báo); src/scenes/SplashScene.ts (hiển thị).
+
+
+────────────────────────────────────────────────────────────────────────────
+8) GAME FEEL — TỐC ĐỘ XE / ĂN SLIME / ÂM / LAYOUT (2026-07-24)
+────────────────────────────────────────────────────────────────────────────
+• Xe chạy +30% (SPEED 10->13).
+• Ăn slime nhanh ~2.25x, đều "như điện giật" (SHOT_COOLDOWN 180->80ms);
+  slime chạy tới xe nhanh hơn cho khớp (RUN_MAX 460->700, RUN_ACCEL 560->850).
+• Đoạn cuối (không còn xe xếp hàng — queueEmpty): xe chạy GẤP ĐÔI (drive x2)
+  + gắp nhanh (cooldown/3, gắp hết slime trong tầm mỗi tick).
+• Slime chạm xe: phồng "bụp" x1.7 (Back.out) trước khi biến -> đã mắt.
+• Âm: Audio.pop() — pop nhỏ nhẹ mỗi lần ăn slime (nhẹ hơn tiếng cũ).
+• Layout: ray vuông ôm gần hết bề ngang (edge 4px); cụm dưới ghim sát đáy;
+  slime to hơn ~15% (bỏ trần board 0.56).
+CHỖ CHỈNH: GameScene.ts (SPEED, SHOT_COOLDOWN, RUN_MAX/ACCEL, freeAdvance boost,
+           buildBoard/getBoardMetrics layout); src/game/audio.ts (pop()).
+
+
+────────────────────────────────────────────────────────────────────────────
+9) THIẾT KẾ LEVEL — build tự động (scripts/build-levels.mjs + CSV)
+   CSV: Manythings/Design winrate/winratedesign1.csv  (chạy --config)
+────────────────────────────────────────────────────────────────────────────
+Cột CSV (input): lvl, tier, target, max màu, maxxe, minxe, xedoi, track,
+                 max slim, skill   | (ref build ghi: slime_ref, win_ref,
+                 xe_ref, màu_ref, note)
+
+Quy tắc:
+• Winrate đo bằng bot "người chơi trung bình" ở SKILL RIÊNG mỗi level
+  (1=hoàn hảo, 0.7-0.8=giỏi, 0.6=TB, 0.4=gà). Build căn winrate ~ target.
+• TARGET (2026-07-24): target>=50 -> +10 (cap100); super(mốc15)<=25;
+  hard từ L20 (mốc5,>=20) <=40.
+• COUNT/xe (slime mỗi xe): cho phép 1-40, ƯU TIÊN 15-35, ideal ~25.
+  minxe (sàn) ưu tiên hơn maxxe (trần).
+• Độ khó từ: số MÀU + thứ tự CHÔN + XE ĐÔI (không nhồi xe con).
+    - quá khó -> tự giảm màu;
+    - hard/super còn dễ -> tự THÊM XE ĐÔI (trần hard 4 / super 6 cặp);
+    - dễ mà kẹt trần -> note để nâng max màu.
+• Chủ thể: to nhất trong giới hạn max slim (L1-2=200 nhỏ; L3-100=750 to full).
+• Phủ slime: từ L3 phủ >=70% board; thiếu thì vẽ VIỀN (nở 2 màu quanh chủ
+  thể tới 70%); hình vuông/chữ nhật cũng được.
+• LEVEL XẢ HƠI: ngay sau mỗi hard/super (L6,11,...,96 = n%5==1): siêu dễ
+  (~95-100%), chủ thể to, ~6 màu -> lấy slime liên tục, đã tay.
+• Track: tất cả "square". Solver kiểm mọi level giải được (kể cả xe đôi).
+
+Lệnh:
+  build cả 100:  node scripts/build-levels.mjs --config "<csv>"
+  rebuild vài:   thêm --only 3,5,20   (giữ nguyên level khác + tranh)
+  đo winrate:    --report --config    -> ghi report.json (skill riêng, 40 lần)
+  vòng lặp: build -> --report -> auto-tune CSV chỗ lệch -> --only rebuild.
+  designed.json = file game đọc trực tiếp (điện thoại đóng/mở lại tab để nạp).
+
+
+────────────────────────────────────────────────────────────────────────────
+10) CƠ CHẾ SLIME 2 LỚP + SLIME "?" + XE BA (2026-07-24)
+────────────────────────────────────────────────────────────────────────────
+• SLIME 2 LỚP (level.layer2[i] = màu ẩn dưới ô i): ăn lớp trên -> slime màu
+  khác pop ra ở đúng ô đó (dấu góc gập trắng đánh dấu ô 2 lớp). Xe được cấp
+  thêm capacity cho lớp dưới. Có ở hard/super từ L35 + toàn bộ pack L101-120.
+• SLIME "?" (level.hidden[i] = màu thật): hiện dấu ? xám, KHÔNG bắn được khi
+  còn ẩn; mở 1 ô cạnh -> lộ màu thật (pop). board vẫn giữ màu thật (solver
+  đúng); chỉ là ẩn với người chơi. Cùng phạm vi level như 2 lớp.
+• XE BA (3 xe khác màu chung pairId): logic như xe đôi (đi/đỗ/rời cùng nhau,
+  cần 3 khay cạnh nhau). Game side đã hỗ trợ nhóm N từ trước; build đặt ở
+  L20,25,30,45 + pack (mỗi level chia hết 3).
+• PACK L101-120 (advanced): tất cả hard/super, đủ cơ chế (2lớp + ? + đôi/ba),
+  skill 0.9 (101-110), 0.8 (111-115), 0.98 (116-120; 1.0 là bot tất định nên
+  dùng 0.98), target 15-20%%. Winrate thực đo: 8-28%% cả 20 level.
+• BÀI HỌC CĂN CHỈNH: ở skill >=0.9 winrate là "vách đá" (0 hoặc 100) — căn
+  bằng SEED SWEEP: build lại với --seedoff K (đổi thứ tự chôn xe), đo bằng
+  --test1 n, giữ seed rơi vào 8-35%%. Script: scratchpad/seedsweep.sh.
+CHỖ CHỈNH: src/game/level.ts (layer2/hidden), GameScene.ts (markTwoLayer,
+  makeHiddenKey, revealHiddenAround, fireTo), scripts/build-levels.mjs
+  (makeLayer2, makeHidden, pickGroups deep-first, --seedoff, --test1).
+
+
+────────────────────────────────────────────────────────────────────────────
+GHI CHÚ CHUNG
+────────────────────────────────────────────────────────────────────────────
+• Stack: Phaser 3 + TypeScript + Vite. Chạy web; sau đóng gói APK bằng Capacitor.
+• Kiểm tra biên dịch:  npx tsc --noEmit
+• Chạy dev:            npm run dev
+• Level đặc biệt test obstacle: mở ?level=999
+================================================================================

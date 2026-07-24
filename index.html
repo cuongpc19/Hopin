@@ -6,7 +6,11 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
     />
-    <title>Pixel Flow</title>
+    <title>Hop In!</title>
+    <!-- Fetch the splash poster in parallel with the JS bundle so it's already
+         cached by the time Phaser boots — the splash then appears the instant the
+         engine is ready instead of after a second round-trip. -->
+    <link rel="preload" as="image" href="art/hopin.png" />
     <style>
       html,
       body {
@@ -30,10 +34,69 @@
       #game canvas {
         display: block;
       }
+      /* Instant boot screen — pure HTML/CSS so it paints in the first frame,
+         before the 1.8MB Phaser bundle finishes downloading/compiling. Removed
+         from JS (SplashScene.create) once the real poster is ready, so there's
+         no blank stall at launch. */
+      #boot {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 22px;
+        background: #bfe3a0;
+        font-family: Arial, sans-serif;
+        z-index: 10;
+        transition: opacity 0.3s ease;
+      }
+      #boot.hide {
+        opacity: 0;
+        pointer-events: none;
+      }
+      #boot .title {
+        font-size: 44px;
+        font-weight: 800;
+        color: #fff;
+        -webkit-text-stroke: 2px #5a3a12;
+        text-shadow: 0 3px 0 #5a3a12;
+        letter-spacing: 1px;
+        animation: bootPulse 1s ease-in-out infinite;
+      }
+      #boot .dots {
+        display: flex;
+        gap: 10px;
+      }
+      #boot .dots span {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: #6a4a12;
+        animation: bootBounce 0.9s ease-in-out infinite;
+      }
+      #boot .dots span:nth-child(2) {
+        animation-delay: 0.15s;
+      }
+      #boot .dots span:nth-child(3) {
+        animation-delay: 0.3s;
+      }
+      @keyframes bootPulse {
+        0%, 100% { transform: scale(1); }
+        50% { transform: scale(1.06); }
+      }
+      @keyframes bootBounce {
+        0%, 100% { transform: translateY(0); opacity: 0.5; }
+        50% { transform: translateY(-10px); opacity: 1; }
+      }
     </style>
   </head>
   <body>
     <div id="game"></div>
+    <div id="boot">
+      <div class="title">Hop In!</div>
+      <div class="dots"><span></span><span></span><span></span></div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

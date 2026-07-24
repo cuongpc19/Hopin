@@ -189,6 +189,16 @@ class GameAudio {
     this.voice(this.sfxGain, base * 3, t, 0.03, 0.14, "triangle"); // soft attack click
   }
 
+  // ---- SFX: a slime is eaten → a SOFT, small, quick pop. Much gentler than board()
+  // because pickups now stream fast (~12/s) — this reads as a satisfying light munch
+  // rather than a wall of loud pops. Tiny random wobble keeps rapid pops lively.
+  pop() {
+    if (!this.ctx || !this.sfxGain) return;
+    const t = this.ctx.currentTime;
+    const base = 640 * (0.93 + Math.random() * 0.16);
+    this.glide(this.sfxGain, base, base * 1.7, t, 0.05, 0.16, "sine"); // short soft pop
+  }
+
   // ---- SFX: a car fills up and drives off → a bright ascending sparkle-chime,
   // clearly different from the pickup pop.
   finish() {

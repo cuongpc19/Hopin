@@ -1,11 +1,11 @@
 {
-  "name": "pixel-flow",
+  "name": "hop-in",
   "version": "0.1.0",
-  "description": "Pixel Flow - conveyor color-shooter puzzle game (Phaser 3 + TS + Vite)",
+  "description": "Hop In! - conveyor color-shooter puzzle game (Phaser 3 + TS + Vite)",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build && node scripts/optimize-art.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -1,9 +1,30 @@
 import { defineConfig, type Plugin } from "vite";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { execSync } from "node:child_process";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const LEVELS = root + "src/levels/designed.json";
+
+// Auto build version shown on the start screen. Derived from git so it increases by
+// itself every commit/deploy (no manual bump): version = 0.0.<commit count>, plus the
+// short commit hash as a guaranteed-unique build stamp. Falls back to package.json if
+// git isn't available (e.g. a stripped tarball build).
+function buildVersion(): { version: string; build: string } {
+  try {
+    const count = execSync("git rev-list --count HEAD", { cwd: root }).toString().trim();
+    const hash = execSync("git rev-parse --short HEAD", { cwd: root }).toString().trim();
+    return { version: `0.0.${count}`, build: hash };
+  } catch {
+    try {
+      const pkg = JSON.parse(readFileSync(root + "package.json", "utf8"));
+      return { version: String(pkg.version ?? "0.0.0"), build: "local" };
+    } catch {
+      return { version: "0.0.0", build: "local" };
+    }
+  }
+}
+const VERSION = buildVersion();
 const EDITOR = root + "tools/level-editor.html";
 
 // Dev-only bridge so tools/level-editor.html (opened at /editor) can save levels
@@ -59,8 +80,8 @@ function levelEditorApi(): Plugin {
         try {
           const { number, level } = JSON.parse(await readBody(req));
           const n = parseInt(number, 10);
-          if (!Number.isFinite(n) || n < 1) throw new Error("số level không hợp lệ");
-          if (!level || !Array.isArray(level.board)) throw new Error("thiếu dữ liệu level");
+          if (!Number.isFinite(n) || n < 1) throw new Error("invalid level number");
+          if (!level || !Array.isArray(level.board)) throw new Error("missing level data");
           const data = readLevels();
           data[n] = level;
           // keep numeric keys sorted so the file stays tidy
@@ -95,6 +116,11 @@ function levelEditorApi(): Plugin {
 export default defineConfig({
   base: "./",
   plugins: [levelEditorApi()],
+  // Bake the version into the bundle so the start screen can display it.
+  define: {
+    __APP_VERSION__: JSON.stringify(VERSION.version),
+    __APP_BUILD__: JSON.stringify(VERSION.build),
+  },
   server: {
     host: true,
     port: 5173,

@@ -27,7 +27,10 @@ const OUT = path.join(ROOT, "src/levels/designed.json");
 const PREVIEW_DIR = process.env.PREVIEW_DIR ||
   path.join(ROOT, "scripts/_level-preview");
 const DRY = process.argv.includes("--dry");
-const N_LEVELS = 100;
+const N_LEVELS = 120; // 100 main + 20 "advanced" hard/super (L101-120, user 2026-07-24)
+// --seedoff K: alternate deterministic seed family (used by the seed-sweep tuner to
+// hunt a burial order whose win-rate lands in band on chaotic high-skill levels).
+const SEED_OFF = (() => { const i = process.argv.indexOf("--seedoff"); return i >= 0 ? (parseInt(process.argv[i + 1], 10) || 0) : 0; })();
 
 // ---- palette (must match src/game/palette.ts & editor BASE_COLORS) ----------
 const BASE_HEX = [
@@ -40,6 +43,14 @@ const baseRgb = BASE_HEX.map(hexToRgb);
 const BASE_N = BASE_HEX.length;
 const EMPTY = -1;
 const BOARD_SIZE = 25, IMG_INNER = 25;
+// "màu tươi": avoid the dark ids that read too dark — black 12, maroon/plum 18, dark
+// grey 10, brown 11, dark blue 13, dark green 16, grey 9 (user 2026-07-24). All new
+// colours (ensureColors, borders, vivid mapping) draw from BRIGHT only.
+const DARK_IDS = new Set([9, 10, 11, 12, 13, 16, 18]);
+const BRIGHT_IDS = []; for (let i = 0; i < BASE_N; i++) if (!DARK_IDS.has(i)) BRIGHT_IDS.push(i); // 0,1,2,3,4,5,6,7,8,14,15,17
+// Leave an empty frame margin so slime never touches the road (user 2026-07-24).
+const FILL_INSET = 2;
+const SUBJECT_SIDE = BOARD_SIZE - 2 * FILL_INSET; // 21 — subject + fill stay inside this
 
 // ---- deterministic RNG ------------------------------------------------------
 function makeRng(seed) { let s = (seed >>> 0) || 1; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 0xffffffff; }; }
@@ -191,7 +202,7 @@ function buildFromImage(src, IW, IH, opts) {
   let board = new Array(N).fill(EMPTY);
 
   if (mode === "game" && vivid) {
-    const VIVID = [1, 3, 4, 5, 6, 15, 17].filter((id) => id < BASE_N);
+    const VIVID = [0, 1, 2, 3, 4, 5, 6, 7, 15, 17].filter((id) => id < BASE_N); // bright, no dark
     const lum = (c) => 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
     const vSorted = VIVID.slice().sort((a, b) => lum(baseRgb[b]) - lum(baseRgb[a]));
     let centers = kmeans(fg.map((i) => cellCol[i]), K, 10);
@@ -310,24 +321,26 @@ function colorOuterness(board, layer) {
 }
 // Greedy 5-bay player. Conservative: straight rays only, one collecting pass per
 // launch on open tracks (line/u/arch), full peel on loop tracks (square/rect).
-function solvable(board, cols, rows, order, track, bays = 5, perRow = 4) {
+function solvable(board, cols, rows, order, track, bays = 5, perRow = 4, layer2 = null) {
   const edges = trackEdges(track);
   const singlePass = track === "line" || track === "u" || track === "arch";
   const occ = board.slice();
-  let remaining = occ.reduce((a, v) => a + (v >= 0 ? 1 : 0), 0);
+  const lay = layer2 ? layer2.slice() : null; // 2-layer bottoms revealed on collect
+  let remaining = occ.reduce((a, v) => a + (v >= 0 ? 1 : 0), 0) + (lay ? lay.reduce((a, v) => a + (v >= 0 ? 1 : 0), 0) : 0);
+  const clearCell = (i) => { if (lay && lay[i] >= 0) { occ[i] = lay[i]; lay[i] = -1; } else occ[i] = -1; remaining--; };
   const columns = Array.from({ length: perRow }, () => []);
   order.forEach((c, i) => columns[i % perRow].push({ color: c.color, cap: c.count }));
   const parked = [];
   const collect = (car) => {
     if (singlePass) {
       const E = exposedTiles(occ, cols, rows, edges);
-      for (const i of E) { if (car.cap <= 0) break; if (occ[i] === car.color) { occ[i] = -1; remaining--; car.cap--; } }
+      for (const i of E) { if (car.cap <= 0) break; if (occ[i] === car.color) { clearCell(i); car.cap--; } }
     } else {
       while (car.cap > 0) {
         const E = exposedTiles(occ, cols, rows, edges);
         let t = -1; for (const i of E) if (occ[i] === car.color) { t = i; break; }
         if (t < 0) break;
-        occ[t] = -1; remaining--; car.cap--;
+        clearCell(t); car.cap--;
       }
     }
   };
@@ -359,29 +372,51 @@ function solvable(board, cols, rows, order, track, bays = 5, perRow = 4) {
 // as level.pairs = [[i,j],…] indexing into chests. Backward-compatible: a game
 // that ignores `pairs` just sees two normal cars, so the level still solves.
 // Perfect-player solver that respects the pair constraint (for the safety check).
-function solvablePairs(board, cols, rows, order, track, pairs, bays = 5, perRow = 4) {
+// `groups` = array of index-arrays (each ≥2 members) that launch/park/leave together
+// (2=twin, 3=triple, …). A greedy perfect-solver used to validate a level is winnable.
+function solvablePairs(board, cols, rows, order, track, groups, bays = 5, perRow = 4, layer2 = null) {
   const edges = trackEdges(track);
   const singlePass = track === "line" || track === "u" || track === "arch";
   const occ = board.slice();
-  let remaining = occ.reduce((a, v) => a + (v >= 0 ? 1 : 0), 0);
-  const cars = order.map((c) => ({ color: c.color, cap: c.count, partner: -1 }));
-  for (const [a, b] of pairs) { cars[a].partner = b; cars[b].partner = a; }
+  const lay = layer2 ? layer2.slice() : null; // 2-layer bottoms revealed on collect
+  let remaining = occ.reduce((a, v) => a + (v >= 0 ? 1 : 0), 0) + (lay ? lay.reduce((a, v) => a + (v >= 0 ? 1 : 0), 0) : 0);
+  const clearCell = (i) => { if (lay && lay[i] >= 0) { occ[i] = lay[i]; lay[i] = -1; } else occ[i] = -1; remaining--; };
+  const cars = order.map((c) => ({ color: c.color, cap: c.count, grouped: false }));
+  const groupCars = (groups || []).map((idxs) => { const g = idxs.map((i) => cars[i]); g.forEach((c) => (c.grouped = true)); return g; });
   const columns = Array.from({ length: perRow }, () => []);
   cars.forEach((c, i) => columns[i % perRow].push(c));
   const parked = [];
   const collect = (car) => {
-    if (singlePass) { const E = exposedTiles(occ, cols, rows, edges); for (const i of E) { if (car.cap <= 0) break; if (occ[i] === car.color) { occ[i] = -1; remaining--; car.cap--; } } }
-    else { while (car.cap > 0) { const E = exposedTiles(occ, cols, rows, edges); let t = -1; for (const i of E) if (occ[i] === car.color) { t = i; break; } if (t < 0) break; occ[t] = -1; remaining--; car.cap--; } }
+    if (singlePass) { const E = exposedTiles(occ, cols, rows, edges); for (const i of E) { if (car.cap <= 0) break; if (occ[i] === car.color) { clearCell(i); car.cap--; } } }
+    else { while (car.cap > 0) { const E = exposedTiles(occ, cols, rows, edges); let t = -1; for (const i of E) if (occ[i] === car.color) { t = i; break; } if (t < 0) break; clearCell(t); car.cap--; } }
   };
   const isFront = (c) => columns.some((col) => col[0] === c);
   const removeCar = (c) => { for (const col of columns) if (col[0] === c) { col.shift(); return; } const p = parked.indexOf(c); if (p >= 0) parked.splice(p, 1); };
+  const TR = process.env.DEBUG_SOLVE && (groups || []).length > 0 && !globalThis.__traced; // trace ONE grouped solve
+  if (TR) globalThis.__traced = true;
   let guard = 0;
   while (remaining > 0 && guard++ < order.length * 6 + 100) {
     const E = exposedTiles(occ, cols, rows, edges);
     const S = new Set(); for (const i of E) S.add(occ[i]);
+    if (TR && guard < 80) console.error(`t${guard} rem${remaining} bay${parked.length} S=[${[...S].join(",")}] fronts=[${columns.map((c) => c[0] ? c[0].color + (c[0].grouped ? "G" : "") + ":" + c[0].cap : "-").join(" ")}]`);
     let moved = false;
-    // 1) a productive non-paired car (parked first, then column fronts)
-    const singles = [...parked.filter((c) => c.partner < 0), ...columns.map((c) => c[0]).filter((c) => c && c.partner < 0)];
+    // 1) a productive READY group FIRST (all members fronts/parked) — groups must eat
+    // before same-colour solo cars steal their tiles (capacities are exact; a starved
+    // group would squat in the bays forever and wedge the level).
+    for (const g of groupCars) {
+      if (g.every((c) => c.cap === 0)) continue;
+      if (!g.every((c) => isFront(c) || parked.includes(c))) continue;
+      if (!g.some((c) => c.cap > 0 && S.has(c.color))) continue; // a member that can STILL eat
+      const own = g.filter((c) => parked.includes(c)).length;
+      if (parked.length - own > bays - g.length) continue; // not enough bays to park the group
+      for (const c of g) removeCar(c);
+      for (const c of g) collect(c);
+      if (!g.every((c) => c.cap === 0)) for (const c of g) parked.push(c); // park together
+      moved = true; break;
+    }
+    if (moved) continue;
+    // 2) a productive solo (ungrouped) car (parked first, then column fronts)
+    const singles = [...parked.filter((c) => !c.grouped), ...columns.map((c) => c[0]).filter((c) => c && !c.grouped)];
     for (const c of singles) if (S.has(c.color)) {
       const wasParked = parked.includes(c);
       collect(c);
@@ -389,41 +424,80 @@ function solvablePairs(board, cols, rows, order, track, pairs, bays = 5, perRow 
       moved = true; break;
     }
     if (moved) continue;
-    // 2) a productive READY pair (both fronts or both parked). Twins park together
-    // into 2 adjacent bays — need ≥2 free (after reclaiming their own parked slots).
-    for (const [a, b] of pairs) {
-      const ca = cars[a], cb = cars[b];
-      if (ca.cap === 0 && cb.cap === 0) continue;
-      if (!((isFront(ca) || parked.includes(ca)) && (isFront(cb) || parked.includes(cb)))) continue;
-      if (!(S.has(ca.color) || S.has(cb.color))) continue;
-      const own = (parked.includes(ca) ? 1 : 0) + (parked.includes(cb) ? 1 : 0);
-      if (parked.length - own > bays - 2) continue; // <2 bays free to park the twin
-      removeCar(ca); removeCar(cb); collect(ca); collect(cb);
-      if (!(ca.cap === 0 && cb.cap === 0)) { parked.push(ca); parked.push(cb); } // park together
-      moved = true; break;
-    }
-    if (moved) continue;
-    // 3) park a non-paired front to reveal deeper (paired cars can't park alone)
+    // 3) park an ungrouped front to reveal deeper (grouped cars can't park alone)
     const np = [];
-    for (let j = 0; j < perRow; j++) { const f = columns[j][0]; if (f && f.partner < 0) np.push(j); }
-    if (np.length === 0 || parked.length >= bays) return false;
-    np.sort((a, b) => columns[b].length - columns[a].length);
-    parked.push(columns[np[0]].shift());
+    for (let j = 0; j < perRow; j++) { const f = columns[j][0]; if (f && !f.grouped) np.push(j); }
+    if (np.length && parked.length < bays) {
+      np.sort((a, b) => columns[b].length - columns[a].length);
+      parked.push(columns[np[0]].shift());
+      continue;
+    }
+    // 4) last resort: launch a READY group into the bays even though it's not
+    // productive yet (the real game allows this — it unblocks the group's columns).
+    let sent = false;
+    for (const g of groupCars) {
+      if (g.every((c) => c.cap === 0)) continue;
+      if (!g.every((c) => isFront(c))) continue; // all still in the queue, at fronts
+      if (parked.length > bays - g.length) continue;
+      for (const c of g) removeCar(c);
+      for (const c of g) collect(c); // may collect nothing — that's fine
+      if (!g.every((c) => c.cap === 0)) for (const c of g) parked.push(c);
+      sent = true; break;
+    }
+    if (!sent) { if (TR) console.error(`tFAIL guard${guard} rem${remaining} bay${parked.length} parked=[${parked.map((c) => c.color + (c.grouped ? "G" : "") + ":" + c.cap).join(" ")}]`); return false; }
   }
   return remaining === 0;
 }
-// Twin candidates must be CONSECUTIVE chests in the SAME inventory row (so they
-// land in adjacent columns, same row — what the game's twin rendering expects):
-// (0,1),(2,3) in row 0, (4,5),(6,7) in row 1, … i.e. even i with i%perRow < perRow-1.
-function pickPairs(order, board, track, want, perRow = 4) {
-  const pairs = [];
-  // even i (perRow=4) always keeps i and i+1 in the same row → adjacent columns.
-  for (let i = 0; i + 1 < order.length && pairs.length < want; i += 2) {
-    const a = i, b = i + 1;
-    if (order[a].color === order[b].color) continue;             // twins of two different colours
-    if (solvablePairs(board, BOARD_SIZE, BOARD_SIZE, order, track, [...pairs, [a, b]])) pairs.push([a, b]);
+// Group candidates must be CONSECUTIVE chests in the SAME inventory row (so they land
+// in adjacent columns — what the game's linked-car rendering expects). Places `triples`
+// (3 adjacent cols) first, then `pairs` (2 adjacent cols) in the remaining slots. Each
+// group needs all-different colours and must keep the level solvable.
+function pickGroups(order, board, track, pairs, triples, perRow = 4, layer2 = null) {
+  const groups = [];
+  const used = new Set();
+  const sameRow = (...idx) => idx.every((i) => Math.floor(i / perRow) === Math.floor(idx[0] / perRow));
+  // The burial order tends to place SAME-colour cars adjacent, which would forbid
+  // every group. Fix a slot by SWAPPING in a later different-colour car (mutates
+  // `order` — the caller measures the swapped order, so difficulty stays honest).
+  const distinctify = (idx) => {
+    for (let k = 1; k < idx.length; k++) {
+      const seen = new Set(idx.slice(0, k).map((i) => order[i].color));
+      if (!seen.has(order[idx[k]].color)) continue;
+      let done = false;
+      for (let j = idx[idx.length - 1] + 1; j < order.length && !done; j++) {
+        if (used.has(j) || seen.has(order[j].color)) continue;
+        [order[idx[k]], order[j]] = [order[j], order[idx[k]]];
+        done = true;
+      }
+      if (!done) return false;
+    }
+    return new Set(idx.map((i) => order[i].color)).size === idx.length;
+  };
+  // Scan DEEP-first (end of the queue → front): a group at the very front blocks its
+  // columns from turn one (its colours are still buried) and wedges the level; a deep
+  // group surfaces mid-game when the board has opened up — challenging but winnable.
+  let nT = 0;
+  const lastBase = Math.floor((order.length - 3) / perRow) * perRow;
+  for (let base = lastBase; base >= 0 && nT < (triples || 0); base -= perRow) {
+    const idx = [base, base + 1, base + 2];
+    if (idx.some((i) => i + 1 > order.length || used.has(i)) || !sameRow(...idx)) continue;
+    const snap = idx.map((i) => order[i]);
+    if (!distinctify(idx)) { idx.forEach((i, k) => (order[i] = snap[k])); continue; }
+    if (solvablePairs(board, BOARD_SIZE, BOARD_SIZE, order, track, [...groups, idx], 5, 4, layer2)) { groups.push(idx); idx.forEach((i) => used.add(i)); nT++; }
+    else idx.forEach((i, k) => (order[i] = snap[k])); // revert the swaps
   }
-  return pairs;
+  let nP = 0;
+  const lastPair = Math.floor((order.length - 2) / 2) * 2;
+  for (let i = lastPair; i >= 0 && nP < (pairs || 0); i -= 2) {
+    if (i + 1 >= order.length || used.has(i) || used.has(i + 1) || !sameRow(i, i + 1)) continue;
+    const idx = [i, i + 1];
+    const snap = idx.map((x) => order[x]);
+    if (!distinctify(idx)) { if (process.env.DEBUG_GROUPS) console.error(`  pair@${i}: distinctify FAIL`); idx.forEach((x, k) => (order[x] = snap[k])); continue; }
+    if (solvablePairs(board, BOARD_SIZE, BOARD_SIZE, order, track, [...groups, idx], 5, 4, layer2)) { groups.push(idx); used.add(i); used.add(i + 1); nP++; }
+    else { if (process.env.DEBUG_GROUPS) console.error(`  pair@${i}: solvable FAIL`); idx.forEach((x, k) => (order[x] = snap[k])); } // revert the swaps
+  }
+  if (process.env.DEBUG_GROUPS) console.error(`  pickGroups: want P${pairs}/T${triples} → placed ${groups.length}`);
+  return groups;
 }
 
 // Order the cars at an EXACT burial strength (0 = outer-first/easy, →1 = inner-first/hard).
@@ -465,13 +539,16 @@ function playAverage(board, cols, rows, order, track, opts) {
   const edges = trackEdges(track);
   const singlePass = track === "line" || track === "u" || track === "arch";
   const occ = board.slice();
-  let remaining = occ.reduce((a, v) => a + (v >= 0 ? 1 : 0), 0);
-  // cars with twin links (two chests sharing pairId are twins)
-  const cars = order.map((c) => ({ color: c.color, cap: c.count, partner: -1 }));
+  const lay = opts.layer2 ? opts.layer2.slice() : null; // 2-layer: bottom colour per cell (-1 none)
+  let remaining = occ.reduce((a, v) => a + (v >= 0 ? 1 : 0), 0) + (lay ? lay.reduce((a, v) => a + (v >= 0 ? 1 : 0), 0) : 0);
+  const clearCell = (i) => { if (lay && lay[i] >= 0) { occ[i] = lay[i]; lay[i] = -1; } else occ[i] = -1; remaining--; };
+  // Linked car GROUPS (2=twin, 3=triple, …): chests sharing a pairId launch / drive /
+  // park / leave together. `grouped` marks a car as a group member (can't act alone).
+  const cars = order.map((c) => ({ color: c.color, cap: c.count, grouped: false }));
   const byPid = new Map();
   order.forEach((c, i) => { if (c.pairId != null) { (byPid.get(c.pairId) || byPid.set(c.pairId, []).get(c.pairId)).push(i); } });
-  const twins = []; // [carA, carB]
-  for (const idxs of byPid.values()) if (idxs.length === 2) { cars[idxs[0]].partner = idxs[1]; cars[idxs[1]].partner = idxs[0]; twins.push([cars[idxs[0]], cars[idxs[1]]]); }
+  const groups = [];
+  for (const idxs of byPid.values()) if (idxs.length >= 2) { const g = idxs.map((i) => cars[i]); g.forEach((c) => (c.grouped = true)); groups.push(g); }
   const columns = Array.from({ length: perRow }, () => []);
   cars.forEach((c, i) => columns[i % perRow].push(c));
   const parked = [];
@@ -480,12 +557,13 @@ function playAverage(board, cols, rows, order, track, opts) {
   const isFront = (c) => columns.some((col) => col[0] === c);
   const removeCar = (c) => { for (const col of columns) if (col[0] === c) { col.shift(); return; } const p = parked.indexOf(c); if (p >= 0) parked.splice(p, 1); };
   const doCollect = (car) => {
-    if (singlePass) { const E = exposedTiles(occ, cols, rows, edges); for (const i of E) { if (car.cap <= 0) break; if (occ[i] === car.color) { occ[i] = -1; remaining--; car.cap--; } } }
-    else { while (car.cap > 0) { const E = exposedTiles(occ, cols, rows, edges); let t = -1; for (const i of E) if (occ[i] === car.color) { t = i; break; } if (t < 0) break; occ[t] = -1; remaining--; car.cap--; } }
+    if (singlePass) { const E = exposedTiles(occ, cols, rows, edges); for (const i of E) { if (car.cap <= 0) break; if (occ[i] === car.color) { clearCell(i); car.cap--; } } }
+    else { while (car.cap > 0) { const E = exposedTiles(occ, cols, rows, edges); let t = -1; for (const i of E) if (occ[i] === car.color) { t = i; break; } if (t < 0) break; clearCell(t); car.cap--; } }
   };
-  // park a NON-twin front (twins can't park alone) — the only way to reveal deeper
+  // park a NON-grouped front (a linked group can't park a single member) — the only
+  // way to reveal deeper columns.
   const parkOne = () => {
-    const fronts = []; for (let j = 0; j < perRow; j++) { const f = columns[j][0]; if (f && f.partner < 0) fronts.push(j); }
+    const fronts = []; for (let j = 0; j < perRow; j++) { const f = columns[j][0]; if (f && !f.grouped) fronts.push(j); }
     if (fronts.length === 0 || parked.length >= bays) return false;
     let j;
     if (rng() > skill) j = fronts[Math.floor(rng() * fronts.length)];
@@ -499,20 +577,19 @@ function playAverage(board, cols, rows, order, track, opts) {
     const E = exposedTiles(occ, cols, rows, edges);
     const S = new Set(); for (const i of E) S.add(occ[i]);
     const prod = [];
-    // productive non-twin cars (parked + column fronts)
-    for (const p of parked) if (p.partner < 0 && S.has(p.color)) prod.push({ kind: "s", car: p, gain: gainOf(p.color, E) });
-    for (let j = 0; j < perRow; j++) { const f = columns[j][0]; if (f && f.partner < 0 && S.has(f.color)) prod.push({ kind: "s", car: f, gain: gainOf(f.color, E) }); }
-    // productive READY twins (both fronts or both parked). Offer only if it fully
-    // collects OR there are 2 bays free to park the pair together.
-    for (const [ca, cb] of twins) {
-      if (ca.cap === 0 && cb.cap === 0) continue;
-      const par = parked.includes(ca);
-      if (!((isFront(ca) || par) && (isFront(cb) || parked.includes(cb)))) continue;
-      if (!(S.has(ca.color) || S.has(cb.color))) continue;
-      const own = (parked.includes(ca) ? 1 : 0) + (parked.includes(cb) ? 1 : 0);
-      const canPark = parked.length - own <= bays - 2;
-      const fullClear = gainOf(ca.color, E) >= ca.cap && gainOf(cb.color, E) >= cb.cap;
-      if (canPark || fullClear) prod.push({ kind: "t", ca, cb, gain: gainOf(ca.color, E) + gainOf(cb.color, E) });
+    // productive solo cars (parked + column fronts)
+    for (const p of parked) if (!p.grouped && S.has(p.color)) prod.push({ kind: "s", car: p, gain: gainOf(p.color, E) });
+    for (let j = 0; j < perRow; j++) { const f = columns[j][0]; if (f && !f.grouped && S.has(f.color)) prod.push({ kind: "s", car: f, gain: gainOf(f.color, E) }); }
+    // productive READY groups (ALL members at column-fronts or parked). Launch only if
+    // the whole group fully collects OR there are groupSize bays free to park together.
+    for (const g of groups) {
+      if (g.every((c) => c.cap === 0)) continue;
+      if (!g.every((c) => isFront(c) || parked.includes(c))) continue;
+      if (!g.some((c) => c.cap > 0 && S.has(c.color))) continue; // a member that can STILL eat
+      const own = g.filter((c) => parked.includes(c)).length;
+      const canPark = parked.length - own <= bays - g.length;
+      const fullClear = g.every((c) => gainOf(c.color, E) >= c.cap);
+      if (canPark || fullClear) prod.push({ kind: "g", g, gain: g.reduce((s, c) => s + gainOf(c.color, E), 0) });
     }
     if (prod.length) {
       const slip = rng() > skill;
@@ -525,33 +602,105 @@ function playAverage(board, cols, rows, order, track, opts) {
         doCollect(car);
         if (car.cap === 0) removeCar(car);
         else if (!wasParked) { removeCar(car); if (parked.length < bays) parked.push(car); }
-      } else { // twin: launch both together
-        removeCar(ch.ca); removeCar(ch.cb); doCollect(ch.ca); doCollect(ch.cb);
-        if (!(ch.ca.cap === 0 && ch.cb.cap === 0)) { parked.push(ch.ca); parked.push(ch.cb); } // room guaranteed
+      } else { // group: launch ALL together, then park all if not fully cleared
+        for (const c of ch.g) removeCar(c);
+        for (const c of ch.g) doCollect(c);
+        if (!ch.g.every((c) => c.cap === 0)) for (const c of ch.g) parked.push(c); // room guaranteed
       }
       continue;
     }
-    if (!parkOne()) return { win: false, peak };
+    if (parkOne()) continue;
+    // Last resort (mirrors the real game): send a READY-but-unproductive group into
+    // the bays to unblock its columns. If even that's impossible → stuck, lose.
+    let sent = false;
+    for (const g of groups) {
+      if (g.every((c) => c.cap === 0)) continue;
+      if (!g.every((c) => isFront(c))) continue;
+      if (parked.length > bays - g.length) continue;
+      for (const c of g) removeCar(c);
+      for (const c of g) doCollect(c);
+      if (!g.every((c) => c.cap === 0)) for (const c of g) parked.push(c);
+      sent = true; break;
+    }
+    if (!sent) return { win: false, peak };
   }
   return { win: remaining === 0, peak };
 }
-function testerReport(board, cols, rows, order, track, { skill = 0.6, trials = 40, seed = 1, bays = 5, perRow = 4 } = {}) {
+function testerReport(board, cols, rows, order, track, { skill = 0.6, trials = 40, seed = 1, bays = 5, perRow = 4, layer2 = null } = {}) {
   let wins = 0, peakSum = 0;
   for (let t = 0; t < trials; t++) {
     const rng = makeRng(seed + t * 7919 + 1);
-    const r = playAverage(board, cols, rows, order, track, { skill, bays, perRow, rng });
+    const r = playAverage(board, cols, rows, order, track, { skill, bays, perRow, rng, layer2 });
     if (r.win) wins++;
     peakSum += r.peak;
   }
   return { winRate: wins / trials, avgPeak: peakSum / trials };
 }
 
+// ---- 2-LAYER slime generation ----------------------------------------------
+// Stamp a rectangular patch of 2-layer cells onto the board: cells inside the patch
+// whose top colour differs get a SINGLE bottom colour (clean look). Returns
+// {layer2, count, bottom} or null if no viable patch. Placed centrally so the patch
+// is buried (revealed mid-game). `frac` ≈ fraction of filled cells to cover.
+function makeLayer2(board, cols, rows, frac, seed) {
+  const rng = makeRng(seed);
+  const filled = []; for (let i = 0; i < board.length; i++) if (board[i] >= 0 && board[i] < 90) filled.push(i);
+  if (filled.length < 40) return null;
+  const present = new Set(); for (const i of filled) present.add(board[i]);
+  // bottom colours: bright colours ALREADY on the board (keeps the palette tight);
+  // big patches split into TWO bottom colours (left/right halves) so no single colour's
+  // cars swamp the bays — keeps group placement solvable on super levels.
+  const cand = BRIGHT_IDS.filter((id) => present.has(id));
+  const b1 = cand.length ? cand[Math.floor(rng() * cand.length)] : BRIGHT_IDS[0];
+  let b2 = b1;
+  if (cand.length > 1) { do { b2 = cand[Math.floor(rng() * cand.length)]; } while (b2 === b1); }
+  // centred square patch sized to hit ~frac of filled cells
+  const side = Math.max(4, Math.round(Math.sqrt(filled.length * frac)));
+  const twoTone = side * side > 40 && b2 !== b1;
+  const r0 = Math.floor(rows / 2 - side / 2), c0 = Math.floor(cols / 2 - side / 2);
+  const layer2 = new Array(board.length).fill(-1);
+  const counts = new Map();
+  let count = 0;
+  for (let r = r0; r < r0 + side; r++) for (let c = c0; c < c0 + side; c++) {
+    if (r < 0 || c < 0 || r >= rows || c >= cols) continue;
+    const i = r * cols + c;
+    const bottom = twoTone && c >= c0 + side / 2 ? b2 : b1; // left half b1, right half b2
+    if (board[i] >= 0 && board[i] < 90 && board[i] !== bottom) {
+      layer2[i] = bottom; count++;
+      counts.set(bottom, (counts.get(bottom) || 0) + 1);
+    }
+  }
+  return count >= 12 ? { layer2, count, counts } : null;
+}
+
+// ---- hidden "?" slime generation --------------------------------------------
+// Pick interior cells (ALL 4 neighbours are slime) to start hidden: hidden[i] = the
+// cell's real colour (board keeps the colour too — solver unaffected; hiding is a
+// perception effect for the player). ~frac of eligible cells, spread by seed.
+function makeHidden(board, cols, rows, frac, seed) {
+  const rng = makeRng(seed);
+  const hidden = new Array(board.length).fill(-1);
+  const isSlime = (i) => board[i] >= 0 && board[i] < 90;
+  const eligible = [];
+  for (let r = 1; r < rows - 1; r++) for (let c = 1; c < cols - 1; c++) {
+    const i = r * cols + c;
+    if (!isSlime(i)) continue;
+    if (isSlime(i - cols) && isSlime(i + cols) && isSlime(i - 1) && isSlime(i + 1)) eligible.push(i);
+  }
+  let count = 0;
+  for (const i of eligible) if (rng() < frac) { hidden[i] = board[i]; count++; }
+  return count >= 8 ? { hidden, count } : null;
+}
+
 // ---- the port of generateNCars ---------------------------------------------
 // Split the board's tiles into exactly N single-colour cars (>= #colours), each
 // colour's cars sharing its tiles evenly → returns the flat car list (unordered).
-function allocateCars(board, N) {
+// `extra` = additional per-colour tile counts (e.g. 2-layer bottoms) folded in so
+// capacity covers BOTH layers.
+function allocateCars(board, N, extraCounts) {
   const counts = new Map();
   for (const id of board) if (id >= 0) counts.set(id, (counts.get(id) || 0) + 1);
+  if (extraCounts) for (const [c, n] of extraCounts) counts.set(c, (counts.get(c) || 0) + n);
   const colorsPresent = [...counts.keys()].sort((a, b) => a - b);
   if (colorsPresent.length === 0) return [];
 
@@ -582,38 +731,41 @@ function generateCars(board, N, opts) {
   const { order, bias: achieved } = orderByDifficulty(carList, board, track, bias, seed);
   return { chests: order, bias: achieved };
 }
-// Extract twin index-pairs from an order's pairId stamps.
-function pairsOf(order) {
+// Extract linked-car index-groups (size ≥2 → twin/triple) from an order's pairId stamps.
+function groupsOf(order) {
   const m = new Map();
   order.forEach((c, i) => { if (c && c.pairId != null) (m.get(c.pairId) || m.set(c.pairId, []).get(c.pairId)).push(i); });
-  const out = []; for (const idxs of m.values()) if (idxs.length === 2) out.push(idxs);
+  const out = []; for (const idxs of m.values()) if (idxs.length >= 2) out.push(idxs);
   return out;
 }
-// Place `twins` xe đôi on an order (row-0/1 consecutive pairs) and stamp pairId.
-// Returns a fresh order (copied) so the caller's carList is never mutated.
-function withTwins(order, board, track, twins) {
+// Place `pairs` xe đôi + `triples` xe ba on an order (consecutive same-row cols) and
+// stamp pairId. Returns a fresh order (copied) so the caller's carList is never mutated.
+function withGroups(order, board, track, pairs, triples, layer2 = null) {
   const copy = order.map((c) => ({ ...c }));
-  if (!twins) return { order: copy, pairs: [] };
-  const pairs = pickPairs(copy, board, track, twins);
-  let pid = 0; for (const [a, b] of pairs) { pid++; copy[a].pairId = pid; copy[b].pairId = pid; }
-  return { order: copy, pairs };
+  if (!pairs && !triples) return { order: copy, groups: [] };
+  const groups = pickGroups(copy, board, track, pairs || 0, triples || 0, 4, layer2);
+  let pid = 0; for (const g of groups) { pid++; for (const i of g) copy[i].pairId = pid; }
+  return { order: copy, groups };
 }
 // Sweep burial strength → order whose average-tester win% is closest to `target`.
 // With `twins`>0 the xe đôi are placed on each candidate and the win% is measured
 // WITH the twin constraint, so difficulty is tuned accounting for them.
-function calibrateOrder(carList, board, cols, rows, track, target, { skill = 0.6, trials = 60, seed = 1, twins = 0, biases = [0, 0.08, 0.16, 0.24, 0.32, 0.4, 0.48, 0.56, 0.64, 0.72] } = {}) {
+function calibrateOrder(carList, board, cols, rows, track, target, { skill = 0.6, trials = 60, seed = 1, twins = 0, triples = 0, layer2 = null, biases = [0, 0.08, 0.16, 0.24, 0.32, 0.4, 0.48, 0.56, 0.64, 0.72] } = {}) {
   let best = null;
+  const wantGroups = (twins || 0) + (triples || 0);
   for (const b of biases) {
-    const { order, pairs } = withTwins(orderAtBias(carList, board, track, b, seed + 6), board, track, twins);
-    const ok = pairs.length ? solvablePairs(board, cols, rows, order, track, pairs) : solvable(board, cols, rows, order, track);
+    const { order, groups } = withGroups(orderAtBias(carList, board, track, b, seed + 6), board, track, twins, triples, layer2);
+    const ok = groups.length ? solvablePairs(board, cols, rows, order, track, groups, 5, 4, layer2) : solvable(board, cols, rows, order, track, 5, 4, layer2);
     if (!ok) continue;
-    const win = Math.round(testerReport(board, cols, rows, order, track, { skill, trials, seed }).winRate * 100);
-    const score = Math.abs(win - target);
+    const win = Math.round(testerReport(board, cols, rows, order, track, { skill, trials, seed, layer2 }).winRate * 100);
+    // Difficulty should come FROM the linked groups (user): a candidate that places
+    // more of the requested twins/triples beats a slightly-closer-to-target one.
+    const score = Math.max(0, wantGroups - groups.length) * 1000 + Math.abs(win - target);
     if (!best || score < best.score || (score === best.score && b < best.b)) best = { b, win, order, score };
   }
   if (!best) {
-    const { order } = withTwins(orderAtBias(carList, board, track, 0, seed + 6), board, track, twins);
-    const win = Math.round(testerReport(board, cols, rows, order, track, { skill, trials, seed }).winRate * 100);
+    const { order } = withGroups(orderAtBias(carList, board, track, 0, seed + 6), board, track, twins, triples, layer2);
+    const win = Math.round(testerReport(board, cols, rows, order, track, { skill, trials, seed, layer2 }).winRate * 100);
     best = { b: 0, win, order, score: Math.abs(win - target) };
   }
   return best;
@@ -697,12 +849,68 @@ function ensureColors(board, targetColors, seed) {
   if (!idxs.length) return b;
   const rng = makeRng(seed);
   const present = new Set(b.filter((v) => v >= 0));
-  const avail = []; for (let id = 0; id < BASE_N; id++) if (!present.has(id)) avail.push(id);
+  const avail = BRIGHT_IDS.filter((id) => !present.has(id)); // bright only — no dark colours
   let ai = 0;
   while (present.size < targetColors && ai < avail.length) {
     const nc = avail[ai++], chunk = Math.max(4, Math.round(idxs.length * 0.06));
     for (let t = 0; t < chunk; t++) b[idxs[Math.floor(rng() * idxs.length)]] = nc;
     present.add(nc);
+  }
+  return b;
+}
+// Reduce the board to at most `k` colours by repeatedly merging the least-common
+// colour into its nearest surviving neighbour (by palette RGB) — used to make a
+// level EASIER when it can't hit its target even at the fewest cars (user: "target
+// khó quá thì giảm màu"). Keeps the picture recognizable (merges look-alikes).
+function reduceColors(board, k, seed) {
+  const b = board.slice();
+  const rgbD = (a, c) => (a[0] - c[0]) ** 2 + (a[1] - c[1]) ** 2 + (a[2] - c[2]) ** 2;
+  const present = () => { const s = new Set(); for (const v of b) if (v >= 0) s.add(v); return [...s]; };
+  let cols = present();
+  while (cols.length > Math.max(1, k)) {
+    const freq = new Map(cols.map((c) => [c, 0]));
+    for (const v of b) if (v >= 0) freq.set(v, freq.get(v) + 1);
+    const victim = cols.slice().sort((a, c) => freq.get(a) - freq.get(c))[0];
+    let dst = null, bd = Infinity;
+    for (const c of cols) { if (c === victim) continue; const d = rgbD(baseRgb[victim], baseRgb[c]); if (d < bd) { bd = d; dst = c; } }
+    if (dst == null) break;
+    for (let i = 0; i < b.length; i++) if (b[i] === victim) b[i] = dst;
+    cols = present();
+  }
+  return b;
+}
+// Grow the subject outward by rings of slime in 2 mixed colours (a decorative border
+// that also gives an outer peel ring). Adds up to `layers` rings, but stops early once
+// the board fill reaches `fillTo` (0..1) if given — used to cover ≥70% of the board
+// from L3 on (user 2026-07-23). All rings share the SAME 2 colours → a clean border.
+// `inset` (default 0) leaves that many empty cells around the border so slime never
+// touches the frame (user 2026-07-24: "slime sát viền quá").
+function addOuterLayers(board, cols, rows, layers, seed, fillTo, inset = 0) {
+  let b = board.slice();
+  const rng = makeRng(seed);
+  const present = new Set(b.filter((v) => v >= 0));
+  const avail = BRIGHT_IDS.filter((id) => !present.has(id)); // bright border colours only
+  const ring = [];
+  for (let k = 0; k < 2 && avail.length; k++) ring.push(avail.splice(Math.floor(rng() * avail.length), 1)[0]);
+  if (!ring.length) ring.push(0, 3);
+  for (let layer = 0; layer < layers; layer++) {
+    if (fillTo != null && slimeCount(b) / (cols * rows) >= fillTo) break;
+    const toFill = [];
+    for (let r = inset; r < rows - inset; r++) for (let c = inset; c < cols - inset; c++) {
+      const i = r * cols + c; if (b[i] >= 0) continue;
+      if ((r > 0 && b[i - cols] >= 0) || (r < rows - 1 && b[i + cols] >= 0) ||
+          (c > 0 && b[i - 1] >= 0) || (c < cols - 1 && b[i + 1] >= 0)) toFill.push(i);
+    }
+    if (!toFill.length) break; // nothing more to grow within the inset area
+    // Colour each border cell by its RECTANGULAR ring distance from the frame — thick
+    // (3-cell) straight concentric bands aligned to the board, so the colours run in
+    // clean straight lines, not a smudged organic blob (user 2026-07-24: "màu thẳng
+    // hàng, tránh lem luốc, trộn ít").
+    for (const i of toFill) {
+      const rr = Math.floor(i / cols), cc = i % cols;
+      const d = Math.min(rr, cc, rows - 1 - rr, cols - 1 - cc) - inset;
+      b[i] = ring[Math.floor(Math.max(0, d) / 3) % ring.length];
+    }
   }
   return b;
 }
@@ -726,35 +934,103 @@ function twinsFor(n, diff) {
   if (diff !== "normal") return 2;
   return (n % 2 === 0) ? 1 : 0;
 }
-// Adjust colours (harder) / car-count (easier) + order until the average tester's
-// win-rate lands near `target`, WITH this level's xe đôi placed & modelled.
-function tuneToTarget(board0, track, target, n, diff) {
-  let board = board0.slice();
-  const seed = n * 101 + 1;
-  const twins = twinsFor(n, diff);
-  const opt = { skill: 0.6, trials: 25, seed, twins, biases: [0, 0.12, 0.24, 0.36, 0.48, 0.6, 0.72] };
-  const slime = slimeCount(board);
-  // Constraints (user 2026-07-23): slime/xe ≥ 3 (cap cars at floor(slime/3));
-  // L2-4 ≤20 xe; L2 ≤12 màu. Colour cap also kept ratio-feasible.
-  const carCap = Math.min(Math.floor(slime / 3), (n >= 2 && n <= 4) ? 20 : Infinity);
-  const colorCap = Math.min(n === 2 ? 12 : 18, Math.floor(slime / 3));
-  const carN = () => Math.min(carCap, Math.max(distinctColors(board), distinctColors(board) * 2 + 2));
-  let best = calibrateOrder(allocateCars(board, carN()), board, BOARD_SIZE, BOARD_SIZE, track, target, opt);
-  // too easy → sprinkle in more colours to raise difficulty (up to the colour cap)
-  let g = 0;
-  while (best.win > target + 8 && distinctColors(board) < colorCap && g++ < 6) {
-    board = ensureColors(board, Math.min(distinctColors(board) + 2, colorCap), seed + g * 17);
-    best = calibrateOrder(allocateCars(board, carN()), board, BOARD_SIZE, BOARD_SIZE, track, target, opt);
+// xe ba (triple, 3-car group): starts at L17; 1 on L20,25,30,45; the advanced pack
+// (L101-120) gets one on every 3rd level (user 2026-07-24).
+function triplesFor(n) {
+  if (n >= 101) return n % 3 === 0 ? 1 : 0;
+  return n >= 17 && [20, 25, 30, 45].includes(n) ? 1 : 0;
+}
+// The ADVANCED pack L101-120 is all hard/super (every 5th = super).
+function packDiff(n) {
+  if (n <= 100) return difficulty(n);
+  return n % 5 === 0 ? "superhard" : "hard";
+}
+// 2-LAYER slime coverage per level: hard/super from L35 get a hidden bottom patch
+// (~18% of the subject; super ~25%). L1-30 stay as approved (demo on L2 aside).
+function layer2FracFor(n, diff, cfg) {
+  if (cfg && cfg.layer2Frac != null) return cfg.layer2Frac;
+  if (n >= 101) return diff === "superhard" ? 0.2 : 0.15; // advanced pack: always (thinner → smoother win landscape)
+  if (n < 35 || diff === "normal") return 0;
+  return diff === "superhard" ? 0.25 : 0.18;
+}
+// hidden "?" coverage: hard/super from L35, ~10% of interior cells (super ~14%).
+function hiddenFracFor(n, diff, cfg) {
+  if (cfg && cfg.hiddenFrac != null) return cfg.hiddenFrac;
+  if (n >= 101) return diff === "superhard" ? 0.14 : 0.12; // advanced pack: always
+  if (n < 35 || diff === "normal") return 0;
+  return diff === "superhard" ? 0.14 : 0.10;
+}
+// Land the tester's win-rate near `target`, MEASURED AT THIS LEVEL'S SKILL (ov.skill).
+// Levers (user 2026-07-23): `max màu` is a colour CEILING — start there and REDUCE
+// colours while the level is still too hard to reach target ("target khó quá thì giảm
+// màu"); cars are swept within [colours .. min(maxxe, slime/3)] and the (count, order)
+// closest to target is kept. xe đôi are placed & modelled per candidate.
+function tuneToTarget(board0, track, target, n, diff, ov = {}) {
+  const seed = n * 101 + 1 + (SEED_OFF * 7919); // --seedoff K explores alternate burial orders
+  let twinsN = ov.twins != null ? ov.twins : twinsFor(n, diff);
+  const triplesN = ov.triples != null ? ov.triples : 0; // xe ba (3-car groups)
+  const skill = ov.skill != null ? ov.skill : 0.6;
+  // 2-LAYER slimes: ov.layer2Frac (0..1) covers ~that fraction of the subject with a
+  // hidden bottom colour. The tester/solver model the reveal; cars get extra capacity.
+  const L2 = ov.layer2Frac ? makeLayer2(board0, BOARD_SIZE, BOARD_SIZE, ov.layer2Frac, seed + 11) : null;
+  const l2extra = L2 ? L2.counts : null;
+  const opt = { skill, trials: 16, seed, twins: twinsN, triples: triplesN, layer2: L2 ? L2.layer2 : null, biases: [0, 0.18, 0.36, 0.54, 0.72] };
+  const slime = slimeCount(board0) + (L2 ? L2.count : 0); // bottoms add to the load
+  // Slimes-per-car (car `count`) is the real feel knob: user wants count in 1..40 but
+  // PREFERS 15..35 (ideal ≈ 25). So car count lives in [ceil(slime/40) .. floor(slime/12)]
+  // and we bias selection toward the 15-35 band (cars ∈ [slime/35 .. slime/15]) nearest
+  // the ideal ≈ slime/25. `minxe` is a hard floor that takes PRIORITY over `maxxe` (user
+  // 2026-07-23). Difficulty comes from colours + burial (not tiny cars); too-hard → drop màu.
+  const ceilColors = Math.min(ov.colors != null ? ov.colors : baseColorsFor(target), Math.floor(slime / 3));
+
+  const evalN = (board, N) => calibrateOrder(allocateCars(board, N, l2extra), board, BOARD_SIZE, BOARD_SIZE, track, target, opt);
+  const sweepCars = (board) => {
+    const lo = Math.max(distinctColors(board), ov.minCars != null ? ov.minCars : 0, Math.ceil(slime / 40)); // minxe + count≤40; minxe wins over maxxe
+    const hi = Math.max(lo, Math.min(ov.maxCars != null ? ov.maxCars : 999, Math.floor(slime / 12)));
+    const ideal = Math.max(lo, Math.min(hi, Math.round(slime / 25)));   // preferred ≈ 25 slimes/car
+    const prefLo = Math.ceil(slime / 35), prefHi = Math.floor(slime / 15); // preferred count 15-35 band
+    const cand = new Set([lo, hi, ideal, Math.max(lo, Math.min(hi, prefLo)), Math.max(lo, Math.min(hi, prefHi))]);
+    const steps = Math.min(8, hi - lo);
+    for (let s = 1; s < steps; s++) cand.add(lo + Math.round((hi - lo) * s / steps));
+    const all = [...cand].sort((a, b) => a - b).map((N) => evalN(board, N));
+    const within = all.filter((f) => Math.abs(f.win - target) <= 8);
+    if (within.length) {
+      // among on-target candidates prefer the most twins/triples placed (difficulty
+      // should come from the groups), then car counts in the 15-35 band near ~25/car.
+      const placed = (f) => groupsOf(f.order).length;
+      const maxG = Math.max(...within.map(placed));
+      const withG = within.filter((f) => placed(f) === maxG);
+      const pref = withG.filter((f) => f.order.length >= prefLo && f.order.length <= prefHi);
+      const pool = pref.length ? pref : withG;
+      return pool.reduce((a, b) => (Math.abs(b.order.length - ideal) < Math.abs(a.order.length - ideal) ? b : a));
+    }
+    return all.reduce((a, b) => (b.score < a.score ? b : a)); // closest to target (score already prefers groups)
+  };
+
+  // Start at the colour ceiling; if still too hard, drop one colour at a time.
+  let board = ensureColors(board0.slice(), ceilColors, seed + 3);
+  let best = sweepCars(board), bestBoard = board;
+  let k = distinctColors(board), guard = 0;
+  while (best.win < target - 8 && k > 2 && guard++ < 8) {
+    k--;
+    const b = reduceColors(board0.slice(), k, seed + 3);
+    const f = sweepCars(b);
+    if (Math.abs(f.win - target) < Math.abs(best.win - target)) { best = f; bestBoard = b; }
+    if (f.win >= target - 8) break;
   }
-  // too hard → hand out more cars (more launches), but never below slime/xe = 3
-  let easeN = carN(), g2 = 0;
-  while (best.win < target - 8 && easeN < carCap && g2++ < 7) {
-    easeN = Math.min(carCap, easeN + 3);
-    const b2 = calibrateOrder(allocateCars(board, easeN), board, BOARD_SIZE, BOARD_SIZE, track, target, opt);
-    if (Math.abs(b2.win - target) < Math.abs(best.win - target)) best = b2;
-    if (b2.win >= target || easeN >= carCap) break;
+  // HARD / SUPER still too EASY (colours + burial + cars can't reach the low target)?
+  // Add xe đôi — the twin constraint (launch together, park 2 adjacent bays) ratchets
+  // difficulty up. Bump one pair at a time until on target or the twin cap (user 2026-07-24).
+  const twinCap = diff === "superhard" ? 6 : 4;
+  let tg = 0;
+  while (diff !== "normal" && best.win > target + 8 && twinsN < twinCap && tg++ < 6) {
+    twinsN++;
+    opt.twins = twinsN;
+    const f = sweepCars(bestBoard);
+    if (Math.abs(f.win - target) < Math.abs(best.win - target)) best = f;
+    if (best.win <= target + 8) break;
   }
-  return { board, chests: best.order, win: best.win, bias: best.b };
+  return { board: bestBoard, chests: best.order, win: best.win, bias: best.b, layer2: L2 ? L2.layer2 : null };
 }
 
 // ---- preview PNG ------------------------------------------------------------
@@ -783,8 +1059,8 @@ if (process.argv.includes("--pairs")) {
     for (const c of L.chests) delete c.pairId; // clean any previous run
     if (k < 8) continue;
     const want = diff === "superhard" ? 2 : diff === "hard" ? 2 : (k % 2 === 0 ? 1 : 0);
-    const pairs = want > 0 ? pickPairs(L.chests, L.board, track, want) : [];
-    for (const [a, b] of pairs) { pid++; L.chests[a].pairId = pid; L.chests[b].pairId = pid; }
+    const pairs = want > 0 ? pickGroups(L.chests, L.board, track, want, triplesFor(k)) : [];
+    for (const g of pairs) { pid++; for (const i of g) L.chests[i].pairId = pid; }
     if (pairs.length) { lvls++; total += pairs.length; }
   }
   if (!DRY) { fs.writeFileSync(OUT, JSON.stringify(data, null, 2)); console.log(`✔ ${total} xe đôi (pairId) on ${lvls} levels (L8+) → ${path.relative(ROOT, OUT)}`); }
@@ -912,6 +1188,87 @@ if (process.argv.includes("--test")) {
   process.exit(0);
 }
 
+// ---- --test1 n: fast single-level grade (40 trials at the level's own skill) ------
+if (process.argv.includes("--test1")) {
+  const k = parseInt(process.argv[process.argv.indexOf("--test1") + 1], 10);
+  const data = JSON.parse(fs.readFileSync(OUT, "utf8"));
+  const L = data[k];
+  if (!L) { console.log("WIN=-1"); process.exit(0); }
+  const ci = process.argv.indexOf("--config");
+  const cfgPath = ci >= 0 && process.argv[ci + 1] && !process.argv[ci + 1].startsWith("--") ? path.join(ROOT, process.argv[ci + 1]) : null;
+  const cfgm = cfgPath ? loadConfig(cfgPath) : null;
+  const c = (cfgm && cfgm.get(k)) || {};
+  const skill = c.skill != null ? c.skill : 0.6;
+  const r = testerReport(L.board, L.cols, L.rows, L.chests, L.track || "square", { skill, trials: 40, seed: k * 101 + 1, layer2: L.layer2 || null });
+  console.log("WIN=" + Math.round(r.winRate * 100));
+  process.exit(0);
+}
+
+// ---- --report: grade CURRENT designed.json at EACH LEVEL'S OWN skill (from cfg) --
+// 40 trials/level, twin-aware. Writes report.json for downstream CSV/summary use.
+if (process.argv.includes("--report")) {
+  const data = JSON.parse(fs.readFileSync(OUT, "utf8"));
+  const ci = process.argv.indexOf("--config");
+  const cfgPath = ci >= 0 && process.argv[ci + 1] && !process.argv[ci + 1].startsWith("--") ? path.join(ROOT, process.argv[ci + 1]) : null;
+  const cfg = cfgPath ? loadConfig(cfgPath) : null;
+  const out = [];
+  console.log("#    skill  tgt→win  slime  xe màu đôi track");
+  for (const k of Object.keys(data).map(Number).sort((a, b) => a - b)) {
+    const L = data[k], track = L.track || "square";
+    const c = (cfg && cfg.get(k)) || {};
+    const skill = c.skill != null ? c.skill : 0.6;
+    const r = testerReport(L.board, L.cols, L.rows, L.chests, track, { skill, trials: 40, seed: k * 101 + 1, layer2: L.layer2 || null });
+    const win = Math.round(r.winRate * 100);
+    let slime = 0; const cs = new Set(); for (const v of L.board) if (v >= 0) { slime++; cs.add(v); }
+    const twins = new Set(L.chests.filter((x) => x.pairId != null).map((x) => x.pairId)).size;
+    out.push({ n: k, skill, target: c.target ?? null, win, slime, cars: L.chests.length, colors: cs.size, twins, track });
+    const gap = c.target != null ? win - c.target : 0;
+    const flag = c.target != null && Math.abs(gap) >= 12 ? (gap < 0 ? " 🔴" : " 🔵") : "";
+    console.log("L" + String(k).padStart(3) + "  " + String(skill).padStart(4) + "  " +
+      String(c.target ?? "  ").padStart(3) + "→" + String(win).padStart(3) + "%  " +
+      String(slime).padStart(5) + " " + String(L.chests.length).padStart(3) + " " +
+      String(cs.size).padStart(3) + " " + String(twins).padStart(3) + " " + track + flag);
+  }
+  fs.writeFileSync(path.join(PREVIEW_DIR, "report.json"), JSON.stringify(out));
+  console.log(`\n→ report.json (${out.length} levels)`);
+  process.exit(0);
+}
+
+// ---- optional per-level overrides from a config file (CSV or whitespace txt) --
+// Columns: lvl,tier,target,max màu,maxxe,xedoi,track,max slim,slime_ref,win_ref,skill.
+// "auto"/blank leaves that lever to the default logic. Use with `--config [path]`.
+//   max màu  = trần số màu (đòn bẩy độ khó; build giảm dưới mức này nếu quá khó)
+//   maxxe    = trần số xe trong khay
+//   minxe    = sàn số xe (để level không quá ít xe, trông buồn cười)
+//   max slim = trần số slime (co nhỏ chủ thể cho vừa)
+//   skill    = skill người chơi giả định cho level đó → target đo ở skill này
+function loadConfig(p) {
+  if (!fs.existsSync(p)) { console.warn("⚠ config not found:", p); return null; }
+  const num = (x) => (!x || x.toLowerCase() === "auto" || isNaN(+x)) ? null : +x;
+  const csv = p.toLowerCase().endsWith(".csv");
+  const map = new Map();
+  for (const line of fs.readFileSync(p, "utf8").split("\n")) {
+    const t = line.trim(); if (!t || t.startsWith("#")) continue;
+    const cols = csv ? t.split(",").map((s) => s.trim()) : t.split("|")[0].trim().split(/\s+/);
+    // User layout: lvl,tier,target,max màu,maxxe,minxe,xedoi,track,max slim,slime_ref,win_ref,skill
+    const [lvl, , target, maxmau, maxxe, minxe, xedoi, track, maxslim, , , skill] = cols;
+    const n = parseInt(lvl, 10); if (!n) continue; // skips the header row
+    map.set(n, { target: num(target), colors: num(maxmau), maxCars: num(maxxe), minCars: num(minxe), twins: num(xedoi), track: (track && track.toLowerCase() !== "auto") ? track : null, maxSlime: num(maxslim), skill: num(skill) });
+  }
+  console.log(`config: ${map.size} levels from ${path.relative(ROOT, p)}`);
+  return map;
+}
+const CONFIG = (() => {
+  const i = process.argv.indexOf("--config");
+  if (i < 0) return null;
+  const arg = process.argv[i + 1];
+  if (arg && !arg.startsWith("--")) return loadConfig(path.join(ROOT, arg));
+  for (const cand of ["Manythings/level-config.csv", "level-config.csv", "level-config.txt"]) {
+    if (fs.existsSync(path.join(ROOT, cand))) return loadConfig(path.join(ROOT, cand));
+  }
+  return loadConfig(path.join(ROOT, "Manythings/level-config.csv"));
+})();
+
 // ---- main -------------------------------------------------------------------
 const isImg = (f) => /\.(png|jpe?g|webp)$/i.test(f);
 // Dropped: their non-white backgrounds survived the flood (filled ~80% of the board).
@@ -945,44 +1302,90 @@ const levels = {};
 const summary = [];
 let prevEarly = 0; // running slime count so L1-10 stays strictly increasing
 
+// `--only 7,13,28` rebuilds just those levels (keeping the rest of designed.json).
+// The image pointer still advances every iteration so each level keeps its picture.
+const ONLY = (() => {
+  const i = process.argv.indexOf("--only");
+  if (i < 0 || !process.argv[i + 1]) return null;
+  const set = new Set(process.argv[i + 1].split(",").map((x) => parseInt(x, 10)).filter(Boolean));
+  const prev = JSON.parse(fs.readFileSync(OUT, "utf8"));
+  for (const k of Object.keys(prev)) levels[Number(k)] = prev[k]; // seed with existing
+  console.log(`--only: rebuilding ${[...set].sort((a, b) => a - b).join(",")} (keeping others)`);
+  return set;
+})();
+
 for (let n = 1; n <= N_LEVELS; n++) {
-  const diff = difficulty(n);
-  const target = targetWin(n, diff);
-  const vivid = diff === "normal";                 // easy → màu tươi; hard/super → natural
+  const diff = packDiff(n);
+  const cfg = (CONFIG && CONFIG.get(n)) || {};
+  const target = cfg.target != null ? cfg.target : targetWin(n, diff);
+  const vivid = true;                              // màu tươi mọi level, tránh màu tối (user 2026-07-24)
   const hard = diff !== "normal";
   const pick = hard ? hardImages[hardPtr++ % hardImages.length] : easyImages[easyPtr++ % easyImages.length];
   const { dir, file } = pick;
+  if (ONLY && !ONLY.has(n)) continue; // pointer already advanced → other levels unchanged
 
   const { data, info } = await sharp(path.join(dir, file))
     .ensureAlpha()
     .resize(512, 512, { fit: "inside", withoutEnlargement: true })
     .raw().toBuffer({ resolveWithObject: true });
 
-  const baseK = baseColorsFor(target);
-  let board;
-  if (n <= 10) {
-    const r = buildEarly(data, info.width, info.height, { mode: "game", vivid, K: baseK }, n, prevEarly);
-    if (!r) { console.warn(`L${n}: no subject found in ${file} — skipped`); continue; }
-    board = r.board; prevEarly = r.cnt;
+  const baseK = cfg.colors != null ? cfg.colors : baseColorsFor(target);
+  // Build the subject as large as possible; but if the config caps the slime count
+  // (maxSlime), shrink the subject (smaller maxSide) until it fits under the cap.
+  // No outer-ring "fill" (that made early levels look speckled) — user 2026-07-23.
+  // Cap the subject to SUBJECT_SIDE (21) so it + the border keep a 2-cell frame margin.
+  let board = null;
+  if (cfg.maxSlime != null) {
+    for (let ms = SUBJECT_SIDE; ms >= 6; ms--) {
+      const b = buildFromImage(data, info.width, info.height, { mode: "game", vivid, K: baseK, maxSide: ms });
+      if (!b) continue;
+      board = b;
+      if (slimeCount(b) <= cfg.maxSlime) break; // largest size that fits the cap
+    }
   } else {
-    board = buildFromImage(data, info.width, info.height, { mode: "game", vivid, K: baseK });
-    if (!board) { console.warn(`L${n}: no subject found in ${file} — skipped`); continue; }
+    board = buildFromImage(data, info.width, info.height, { mode: "game", vivid, K: baseK, maxSide: SUBJECT_SIDE });
   }
+  if (!board) { console.warn(`L${n}: no subject found in ${file} — skipped`); continue; }
 
-  const track = trackFor(n, diff);
-  const tuned = tuneToTarget(board, track, target, n, diff); // colours/cars/order/xe-đôi → win ≈ target
+  // From L3 on, COVER ≥70% of the board with slime: grow a decorative 2-colour border
+  // around the subject until fill hits 70% (a subject already ≥70% gets none). If the
+  // subject is small this becomes a filled square/rect — that's fine (user 2026-07-23).
+  // L1-2 stay small/clean. Added BEFORE calibration so cars cover it & win-rate counts it.
+  if (n >= 3) board = addOuterLayers(board, BOARD_SIZE, BOARD_SIZE, 25, n * 191 + 5, 0.70, FILL_INSET);
+
+  // RELIEF level (right after each hard/super — n%5==1): a super-easy breather. Cap the
+  // whole board at ~6 colours so a car almost always matches the outer layer → slimes
+  // stream in continuously & satisfyingly (target ~95%, big subject) — user 2026-07-23.
+  if (n >= 6 && n % 5 === 1 && distinctColors(board) > 6) board = reduceColors(board, 6, n * 7 + 3);
+
+  // A thin shape can still leave lots of empty margin even at full size — flag for review.
+  const fill0 = slimeCount(board) / (BOARD_SIZE * BOARD_SIZE);
+  const sparse = fill0 < 0.28 ? Math.round(fill0 * 100) : 0;
+
+  const track = cfg.track || trackFor(n, diff);
+  const tuned = tuneToTarget(board, track, target, n, diff, { colors: cfg.colors, maxCars: cfg.maxCars, minCars: cfg.minCars, twins: cfg.twins, triples: triplesFor(n), skill: cfg.skill, layer2Frac: layer2FracFor(n, diff, cfg) }); // → win ≈ target @ skill
   board = tuned.board;
   const chests = tuned.chests;
 
   levels[n] = { track, cols: BOARD_SIZE, rows: BOARD_SIZE, board, chests };
+  if (tuned.layer2) levels[n].layer2 = tuned.layer2;
+  // hidden "?" slimes: perception-only (board keeps the real colour) → stamped on the
+  // FINAL board, after tuning; interior cells only so nothing hidden is edge-exposed.
+  const hf = hiddenFracFor(n, diff, cfg);
+  if (hf > 0) {
+    const H = makeHidden(board, BOARD_SIZE, BOARD_SIZE, hf, n * 977 + 13);
+    if (H) levels[n].hidden = H.hidden;
+  }
 
-  const pr = pairsOf(chests);
-  const solved = pr.length ? solvablePairs(board, BOARD_SIZE, BOARD_SIZE, chests, track, pr) : solvable(board, BOARD_SIZE, BOARD_SIZE, chests, track);
+  const pr = groupsOf(chests);
+  const solved = pr.length ? solvablePairs(board, BOARD_SIZE, BOARD_SIZE, chests, track, pr, 5, 4, tuned.layer2) : solvable(board, BOARD_SIZE, BOARD_SIZE, chests, track, 5, 4, tuned.layer2);
   if (!solved) console.warn(`⚠ L${n}: perfect-solver could not clear it`);
   await boardToPng(board, path.join(PREVIEW_DIR, `L${String(n).padStart(2, "0")}.png`));
-  summary.push({ n, diff, target, win: tuned.win, colors: distinctColors(board), slimes: slimeCount(board), cars: chests.length, track, file, solved });
+  const twinsN = new Set(chests.filter((c) => c.pairId != null).map((c) => c.pairId)).size;
+  summary.push({ n, diff, target, win: tuned.win, skill: cfg.skill != null ? cfg.skill : 0.6, colors: distinctColors(board), slimes: slimeCount(board), cars: chests.length, twins: twinsN, track, file, solved, sparse });
   if (n % 10 === 0) console.log(`  …built L${n} (${summary.filter((s) => s.solved).length}/${summary.length} solvable so far)`);
 }
+if (!DRY) fs.writeFileSync(path.join(PREVIEW_DIR, "summary.json"), JSON.stringify(summary));
 
 // ---- write designed.json ----------------------------------------------------
 if (!DRY) {
@@ -1011,4 +1414,7 @@ for (const s of summary) {
 }
 const solvedCount = summary.filter((s) => s.solved).length;
 console.log(`\nsolvable (perfect): ${solvedCount}/${summary.length}`);
+const sparseLv = summary.filter((s) => s.sparse);
+console.log(`\nLEVEL CÒN TRỐNG (hình mỏng, đã to hết cỡ — ${sparseLv.length} level):`);
+console.log(sparseLv.map((s) => `L${s.n}(${s.sparse}%)`).join("  ") || "  (none — mọi board ≥28%)");
 console.log(`previews → ${path.relative(ROOT, PREVIEW_DIR)}/L01.png … L${N_LEVELS}.png`);

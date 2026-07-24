@@ -1,7 +1,29 @@
 import Phaser from "phaser";
 import { COLORS, TEXT_LIGHT, shade } from "../game/palette";
-import { makeLevel, type Chest, type Level, type TrackKind } from "../game/level";
+import {
+  makeLevel,
+  HARD_ROCK,
+  isObstacle,
+  isBigObstacle,
+  obstacleKind,
+  softHp,
+  isRemovable,
+  type Chest,
+  type Level,
+  type TrackKind,
+} from "../game/level";
 import { Audio } from "../game/audio";
+import {
+  awardClovers,
+  isEventUnlocked,
+  isEventComplete,
+  cloversForWin,
+  rewardLabel,
+  CLOVER_ICON,
+  EVENT_NAME,
+  EVENT_UNLOCK_LEVEL,
+  type EventReward,
+} from "../game/cloverEvent";
 
 // Logical design resolution (portrait phone). Width is fixed; height flexes to
 // the device's real aspect ratio so the game fills the screen top-to-bottom
@@ -36,7 +58,8 @@ interface ChestView {
   inFlight: number; // critters dispatched to this car but not yet aboard (gates over-collecting)
   left?: boolean; // car has driven off (guard against double-finish)
   waiting?: boolean; // parked at route's end, waiting for its last runners → they rush in
-  twin?: ChestView; // twin car ("xe đôi"): always launches / parks / leaves with its partner
+  group?: ChestView[]; // linked car group (2=twin, 3=triple, …): always launches / drives / parks / leaves together, in this order. Undefined = solo.
+  launchAt?: number; // don't spawn onto the track before this time (lets the launch hop play)
 }
 
 // A chest currently travelling on the Line.
@@ -49,6 +72,8 @@ interface ActiveChest {
   heading?: number; // smoothed travel angle (rad) — lerped so corners look fluid
   approaching?: boolean; // fresh from the queue: drive faster until the first pickup
   parkPending?: boolean; // route finished; holding still until its runners board, then park
+  finishing?: boolean; // route finished but still driving a bit while last runners board
+  entering?: boolean; // gliding from its bay/lineup onto the track entrance (don't drive yet)
 }
 
 // A collected critter running (with shuffling legs) to board its car.
@@ -73,15 +98,24 @@ const SLOT_SIZE = 54; // waiting bay size (bumped up so the parked car sits comf
 const CAR_SIZE = 55;
 const TRACK_STEP = 16; // px between adjacent track nodes (uniform spacing)
 const MAX_ON_TRACK = 5; // hard cap on cars travelling the ray at the same time
-const SPEED = 10; // track nodes per second (car travel speed — slower = more pickups per lap)
+// AUTO-DRIVE (user 2026-07-24): cars self-manage so the player taps far less.
+//  1) a car that finishes its lap KEEPS circling while it can still collect more of
+//     its colour; it only retires to a waiting bay once nothing is left to grab.
+//  2) a parked car auto-hops back onto the ray when there's collectable work for its
+//     colour and no other car of that colour is already handling it (track cap still 5).
+// Set to false to ROLL BACK to the old "park at end of every lap, tap to relaunch".
+const AUTO_CIRCLE = true;
+const SPEED = 13; // track nodes per second (car travel speed — +30%, user 2026-07-23)
 const MIN_GAP = 5; // min spacing between cars, in nodes (bigger cars need more room)
+const TWIN_SPAWN_GAP = 5; // nodes between a twin pair on the ray (snug but the rope still shows)
+const TWIN_INTRO_LEVEL = 8; // the ONE level that introduces twin cars (skip if you're past it)
 const BELT_SPEED = 6; // Line belt cleats: nodes per second
-const SHOT_COOLDOWN = 180; // ms: min gap between a car picking up two critters (faster pickup)
+const SHOT_COOLDOWN = 80; // ms between pickups — fast, even "electric" munch stream (user 2026-07-23)
 // Critter "run to the car" animation: sets off, accelerates to catch the moving
 // car. RUN_MAX must comfortably exceed car speed (SPEED * TRACK_STEP px/s).
-const RUN_START = 160;
-const RUN_ACCEL = 560;
-const RUN_MAX = 460;
+const RUN_START = 220;
+const RUN_ACCEL = 850;
+const RUN_MAX = 700;
 // Direction the car sprite art faces, in radians (0 = right/East). Tune if the
 // car points the wrong way as it drives: right=0, up=-PI/2, left=PI, down=PI/2.
 const CAR_ART_FACING = Math.PI / 2; // car art faces UP (face at top); +90° so the face leads travel
@@ -115,17 +149,20 @@ const BOOSTERS: BoosterDef[] = [
     desc: "Instantly send out ANY car from the queue — skip the front-only rule.",
   },
   {
-    key: "refresh", img: "booster-refresh", label: "Shuffle", cost: 1000, unlock: 16,
+    key: "refresh", img: "booster-refresh", label: "Shuffle", cost: 600, unlock: 16,
     title: "New Booster: Shuffle!",
     desc: "Re-rolls the colors of the queued cars, bringing up a color you need.",
   },
   {
-    key: "magnet", img: "booster-magnet", label: "Magnet", cost: 2000, unlock: 21,
+    key: "magnet", img: "booster-magnet", label: "Magnet", cost: 600, unlock: 21,
     title: "New Booster: Magnet!",
-    desc: "Tap a slime and a VIP car reels in every slime of that color, ignoring blockers.",
+    desc: "Tap a slime and a VIP car reels in the whole connected cluster of that color.",
   },
 ];
 const FREE_GIFT = 3; // free copies granted the first time you reach a booster's unlock level
+
+// Textures for obstacle tiles + special cars; placeholder-drawn until real PNGs exist.
+const OBSTACLE_ART_KEYS = ["rock-hard", "rock-soft", "rock-soft-cracked", "wood", "car-hammer", "car-wood"];
 
 export class GameScene extends Phaser.Scene {
   private level!: Level;
@@ -138,6 +175,9 @@ export class GameScene extends Phaser.Scene {
   // keys[r*cols+c] = the key display object, or null once collected
   private keys: (Phaser.GameObjects.Container | null)[] = [];
   private keysRemaining = 0;
+  // Cells whose slime is still a hidden "?" (real colour unknown to the player, in
+  // level.hidden). Untargetable until a 4-neighbour opens, then revealed.
+  private hiddenSet = new Set<number>();
 
   private track: TrackNode[] = [];
   private startIndex = 0;
@@ -151,14 +191,19 @@ export class GameScene extends Phaser.Scene {
   private invGapX = 30;
   private invGapY = 16;
   private invVisRows = 2; // inventory rows shown before the mask clips (flexes to fit ≤40%)
+  private invPeek = 0; // px of the next (partly-hidden) row the mask reveals
   private invMask?: Phaser.Display.Masks.GeometryMask;
   private invMaskG?: Phaser.GameObjects.Graphics;
   private slots: (ChestView | null)[] = [];
+  private audioCtx?: AudioContext; // lazily created for synthesized SFX (pop)
   private slotXs: number[] = [];
   private slotY = 0;
   private slotCount = SLOT_COUNT; // grows when the "Add" booster is used
   private slotTiles: Phaser.GameObjects.Image[] = []; // the bay sprites (re-laid on Add)
+  private slotWarnActive = false; // waiting bays all full → flashing a warning
+  private slotWarnG: Phaser.GameObjects.GameObject[] = []; // the pulsing warning rings
   private handMode = false; // "Hand" booster armed: next tap picks a queued car
+  private handMarks: Phaser.GameObjects.GameObject[] = []; // rings recommending back-row cars
   private magnetMode = false; // "Magnet" booster armed: next tap picks a slime colour
   private boosterCounts: Record<string, number> = {}; // owned count per booster key
   private boostBar?: Phaser.GameObjects.Container; // holds the booster buttons (rebuilt on change)
@@ -179,20 +224,29 @@ export class GameScene extends Phaser.Scene {
   // Level-1 tutorial: step 1 = tap a queued car; step 2 = tap the car that parked.
   private tutStep = 0;
   private tutObjs: Phaser.GameObjects.GameObject[] = [];
+  private tutPaused = false; // a tutorial is up → freeze the game until the player acts
+  private tutHand?: Phaser.GameObjects.Text; // the bobbing 👆 (re-animated on a mis-tap)
+  private tutHandY = 0; // the hand's resting Y (bob baseline)
+  private tutBooster?: { list: BoosterDef[]; idx: number; key: string }; // active booster tutorial
 
   private signalCount?: Phaser.GameObjects.Text; // "N/5" on the start-signal's green light
   private signalPost?: Phaser.GameObjects.Container; // the whole start-signal (bounced when full)
-  private twinPairs: [ChestView, ChestView][] = []; // linked "xe đôi" pairs
+  private carGroups: ChestView[][] = []; // linked car groups (2=twin, 3=triple, …)
   private twinLinkG?: Phaser.GameObjects.Graphics; // the holding-hands link, redrawn each frame
 
   private won = false;
   private lost = false; // waiting queue overflowed → game over
+  // Lucky Clover: true once the player has lost/replayed the CURRENT level attempt,
+  // so a later win counts as 1 rock (not a clean 2-rock First-Try win). Reset only
+  // on a fresh entry from the map (create), NOT on the in-place Replay.
+  private failedThisAttempt = false;
 
   private gold = 0; // player's currency (persists across levels + reloads)
   private goldText?: Phaser.GameObjects.Text;
 
   private startAt?: number; // level chosen on the picker (via scene.start("game", {level}))
   private missingSlime = new Set<number>(); // color ids whose slime-*.png is absent → drawn procedurally
+  private missingArt = new Set<string>(); // obstacle / special-car texture keys with no PNG → placeholder
 
   constructor() {
     super("game");
@@ -215,14 +269,21 @@ export class GameScene extends Phaser.Scene {
     this.load.image("road-corner", "art/road-corner.png");
     this.load.image("slot", "art/ocho.png"); // grass-framed dirt parking bay (waiting slot)
     this.load.image("start-signal", "art/start-signal.png"); // start marker at the car spawn
+    this.load.image("victory", "art/victory.png"); // win-screen hero art
+    this.load.image("out-of-space", "art/outofspace.png"); // queue-full (lose) hero art
     this.load.image("car-vip", "art/car-vip.png"); // golden/purple VIP car for the Magnet booster
     for (const b of ["add", "hand", "refresh", "magnet"]) {
       this.load.image(`booster-${b}`, `art/booster-${b}.png`);
     }
+    // Obstacle tiles + the special cars. Any of these with no PNG yet falls back to
+    // a procedurally-drawn placeholder (detected in create(), see makePlaceholderTexture),
+    // so obstacle levels are fully playable before the real art is dropped in.
+    for (const k of OBSTACLE_ART_KEYS) this.load.image(k, `art/${k}.png`);
     // A colour whose slime-*.png doesn't exist yet (e.g. the expanded palette 11-18)
     // is drawn procedurally in create() so its tiles still render.
     this.load.on("loaderror", (file: Phaser.Loader.File) => {
       if (file.key.startsWith("slime-")) this.missingSlime.add(parseInt(file.key.slice(6), 10));
+      else this.missingArt.add(file.key);
     });
     for (let i = 0; i < COLORS.length; i++) {
       this.load.image(`slime-${i}`, `art/slime-${i}.png`);
@@ -237,18 +298,42 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.setZoom(dpr);
     this.cameras.main.centerOn(GAME_W / 2, GAME_H / 2);
     this.cameras.main.setBackgroundColor(0xbfe3a0);
-    this.gold = this.loadGold(); // starts at 0
-    if (this.gold >= 1_000_000) {
-      this.gold = 0; // clear the old dev top-up so the booster economy is real
-      this.saveGold();
+    this.gold = this.loadGold();
+    // One-time wallet reset: everyone starts from a clean 0 (wipes leftover dev/test
+    // gold once). After this, wins accumulate normally and the balance persists.
+    try {
+      if (localStorage.getItem("pf_gold_reset") !== "1") {
+        this.gold = 0;
+        this.saveGold();
+        localStorage.setItem("pf_gold_reset", "1");
+      }
+    } catch {
+      /* storage unavailable — just run with the in-memory balance */
     }
     this.boosterCounts = this.loadBoosterCounts();
     // Draw a placeholder slime for any colour that has no slime art yet (palette 11-18).
     for (const i of this.missingSlime) this.makeSlimeTexture(i);
+    // Placeholder art for obstacle / special-car textures. NOTE: Vite's dev server
+    // returns 200 (index.html) for a missing PNG, so `loaderror` is unreliable —
+    // instead detect a missing/broken texture directly and draw a placeholder.
+    for (const k of OBSTACLE_ART_KEYS) {
+      const tex = this.textures.get(k);
+      const src =
+        tex && tex.key !== "__MISSING"
+          ? (tex.getSourceImage() as HTMLImageElement | HTMLCanvasElement | null)
+          : null;
+      const valid = !!src && src.width > 4 && src.height > 4;
+      if (!valid) {
+        this.missingArt.add(k);
+        this.makePlaceholderTexture(k);
+      }
+    }
     // Auto-trim each car sprite's transparent padding → consistent on-screen size
     // regardless of how the art is exported (and rotation stays centred).
     for (let i = 0; i < COLORS.length; i++) this.trimTexture(`car-${i}`);
     this.trimTexture("car-vip");
+    this.trimTexture("car-hammer");
+    this.trimTexture("car-wood");
     this.trimTexture("start-signal");
     // Keep the audio context unlocked (SFX only — no background music) in case the
     // game was opened directly without a prior gesture.
@@ -258,6 +343,7 @@ export class GameScene extends Phaser.Scene {
     // Level to start: picker choice > ?level=N (dev) > level 1.
     const q = parseInt(new URLSearchParams(location.search).get("level") ?? "", 10);
     const fromUrl = Number.isFinite(q) && q > 0 ? q : undefined;
+    this.failedThisAttempt = false; // fresh entry from the map → a clean First-Try win is possible
     this.startLevel(this.startAt ?? fromUrl ?? 1);
   }
 
@@ -276,7 +362,10 @@ export class GameScene extends Phaser.Scene {
     this.slotCount = SLOT_COUNT;
     this.slots = new Array(this.slotCount).fill(null);
     this.slotTiles = [];
+    this.slotWarnActive = false; // children.removeAll() already destroyed old rings
+    this.slotWarnG = [];
     this.handMode = false;
+    this.handMarks = [];
     this.magnetMode = false;
     this.keys = [];
     this.track = [];
@@ -285,13 +374,27 @@ export class GameScene extends Phaser.Scene {
     this.lost = false;
     this.tutObjs = [];
     this.tutStep = 0;
-    this.twinPairs = [];
+    this.tutPaused = false;
+    this.tutHand = undefined;
+    this.tutBooster = undefined;
+    this.carGroups = [];
 
     this.buildBackground();
-    this.twinLinkG = this.add.graphics().setDepth(-1); // twin "hands" link (above road, below cars)
+    // Twin "hands" link. Sits just BELOW the cars (DEPTH_RUNNER+5) but ABOVE every
+    // board element — slimes, tiles, parking slots (all <= DEPTH_RUNNER+1). At the
+    // old depth of -1 the rope hid behind anything it crossed (board centre when the
+    // pair rode the top edge, or the queue slots when the twins sat in different rows).
+    this.twinLinkG = this.add.graphics().setDepth(DEPTH_RUNNER + 4);
 
     this.level = makeLevel(levelNum);
-    this.keysRemaining = this.level.board.filter((v) => v >= 0).length;
+    // Win when all REMOVABLE cells are gone (slimes + wood + soft rock). Hard rocks
+    // stay forever and are not counted. A 2-layer cell counts TWICE (top + hidden bottom).
+    this.keysRemaining =
+      this.level.board.filter((v) => isRemovable(v)).length +
+      (this.level.layer2 ? this.level.layer2.filter((v) => v >= 0).length : 0);
+    // "?" slimes start hidden (scene restart safe — rebuilt from the level data).
+    this.hiddenSet.clear();
+    if (this.level.hidden) this.level.hidden.forEach((v, i) => { if (v >= 0) this.hiddenSet.add(i); });
 
     // Top HUD (like the real Pixel Flow): settings (left) · level pill (center) ·
     // gold (right).
@@ -302,9 +405,9 @@ export class GameScene extends Phaser.Scene {
 
     const hudH = 58; // top HUD strip
     const gTop = 10; // gap below the HUD
-    const gBoard = 42; // breathing room between the board and the waiting slots
+    const gBoard = 20; // breathing room between the board and the waiting slots (small → board grows)
     const gSlots = 18;
-    const gInv = 18;
+    const gInv = 10; // small gap — the freed space goes into the row-3 peek, not empty air
     const boostH = 78;
     const margin = 6;
 
@@ -312,7 +415,9 @@ export class GameScene extends Phaser.Scene {
     // screen height — the board (zone 1) takes everything else. If the cap is tight,
     // the inventory shows fewer rows rather than shrinking the cars.
     const rowStep = chest + this.invGapY;
-    const peek = Math.round(chest * 0.45);
+    // Reveal most of the next row (was 0.45) so row 3 is clearly visible, not a sliver.
+    const peek = Math.round(chest * 0.8);
+    this.invPeek = peek; // mask uses the same value so the clip matches the reserved space
     const regionH = (rows: number) => (rows - 1) * rowStep + chest + peek + 8;
     const bottomFixed = SLOT_SIZE + gSlots + gInv + boostH;
     const bottomMax = Math.round(GAME_H * 0.4);
@@ -325,18 +430,20 @@ export class GameScene extends Phaser.Scene {
     if (bottomFixed + invH > bottomMax) invH = Math.max(chest + peek + 8, bottomMax - bottomFixed);
     const bottomH = bottomFixed + invH; // ≤ 40% of GAME_H
 
-    // Board absorbs the remaining height between the HUD and the bottom cluster.
+    // Board absorbs ALL the remaining height between the HUD and the bottom cluster
+    // (no artificial cap) so the ring road grows as large as the screen allows and the
+    // slimes scale up with it. The square is still bounded to GAME_W in computeMetrics.
     const topFixed = hudH + gTop + gBoard;
     let boardBudget = GAME_H - topFixed - bottomH - 2 * margin;
-    boardBudget = Math.round(Math.min(Math.max(boardBudget, 220), GAME_H * 0.56));
+    boardBudget = Math.round(Math.max(boardBudget, 220));
     const m = this.computeMetrics(boardBudget);
 
-    // Board sits just under the HUD; the bottom cluster is anchored to the screen
-    // bottom (controls within thumb reach). Any slack falls between the two.
+    // Board sits just under the HUD; the bottom cluster is ALWAYS pinned to the screen
+    // bottom (controls within thumb reach). Any slack falls between board and cluster.
     const boardTop = hudH + gTop;
     this.buildBoard(boardTop, m); // zone 1
 
-    let by = Math.max(boardTop + m.frameH + gBoard, GAME_H - margin - bottomH);
+    let by = GAME_H - margin - bottomH;
     this.buildSlots(by); // zone 2 (waiting slots)
     by += SLOT_SIZE + gSlots;
 
@@ -349,6 +456,7 @@ export class GameScene extends Phaser.Scene {
     this.checkBoosterUnlocks(levelNum);
 
     if (levelNum === 1) this.startTutorial(); // gentle intro guidance
+    else this.maybeShowTwinIntro(); // first level with a twin pair → explain twin cars
   }
 
   // ---- Level-1 tutorial ----------------------------------------------
@@ -359,19 +467,133 @@ export class GameScene extends Phaser.Scene {
     this.tutStep = 1;
     const front = this.invColumns.find((col) => col.length > 0)?.[0];
     if (!front) return;
-    this.showTutHint(front.container.x, front.container.y, "Tap the car to send it off!");
+    this.showTutHint(front.container.x, front.container.y, "Tap the car to\nsend it out!", this.chestSize * 0.95);
   }
 
-  private showTutHint(x: number, y: number, msg: string) {
+  // ---- Twin-car intro (only on its designated level) -----------------
+  private maybeShowTwinIntro() {
+    // Only introduce twin cars AT their intro level — never on later twin levels you
+    // reached by skipping ahead (e.g. testing straight to 11/12, already past level 8).
+    if (this.levelNum !== TWIN_INTRO_LEVEL) return;
+    if (this.carGroups.length === 0) return;
+    let shown = false;
+    try {
+      shown = localStorage.getItem("pf_twin_intro") === "1";
+    } catch {
+      /* storage unavailable */
+    }
+    if (shown) return;
+    try {
+      localStorage.setItem("pf_twin_intro", "1");
+    } catch {
+      /* storage unavailable */
+    }
+    this.showTwinIntroModal();
+  }
+
+  private showTwinIntroModal() {
+    this.tutPaused = true; // freeze behind the modal
+    const D = 400;
+    const pw = 330;
+    const ph = 296;
+    const x0 = GAME_W / 2 - pw / 2;
+    const y0 = GAME_H / 2 - ph / 2;
+    const dim = this.add
+      .rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0x000000, 0.6)
+      .setDepth(D)
+      .setInteractive();
+    const panel = this.add.graphics().setDepth(D + 1);
+    panel.fillStyle(0xf7edd0, 1);
+    panel.fillRoundedRect(x0, y0, pw, ph, 20);
+    panel.lineStyle(4, 0x8a5a12, 1);
+    panel.strokeRoundedRect(x0, y0, pw, ph, 20);
+    const icon = this.add
+      .text(GAME_W / 2, y0 + 62, "🚗🤝🚙", { fontSize: "38px" })
+      .setOrigin(0.5)
+      .setDepth(D + 2);
+    const title = this.add
+      .text(GAME_W / 2, y0 + 118, "Twin Cars!", {
+        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "22px", color: "#6a4a12",
+      })
+      .setOrigin(0.5)
+      .setDepth(D + 2);
+    const desc = this.add
+      .text(GAME_W / 2, y0 + 172, "These two are best buddies — they set off, park, and leave TOGETHER, always side by side. Tap one and BOTH roll out!", {
+        fontFamily: "Arial, sans-serif", fontSize: "14px", color: "#6a4a12", align: "center",
+        wordWrap: { width: pw - 44 },
+      })
+      .setOrigin(0.5)
+      .setDepth(D + 2);
+    const ok = this.add
+      .text(GAME_W / 2, y0 + ph - 34, "GOT IT!", {
+        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "16px", color: "#ffffff",
+        backgroundColor: "#3a8a3a", padding: { x: 26, y: 8 },
+      })
+      .setOrigin(0.5)
+      .setDepth(D + 2)
+      .setInteractive({ useHandCursor: true });
+    const kill = () => {
+      [dim, panel, icon, title, desc, ok].forEach((o) => o.destroy());
+      this.tutPaused = false;
+      this.spotlightTwinPair(); // then guide the player to launch them
+    };
+    ok.on("pointerdown", kill);
+    dim.on("pointerdown", kill);
+  }
+
+  // After the intro modal, spotlight the linked group in the lineup so the player
+  // sends them out — the game stays frozen until they do (handled in launchFromInventory).
+  private spotlightTwinPair() {
+    const group = this.carGroups[0];
+    if (!group) return;
+    const pos = group.map((m) => this.findInInventory(m));
+    if (pos.some((p) => !p || p.r !== 0)) return; // only guide when the whole group is at the front
+    const xs = group.map((m) => m.container.x);
+    const ys = group.map((m) => m.container.y);
+    const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+    const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+    const radius = (Math.max(...xs) - Math.min(...xs)) / 2 + this.chestSize * 0.78;
+    this.tutStep = 8; // group-launch step
+    this.showTutHint(cx, cy, "Tap to send the\nlinked cars out together!", radius);
+  }
+
+  // Spotlight a spot on screen: freeze the game, dim everything AROUND a clear
+  // circular "hole" (so only the target stays lit & tappable), and bob a hand +
+  // label over it. The game resumes when clearTutHint() runs (the player acted).
+  private showTutHint(x: number, y: number, msg: string, radius = 40, labelAbove = true) {
     this.clearTutHint();
-    const D = 260;
-    const ring = this.add.circle(x, y, 32).setStrokeStyle(4, 0xffe14a, 1).setDepth(D);
+    this.tutPaused = true;
+    const D = 250;
+    // Four dark "mat" rectangles frame the clear spotlight box — leaving the target
+    // uncovered so its own tap still works, while every click outside is swallowed.
+    const r = radius;
+    const bx = Phaser.Math.Clamp(x - r, 0, GAME_W);
+    const byT = Phaser.Math.Clamp(y - r, 0, GAME_H);
+    const bw = Math.min(x + r, GAME_W) - bx;
+    const bh = Math.min(y + r, GAME_H) - byT;
+    const mat = (mx: number, my: number, mw: number, mh: number) =>
+      this.add
+        .rectangle(mx, my, mw, mh, 0x000000, 0.62)
+        .setOrigin(0, 0)
+        .setDepth(D)
+        .setInteractive(); // swallow taps outside the spotlight
+    const mats = [
+      mat(0, 0, GAME_W, byT), // above
+      mat(0, byT + bh, GAME_W, GAME_H - (byT + bh)), // below
+      mat(0, byT, bx, bh), // left
+      mat(bx + bw, byT, GAME_W - (bx + bw), bh), // right
+    ];
+    // tapping the dark area nudges the hand so the player looks at the target
+    for (const m of mats) m.on("pointerdown", () => this.nudgeTutHand());
+
+    const ring = this.add.circle(x, y, r - 6).setStrokeStyle(4, 0xffe14a, 1).setDepth(D + 2);
     const hand = this.add
       .text(x + 20, y + 18, "👆", { fontSize: "36px" })
       .setOrigin(0.5)
-      .setDepth(D + 1);
+      .setDepth(D + 3);
+    const ly = labelAbove ? y - (r + 24) : y + (r + 24);
     const label = this.add
-      .text(x, y - 52, msg, {
+      .text(x, ly, msg, {
         fontFamily: "Arial, sans-serif",
         fontStyle: "bold",
         fontSize: "15px",
@@ -381,17 +603,42 @@ export class GameScene extends Phaser.Scene {
         align: "center",
       })
       .setOrigin(0.5)
-      .setDepth(D + 1);
-    this.tweens.add({ targets: ring, scale: 1.4, alpha: 0.35, duration: 700, yoyo: true, repeat: -1 });
+      .setDepth(D + 3);
+    this.tweens.add({ targets: ring, scale: 1.25, alpha: 0.4, duration: 700, yoyo: true, repeat: -1 });
+    this.tutHand = hand;
+    this.tutHandY = hand.y;
     this.tweens.add({
       targets: hand,
-      y: y + 30,
+      y: hand.y + 12,
       duration: 560,
       yoyo: true,
       repeat: -1,
       ease: "Sine.inOut",
     });
-    this.tutObjs = [ring, hand, label];
+    this.tutObjs = [...mats, ring, hand, label];
+  }
+
+  // A quick pop of the guiding hand when the player taps the dimmed area by mistake.
+  private nudgeTutHand() {
+    if (!this.tutHand) return;
+    this.tweens.killTweensOf(this.tutHand);
+    this.tweens.add({
+      targets: this.tutHand,
+      scale: { from: 1.5, to: 1 },
+      duration: 260,
+      ease: "Back.out",
+      onComplete: () => {
+        if (!this.tutHand) return;
+        this.tweens.add({
+          targets: this.tutHand,
+          y: this.tutHandY + 12,
+          duration: 560,
+          yoyo: true,
+          repeat: -1,
+          ease: "Sine.inOut",
+        });
+      },
+    });
   }
 
   private clearTutHint() {
@@ -400,6 +647,8 @@ export class GameScene extends Phaser.Scene {
       o.destroy();
     }
     this.tutObjs = [];
+    this.tutHand = undefined;
+    this.tutPaused = false; // unfreeze — the guided action is done
   }
 
   // Board size depends on the grid AND the height left over for it (passed in),
@@ -434,7 +683,7 @@ export class GameScene extends Phaser.Scene {
     const cy = topY + m.frameH / 2;
 
     const pad = 16; // outer margin from the frame edge to the road-centre box
-    const gap = 8; // grass gap between a road and the grid (small → board fills more)
+    const gap = 4; // grass gap between a road and the grid (small → board fills more)
     const roadW = Math.round(CAR_SIZE * 0.8); // slimmer road so the board is bigger
     this.beltMarks = undefined;
     this.trackKind = this.level.track ?? "square";
@@ -470,9 +719,9 @@ export class GameScene extends Phaser.Scene {
       // still leaving a clear run gap down to the road.
       this.gridY = gridTop + Math.max(0, bandH - gridH) * 0.5;
     } else if (kind === "square" || kind === "rect") {
-      // Largest CENTRED SQUARE loop that fits, sitting near the outer edge but
-      // leaving a small margin so the whole road (outline included) stays visible.
-      const edge = 12;
+      // Largest CENTRED SQUARE loop that fits, hugging the screen edges (tiny margin
+      // so the road spans nearly the full width → biggest enclosed area).
+      const edge = 4;
       const side = Math.min(GAME_W - roadW - 2 * edge, m.frameH - roadW - 2 * edge);
       this.beltLeft = cx - side / 2;
       this.beltRight = cx + side / 2;
@@ -483,13 +732,14 @@ export class GameScene extends Phaser.Scene {
       // so every level renders slimes at the SAME size. A 25×25 board fills the ring;
       // a smaller board just occupies less of it, centred, at the same slime size.
       const STD = 25;
-      const cb = Math.round(this.roadRadius * 0.3);
+      const cb = Math.round(this.roadRadius * 0.1);
       const availW = this.beltRight - this.beltLeft - roadW - 2 * gap - cb;
       const availH = this.beltBottom - this.beltTop - roadW - 2 * gap - cb;
       this.cell = Math.max(6, Math.floor(Math.min(availW, availH) / STD));
-      // small fill bump, capped by the road boundary (cb removed) so tiles never reach the road
+      // fill bump so the slimes fill more of the enlarged interior, capped by the road
+      // boundary (cb removed) so tiles never actually reach the road.
       const capCell = Math.floor((this.beltRight - this.beltLeft - roadW - 2 * gap) / STD);
-      this.cell = Math.min(Math.round(this.cell * 1.05), capCell);
+      this.cell = Math.min(Math.round(this.cell * 1.15), capCell);
       gridW = cols * this.cell;
       gridH = rows * this.cell;
       this.gridX = cx - gridW / 2;
@@ -524,18 +774,38 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    this.buildGroundMat(cols, rows);
+    // this.buildGroundMat(cols, rows); // dropped the brown/sand mat under the slimes for now
 
     const keySize = this.cell;
+    // Index-addressed (not push) so a 2×2 BIG obstacle can claim its 4 cells.
+    this.keys = new Array(rows * cols).fill(null);
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
-        const id = board[r * cols + c];
-        if (id < 0) {
-          this.keys.push(null);
-          continue;
-        }
+        const idx = r * cols + c;
+        if (this.keys[idx]) continue; // already claimed by a big obstacle to the up-left
+        const id = board[idx];
+        if (id < 0) continue;
         const { x, y } = this.cellCenter(r, c);
-        this.keys.push(this.makeKey(id, x, y, keySize));
+        if (isBigObstacle(id) && r + 1 < rows && c + 1 < cols) {
+          // 2×2: the same code fills all four cells (for line-of-sight + matching);
+          // one big sprite centred on the block; every cell points at the same object.
+          const cells = [idx, idx + 1, idx + cols, idx + cols + 1];
+          for (const ci of cells) board[ci] = id;
+          const cxp = this.gridX + (c + 1) * this.cell; // centre between the two columns
+          const cyp = this.gridY + (r + 1) * this.cell; // centre between the two rows
+          const obj = this.makeObstacle(id, cxp, cyp, this.cell * 2, cells);
+          for (const ci of cells) this.keys[ci] = obj;
+        } else if (isObstacle(id)) {
+          this.keys[idx] = this.makeObstacle(id, x, y, keySize, [idx]);
+        } else if (this.hiddenSet.has(idx)) {
+          // hidden "?" slime — grey tile with a question mark until revealed
+          this.keys[idx] = this.makeHiddenKey(x, y, keySize);
+        } else {
+          this.keys[idx] = this.makeKey(id, x, y, keySize);
+          // 2-layer slime: mark it with a small corner fold so the player sees it hides
+          // a second colour underneath (revealed when the top is collected).
+          if (this.level.layer2 && this.level.layer2[idx] >= 0) this.markTwoLayer(this.keys[idx]!, keySize);
+        }
       }
     }
 
@@ -597,6 +867,7 @@ export class GameScene extends Phaser.Scene {
 
   // A smooth sandy/earth patch under the grid so the slimes stand on a defined clearing
   // (instead of blending into the grass) — a soft rim + top highlight, no gritty texture.
+  // @ts-expect-error currently unused — the brown/sand mat under the slimes was dropped
   private buildGroundMat(cols: number, rows: number) {
     const gw = cols * this.cell, gh = rows * this.cell;
     const pad = Math.round(this.cell * 0.85);
@@ -734,6 +1005,108 @@ export class GameScene extends Phaser.Scene {
     return c;
   }
 
+  // A hidden "?" slime: a grey slime body with a bold question mark. Its real colour
+  // (level.hidden / board) shows only once a 4-neighbour opens (revealHiddenAround).
+  private makeHiddenKey(x: number, y: number, s: number) {
+    const img = this.add.image(0, 0, "slime-9").setDisplaySize(s * 1.15, s * 1.15).setTint(0x9a9aa8);
+    const q = this.add
+      .text(0, 0, "?", {
+        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: `${Math.round(s * 0.62)}px`,
+        color: "#ffffff", stroke: "#4a4a5a", strokeThickness: Math.max(2, Math.round(s * 0.08)),
+      })
+      .setOrigin(0.5);
+    const c = this.add.container(x, y, [img, q]);
+    c.setSize(s, s);
+    c.setData("body", img);
+    c.setData("qmark", q);
+    return c;
+  }
+
+  // A cell was cleared → any adjacent hidden "?" slime gets revealed (its true colour
+  // pops in). Called from every collect/clear path.
+  private revealHiddenAround(cells: number[]) {
+    if (this.hiddenSet.size === 0) return;
+    const cols = this.level.cols, rows = this.level.rows;
+    for (const idx of cells) {
+      const r = Math.floor(idx / cols), c = idx % cols;
+      const nb = [
+        r > 0 ? idx - cols : -1,
+        r < rows - 1 ? idx + cols : -1,
+        c > 0 ? idx - 1 : -1,
+        c < cols - 1 ? idx + 1 : -1,
+      ];
+      for (const j of nb) {
+        if (j < 0 || !this.hiddenSet.has(j) || !this.keys[j]) continue;
+        this.hiddenSet.delete(j);
+        const tile = this.keys[j]!;
+        const color = this.level.board[j];
+        const body = tile.getData("body") as Phaser.GameObjects.Image;
+        body.clearTint();
+        body.setTexture(`slime-${color}`);
+        const q = tile.getData("qmark") as Phaser.GameObjects.Text | undefined;
+        if (q) q.destroy();
+        tile.setScale(0.6);
+        this.tweens.add({ targets: tile, scale: 1, duration: 200, ease: "Back.out" });
+        this.sparkle(tile.x, tile.y, COLORS[color]);
+      }
+    }
+  }
+
+  // A small white corner fold marking a 2-layer slime (a different colour hides under it).
+  private markTwoLayer(tile: Phaser.GameObjects.Container, s: number) {
+    const g = this.add.graphics();
+    g.fillStyle(0xffffff, 0.9);
+    g.beginPath();
+    g.moveTo(s * 0.5 - s * 0.3, -s * 0.5);
+    g.lineTo(s * 0.5, -s * 0.5);
+    g.lineTo(s * 0.5, -s * 0.5 + s * 0.3);
+    g.closePath();
+    g.fillPath();
+    g.lineStyle(Math.max(1, s * 0.035), 0x2a2a3a, 0.55);
+    g.strokePath();
+    tile.add(g);
+  }
+
+  // An obstacle tile (hard/soft rock, or wood), `code` = BASE code. `tileSize` is its
+  // footprint (cell for 1×1, cell*2 for a BIG 2×2). `cells` = every board index it
+  // occupies, so collecting/breaking clears them all together. Occupies the cell(s) →
+  // blocks line of sight.
+  private makeObstacle(code: number, x: number, y: number, tileSize: number, cells: number[]) {
+    const kind = obstacleKind(code);
+    const key = kind === "hard" ? "rock-hard" : kind === "soft" ? "rock-soft" : "wood";
+    const img = this.add.image(0, 0, key).setDisplaySize(tileSize * 1.08, tileSize * 1.08);
+    const c = this.add.container(x, y, [img]);
+    c.setSize(tileSize, tileSize);
+    c.setData("body", img);
+    c.setData("obstacle", code);
+    c.setData("cells", cells);
+    if (kind === "soft") {
+      // Soft rock shows its remaining hits (updated on each hit, gone when broken).
+      const hp = softHp(code);
+      c.setData("hp", hp);
+      const num = this.add
+        .text(0, 0, String(hp), {
+          fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: `${Math.round(tileSize * 0.5)}px`,
+          color: "#ffffff", stroke: "#3a250a", strokeThickness: Math.round(tileSize * 0.05),
+        })
+        .setOrigin(0.5);
+      c.add(num);
+      c.setData("hpText", num);
+    }
+    // While using placeholder art, stamp a readable label so it's obvious what it is.
+    if (this.missingArt.has(key) && kind !== "soft") {
+      const label = kind === "hard" ? "HARD\nROCK" : "WOOD";
+      const t = this.add
+        .text(0, 0, label, {
+          fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: `${Math.round(tileSize * 0.22)}px`,
+          color: "#ffffff", stroke: "#000000", strokeThickness: 3, align: "center",
+        })
+        .setOrigin(0.5);
+      c.add(t);
+    }
+    return c;
+  }
+
   // Build the ring of track nodes following the ROUNDED road (straight edges +
   // quarter-circle corners), counter-clockwise from the bottom-left. Matching the
   // road's corners keeps the cars on the tarmac as they turn.
@@ -861,6 +1234,46 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  // Flash the waiting bays red when they're ALL full — a warning that the next car
+  // forced to park will overflow the queue and lose the level. Call after any change
+  // to which bays are occupied.
+  private updateSlotWarning() {
+    const occ = this.slots.reduce((n, s) => n + (s ? 1 : 0), 0);
+    const full = this.slotCount > 0 && occ >= this.slotCount;
+    if (full && !this.slotWarnActive) this.startSlotWarning();
+    else if (!full && this.slotWarnActive) this.stopSlotWarning();
+  }
+
+  private startSlotWarning() {
+    this.slotWarnActive = true;
+    const art = Math.round(SLOT_SIZE * 1.5);
+    for (let i = 0; i < this.slotCount; i++) {
+      const ring = this.add
+        .rectangle(this.slotXs[i], this.slotY, art - 6, art - 6)
+        .setStrokeStyle(4, 0xff3b3b, 1)
+        .setDepth(120);
+      this.tweens.add({
+        targets: ring,
+        alpha: { from: 1, to: 0.12 },
+        scale: { from: 1, to: 1.09 },
+        duration: 440,
+        yoyo: true,
+        repeat: -1,
+        ease: "Sine.inOut",
+      });
+      this.slotWarnG.push(ring);
+    }
+  }
+
+  private stopSlotWarning() {
+    this.slotWarnActive = false;
+    for (const o of this.slotWarnG) {
+      this.tweens.killTweensOf(o);
+      o.destroy();
+    }
+    this.slotWarnG = [];
+  }
+
   // Draws the moving cleats that make the Line read as a running conveyor.
   private animateBelt(dt: number) {
     const g = this.beltMarks;
@@ -903,25 +1316,25 @@ export class GameScene extends Phaser.Scene {
     // Distribute chests into `perRow` vertical queues (columns), filling
     // row by row so each column is a stack the player draws from the top.
     this.invColumns = Array.from({ length: perRow }, () => [] as ChestView[]);
-    const byPair = new Map<number, ChestView>();
+    const byPair = new Map<number, ChestView[]>();
     this.level.chests.forEach((chest, i) => {
       const view = this.makeChestView(chest, 0, 0);
       const hit = view.container.getData("hit") as Phaser.GameObjects.Rectangle;
       hit.on("pointerdown", () => this.launchFromInventory(view));
       this.invColumns[i % perRow].push(view);
-      // Link twin cars sharing a pairId (consecutive → adjacent columns, same row).
+      // Collect all cars sharing a pairId into ONE ordered group (2=twin, 3=triple, …).
       if (chest.pairId != null) {
-        const other = byPair.get(chest.pairId);
-        if (other) {
-          view.twin = other;
-          other.twin = view;
-          this.twinPairs.push([other, view]);
-          byPair.delete(chest.pairId);
-        } else {
-          byPair.set(chest.pairId, view);
-        }
+        const list = byPair.get(chest.pairId) ?? [];
+        list.push(view);
+        byPair.set(chest.pairId, list);
       }
     });
+    // Finalise the groups: point every member at the shared, ordered member list.
+    for (const list of byPair.values()) {
+      if (list.length < 2) continue; // a lone pairId isn't a group
+      for (const v of list) v.group = list;
+      this.carGroups.push(list);
+    }
 
     this.applyInventoryMask();
     this.layoutInventory(false);
@@ -932,7 +1345,7 @@ export class GameScene extends Phaser.Scene {
     const rowStep = this.chestSize + this.invGapY;
     const maskTop = this.invTop - this.chestSize / 2 - 4;
     const maskBottom =
-      this.invTop + (this.invVisRows - 1) * rowStep + this.chestSize / 2 + this.chestSize * 0.45;
+      this.invTop + (this.invVisRows - 1) * rowStep + this.chestSize / 2 + this.invPeek;
     const mg = this.make.graphics();
     mg.fillStyle(0xffffff, 1);
     mg.fillRect(0, maskTop, GAME_W, maskBottom - maskTop);
@@ -941,7 +1354,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   // Lay out the column queues. Only the top chest of each column is clickable;
-  // deeper chests are dimmed, and the mask makes row 3+ peek/hide.
+  // rows 1 & 2 stay fully bright, only row 3+ is dimmed (and the mask makes it peek/hide).
   private layoutInventory(animate: boolean) {
     for (let j = 0; j < this.invColumns.length; j++) {
       const col = this.invColumns[j];
@@ -954,7 +1367,7 @@ export class GameScene extends Phaser.Scene {
         const hit = view.container.getData("hit") as Phaser.GameObjects.Rectangle;
         if (front) hit.setInteractive({ useHandCursor: true });
         else hit.disableInteractive();
-        view.container.setAlpha(front ? 1 : r === 1 ? 0.7 : 0.4);
+        view.container.setAlpha(r <= 1 ? 1 : 0.4); // rows 1 & 2 full; row 3+ dimmed
         if (this.invMask) view.container.setMask(this.invMask);
 
         if (animate) {
@@ -1013,13 +1426,6 @@ export class GameScene extends Phaser.Scene {
         this.tweens.add({ targets: btn, scale: btn.scale * 0.88, duration: 80, yoyo: true });
         this.runBooster(b.key);
       });
-      const label = this.add
-        .text(x, iconY + size / 2 + 8, b.label, {
-          fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "11px", color: "#5a4a2a",
-        })
-        .setOrigin(0.5);
-      this.boostBar!.add(label);
-
       // Owned-count badge on the icon's top-right corner — ALWAYS visible so the
       // player can see how many they have left right on the booster. Green when you
       // have some, red when empty.
@@ -1050,10 +1456,107 @@ export class GameScene extends Phaser.Scene {
   }
 
   private runBooster(key: string) {
+    // Out of stock → tapping offers to BUY one with gold (explicit confirm) instead
+    // of using. Buying tops up the inventory; the player taps again to use it. This
+    // keeps buying separate from using so a failed precondition can't waste gold.
+    if (!this.tutPaused && this.isBoosterUnlocked(key) && (this.boosterCounts[key] ?? 0) <= 0) {
+      this.promptBuyBooster(key);
+      return;
+    }
+
+    // If this tap is completing a booster tutorial, drop its spotlight & unpause first.
+    const tut = this.tutBooster && this.tutBooster.key === key ? this.tutBooster : undefined;
+    if (tut) {
+      this.tutBooster = undefined;
+      this.clearTutHint();
+    }
+
     if (key === "add") this.boosterAdd();
     else if (key === "hand") this.boosterHand();
     else if (key === "refresh") this.boosterRefresh();
     else if (key === "magnet") this.boosterMagnet();
+
+    // Chain to the next just-unlocked booster's tutorial (only when several unlocked
+    // at once — normally there's just one per level).
+    if (tut && tut.idx < tut.list.length - 1) {
+      this.time.delayedCall(450, () => this.showBoosterTutorials(tut.list, tut.idx + 1));
+    }
+  }
+
+  // Confirm-and-buy one booster with gold (shown when the player taps an empty one).
+  // On buy, +1 goes into the inventory; the player taps again to actually use it.
+  private promptBuyBooster(key: string) {
+    const def = BOOSTERS.find((b) => b.key === key)!;
+    this.tutPaused = true; // freeze the board behind the modal (proper modal behaviour)
+    const D = 400;
+    const pw = 300;
+    const ph = 226;
+    const x0 = GAME_W / 2 - pw / 2;
+    const y0 = GAME_H / 2 - ph / 2;
+    const dim = this.add
+      .rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0x000000, 0.6)
+      .setDepth(D)
+      .setInteractive();
+    const panel = this.add.graphics().setDepth(D + 1);
+    panel.fillStyle(0xf7edd0, 1);
+    panel.fillRoundedRect(x0, y0, pw, ph, 20);
+    panel.lineStyle(4, 0x8a5a12, 1);
+    panel.strokeRoundedRect(x0, y0, pw, ph, 20);
+    const objs: Phaser.GameObjects.GameObject[] = [dim, panel];
+
+    const icon = this.add.image(GAME_W / 2, y0 + 56, def.img).setDisplaySize(60, 60).setDepth(D + 2);
+    const title = this.add
+      .text(GAME_W / 2, y0 + 104, `Buy ${def.label}?`, {
+        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "20px", color: "#6a4a12",
+      })
+      .setOrigin(0.5)
+      .setDepth(D + 2);
+    const coin = this.add.circle(GAME_W / 2 - 22, y0 + 138, 11, 0xf9c22e).setStrokeStyle(2, 0xc98a10).setDepth(D + 2);
+    const price = this.add
+      .text(GAME_W / 2 - 6, y0 + 138, String(def.cost), {
+        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "19px", color: "#8a5a10",
+      })
+      .setOrigin(0, 0.5)
+      .setDepth(D + 2);
+    objs.push(icon, title, coin, price);
+
+    const close = () => {
+      objs.forEach((o) => o.destroy());
+      this.tutPaused = false; // unfreeze
+    };
+    const no = this.add
+      .text(GAME_W / 2 - 66, y0 + ph - 30, "CANCEL", {
+        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "15px", color: "#ffffff",
+        backgroundColor: "#b0392b", padding: { x: 16, y: 8 },
+      })
+      .setOrigin(0.5)
+      .setDepth(D + 2)
+      .setInteractive({ useHandCursor: true });
+    const yes = this.add
+      .text(GAME_W / 2 + 56, y0 + ph - 30, "BUY", {
+        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "15px", color: "#ffffff",
+        backgroundColor: "#3a8a3a", padding: { x: 24, y: 8 },
+      })
+      .setOrigin(0.5)
+      .setDepth(D + 2)
+      .setInteractive({ useHandCursor: true });
+    objs.push(no, yes);
+
+    no.on("pointerdown", () => close());
+    dim.on("pointerdown", () => close());
+    yes.on("pointerdown", () => {
+      if (this.gold < def.cost) {
+        close();
+        this.toast(`Need ${def.cost} gold`);
+        return;
+      }
+      this.addGold(-def.cost);
+      this.boosterCounts[key] = (this.boosterCounts[key] ?? 0) + 1;
+      this.saveBoosterCounts();
+      this.drawBoosters();
+      close();
+      this.toast(`${def.label} purchased! Tap to use.`);
+    });
   }
 
   // ---- Booster inventory: owned counts + unlock gifts -----------------
@@ -1085,19 +1588,23 @@ export class GameScene extends Phaser.Scene {
     return this.giftedSet().has(key);
   }
 
-  // Entering a level: gift (once) every booster whose unlock level is now reached,
-  // then walk their tutorials one after another.
+  // Entering a level: gift (once) every booster whose unlock level is now reached so
+  // the player owns it — but only TUTORIALISE the ones unlocking EXACTLY at this level.
+  // (Jumping ahead, e.g. testing straight to level 11, still grants the earlier
+  // boosters but won't replay tutorials for levels you've already passed.)
   private checkBoosterUnlocks(levelNum: number) {
     const gifted = this.giftedSet();
-    const fresh: BoosterDef[] = [];
+    let changed = false;
+    const freshTut: BoosterDef[] = [];
     for (const b of BOOSTERS) {
       if (levelNum >= b.unlock && !gifted.has(b.key)) {
         gifted.add(b.key);
         this.boosterCounts[b.key] = (this.boosterCounts[b.key] ?? 0) + FREE_GIFT; // free copies
-        fresh.push(b);
+        changed = true;
+        if (b.unlock === levelNum) freshTut.push(b); // tutorial only at its own unlock level
       }
     }
-    if (fresh.length === 0) return;
+    if (!changed) return;
     try {
       localStorage.setItem("pf_boost_gifted", [...gifted].join(","));
     } catch {
@@ -1105,12 +1612,13 @@ export class GameScene extends Phaser.Scene {
     }
     this.saveBoosterCounts();
     this.drawBoosters();
-    this.showBoosterTutorials(fresh, 0);
+    if (freshTut.length > 0) this.showBoosterTutorials(freshTut, 0);
   }
 
   // A modal explaining a just-unlocked booster (English). Chains through `list`.
   private showBoosterTutorials(list: BoosterDef[], idx: number) {
     if (idx >= list.length || this.won) return;
+    this.tutPaused = true; // freeze the game behind the booster modal
     const b = list[idx];
     const D = 400;
     const pw = 320;
@@ -1146,9 +1654,8 @@ export class GameScene extends Phaser.Scene {
       })
       .setOrigin(0.5)
       .setDepth(D + 2);
-    const last = idx === list.length - 1;
     const ok = this.add
-      .text(GAME_W / 2, y0 + ph - 32, "TRY IT NOW!", {
+      .text(GAME_W / 2, y0 + ph - 32, "SHOW ME!", {
         fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "16px", color: "#ffffff",
         backgroundColor: "#3a8a3a", padding: { x: 26, y: 8 },
       })
@@ -1157,40 +1664,60 @@ export class GameScene extends Phaser.Scene {
       .setInteractive({ useHandCursor: true });
     const kill = () => {
       [dim, panel, icon, title, desc, gift, ok].forEach((o) => o.destroy());
-      if (!last) {
-        this.showBoosterTutorials(list, idx + 1); // next unlocked booster's tutorial
-      } else {
-        // Let the player use the just-unlocked booster right away (one free go).
-        this.time.delayedCall(80, () => this.runBooster(b.key));
-      }
+      this.tutPaused = false; // unfreeze
+      // Now point at the REAL booster button and let the player tap it themselves.
+      this.spotlightBooster(list, idx);
     };
     ok.on("pointerdown", kill);
     dim.on("pointerdown", kill);
   }
 
-  // Can `key` be used now? (own one, or can afford to buy one at its gold price)
-  private canUseBooster(key: string): boolean {
-    if (!this.isBoosterUnlocked(key)) return false;
-    if ((this.boosterCounts[key] ?? 0) > 0) return true;
-    const def = BOOSTERS.find((b) => b.key === key)!;
-    return this.gold >= def.cost;
+  // Highlight the actual booster button in the bar and wait for the player to tap it
+  // (the tap runs the booster via its own handler; runBooster() clears this spotlight
+  // and chains to the next unlocked booster's tutorial, if any).
+  private spotlightBooster(list: BoosterDef[], idx: number) {
+    const b = list[idx];
+    const pos = this.boosterButtonPos(b.key);
+    if (!pos) {
+      // No button to point at (shouldn't happen) → just run it so the flow continues.
+      this.time.delayedCall(80, () => this.runBooster(b.key));
+      return;
+    }
+    this.tutBooster = { list, idx, key: b.key };
+    const size = Math.min(this.boostBarH - 26, 52);
+    this.showTutHint(pos.x, pos.y, "Tap this booster\nto use it!", size * 0.72);
   }
-  // Spend one use: from owned stock if any, else buy one with gold.
+
+  // World position of a booster's button (mirrors the layout math in drawBoosters).
+  private boosterButtonPos(key: string): { x: number; y: number } | null {
+    const i = BOOSTERS.findIndex((b) => b.key === key);
+    if (i < 0) return null;
+    const size = Math.min(this.boostBarH - 26, 52);
+    const iconY = this.boostBarTop + size / 2 + 2;
+    const gap = 16;
+    const totalW = BOOSTERS.length * size + (BOOSTERS.length - 1) * gap;
+    const startX = (GAME_W - totalW) / 2 + size / 2;
+    return { x: startX + i * (size + gap), y: iconY };
+  }
+
+  // Usable now = unlocked AND at least one owned. Buying (with gold) is a separate
+  // step handled by promptBuyBooster when the player taps an empty booster.
+  private canUseBooster(key: string): boolean {
+    return this.isBoosterUnlocked(key) && (this.boosterCounts[key] ?? 0) > 0;
+  }
+  // Spend one from owned stock.
   private consumeBooster(key: string) {
     if ((this.boosterCounts[key] ?? 0) > 0) {
       this.boosterCounts[key] -= 1;
       this.saveBoosterCounts();
-    } else {
-      const def = BOOSTERS.find((b) => b.key === key)!;
-      this.addGold(-def.cost);
     }
     this.drawBoosters();
   }
-  // Gate for immediate boosters: true if usable, else a toast explaining the cost.
+  // Gate for immediate boosters: true if one is owned, else a hint to buy it.
   private affordToast(key: string): boolean {
     if (this.canUseBooster(key)) return true;
     const def = BOOSTERS.find((b) => b.key === key)!;
-    this.toast(`Need ${def.cost} gold`);
+    this.toast(`Tap ${def.label} to buy one (${def.cost} 🪙)`);
     return false;
   }
 
@@ -1206,7 +1733,29 @@ export class GameScene extends Phaser.Scene {
     this.slotCount += 1;
     this.slots.push(null);
     this.layoutSlots();
+    if (this.slotWarnActive) this.stopSlotWarning(); // a fresh empty bay clears the warning
+    this.flashNewSlot(this.slotCount - 1); // draw the eye to the brand-new bay
     this.toast("+1 waiting bay!");
+  }
+
+  // Pulse a green ring on a bay a few times to call out that it's newly added.
+  private flashNewSlot(index: number) {
+    if (!this.slotXs[index]) return;
+    const s = Math.round(SLOT_SIZE * 1.5) - 6;
+    const ring = this.add
+      .rectangle(this.slotXs[index], this.slotY, s, s)
+      .setStrokeStyle(4, 0x3ad14a, 1)
+      .setDepth(120);
+    this.tweens.add({
+      targets: ring,
+      alpha: { from: 1, to: 0.1 },
+      scale: { from: 1, to: 1.14 },
+      duration: 360,
+      yoyo: true,
+      repeat: 4,
+      ease: "Sine.inOut",
+      onComplete: () => ring.destroy(),
+    });
   }
 
   // "Hand": arm a one-shot tap that launches ANY car from the lineup queue (zone 3)
@@ -1220,11 +1769,13 @@ export class GameScene extends Phaser.Scene {
     }
     if (!this.affordToast("hand")) return;
     this.handMode = true;
-    this.toast("Tap a car in the queue to send it out");
+    this.toast("Grab any car — a back-row one is best!");
+    this.armHandHighlight(); // spotlight the buried back-row cars (Grab's best use)
     // Defer one tick so the tap that pressed the booster button isn't captured.
     this.time.delayedCall(40, () =>
       this.input.once("pointerdown", (p: Phaser.Input.Pointer) => {
         this.handMode = false;
+        this.clearHandHighlight();
         let best: ChestView | null = null;
         let bestD = Infinity;
         for (const v of queued) {
@@ -1236,6 +1787,19 @@ export class GameScene extends Phaser.Scene {
           }
         }
         if (best && bestD < 40) {
+          // Linked cars leave together, so EVERY member must be reachable near the
+          // front: each must sit in the first two rows (row 1 or 2). Any deeper and the
+          // group can't be pulled out cleanly — reject WITHOUT spending the booster.
+          if (best.group) {
+            const ok = this.groupOf(best).every((m) => {
+              const p = this.findInInventory(m);
+              return p && p.r <= 1;
+            });
+            if (!ok) {
+              this.toast("Linked cars: all must be in the first 2 rows to grab them together");
+              return;
+            }
+          }
           this.consumeBooster("hand");
           this.launchQueued(best);
           this.toast("Car sent!");
@@ -1246,10 +1810,51 @@ export class GameScene extends Phaser.Scene {
     );
   }
 
+  // Un-dim and ring the SECOND-row cars while Grab is armed, so the player sees the
+  // cars they can pull straight up. (Only row 2 — row 3+ is barely visible, so
+  // ringing it just looks like clutter peeking out.)
+  private armHandHighlight() {
+    this.clearHandHighlight();
+    for (const col of this.invColumns) {
+      const r = 1;
+      if (col.length > r) {
+        const v = col[r];
+        if (!v.container.scene) continue;
+        v.container.setAlpha(1); // un-dim so the buried car stands out
+        const s = this.chestSize * 0.98;
+        const ring = this.add
+          .rectangle(v.container.x, v.container.y, s, s)
+          .setStrokeStyle(3, 0xffe14a, 0.95)
+          .setDepth(25);
+        this.tweens.add({
+          targets: ring,
+          alpha: { from: 0.95, to: 0.3 },
+          scale: { from: 1, to: 1.12 },
+          duration: 480,
+          yoyo: true,
+          repeat: -1,
+          ease: "Sine.inOut",
+        });
+        this.handMarks.push(ring);
+      }
+    }
+  }
+
+  private clearHandHighlight() {
+    if (this.handMarks.length === 0) return;
+    for (const o of this.handMarks) {
+      this.tweens.killTweensOf(o);
+      o.destroy();
+    }
+    this.handMarks = [];
+    this.layoutInventory(false); // restore the dimmed back rows
+  }
+
   // Launch a specific queued car regardless of its position in the column.
   private launchQueued(view: ChestView) {
-    // Twin cars leave together (Hand booster bypasses the front-of-column rule).
-    const group = view.twin ? [view, view.twin] : [view];
+    this.playPop(); // same "pop" feedback as a normal launch
+    // Linked cars leave together (Hand booster bypasses the front-of-column rule).
+    const group = this.groupOf(view);
     for (const v of group) {
       const p = this.findInInventory(v);
       if (!p) continue;
@@ -1267,18 +1872,19 @@ export class GameScene extends Phaser.Scene {
   // fits), so you can bring a colour you need to the front.
   private boosterRefresh() {
     if (this.won) return;
-    const cars = this.invColumns.flat().filter((v) => v.container.scene);
+    // Only recolour ordinary colour cars (leave hammer/wood cars as they are).
+    const cars = this.invColumns.flat().filter((v) => v.container.scene && (v.chest.kind ?? "color") === "color");
     if (cars.length === 0) {
       this.toast("Queue is empty");
       return;
     }
-    // colours that still have uncollected slimes on the board
+    // colours that still have uncollected SLIMES on the board (skip obstacles)
     const left: number[] = [];
     const seen = new Set<number>();
     for (let i = 0; i < this.keys.length; i++) {
       if (this.keys[i]) {
         const c = this.level.board[i];
-        if (!seen.has(c)) {
+        if (c >= 0 && c < HARD_ROCK && !seen.has(c)) {
           seen.add(c);
           left.push(c);
         }
@@ -1300,11 +1906,65 @@ export class GameScene extends Phaser.Scene {
       const j = Math.floor(Math.random() * (i + 1));
       [assign[i], assign[j]] = [assign[j], assign[i]];
     }
+    // Focus the lineup area (dim around it + a glowing frame) so the player's eye
+    // goes there, then recolour the cars in a slow left-to-right "flip" wave.
+    const total = (cars.length - 1) * 90 + 440;
+    this.focusLineup(total + 350);
     cars.forEach((v, k) => {
-      this.setCarColor(v, assign[k]);
-      this.tweens.add({ targets: v.container, scale: v.container.scale * 1.16, duration: 130, yoyo: true, delay: (k % 8) * 15 });
+      const baseX = v.container.scaleX;
+      this.tweens.add({
+        targets: v.container,
+        scaleX: 0.08, // flip edge-on...
+        duration: 200,
+        delay: k * 90,
+        ease: "Cubic.in",
+        onComplete: () => {
+          this.setCarColor(v, assign[k]); // ...swap the colour at the thin point...
+          this.tweens.add({ targets: v.container, scaleX: baseX, duration: 240, ease: "Back.out" }); // ...flip back
+        },
+      });
     });
-    this.toast("Cars recolored!");
+    this.time.delayedCall(total + 120, () => this.toast("Cars recolored!"));
+  }
+
+  // Briefly dim everything EXCEPT the lineup queue (zone 3), with a pulsing frame, so
+  // the player notices a change is happening there. Auto-fades after `dur` ms. Purely
+  // visual — not interactive, so it never blocks taps.
+  private focusLineup(dur: number) {
+    const cars = this.invColumns.flat().filter((v) => v.container.scene);
+    if (cars.length === 0) return;
+    const xs = cars.map((v) => v.container.x);
+    const ys = cars.map((v) => v.container.y);
+    const pad = this.chestSize * 0.85;
+    const x0 = Math.max(0, Math.min(...xs) - pad);
+    const y0 = Math.max(0, Math.min(...ys) - pad);
+    const x1 = Math.min(GAME_W, Math.max(...xs) + pad);
+    const y1 = Math.min(GAME_H, Math.max(...ys) + pad);
+    const objs: Phaser.GameObjects.GameObject[] = [];
+    const mat = (mx: number, my: number, mw: number, mh: number) => {
+      if (mw <= 0 || mh <= 0) return;
+      const r = this.add.rectangle(mx, my, mw, mh, 0x000000, 0).setOrigin(0, 0).setDepth(115);
+      this.tweens.add({ targets: r, fillAlpha: 0.45, duration: 200 });
+      objs.push(r);
+    };
+    mat(0, 0, GAME_W, y0); // above
+    mat(0, y1, GAME_W, GAME_H - y1); // below
+    mat(0, y0, x0, y1 - y0); // left
+    mat(x1, y0, GAME_W - x1, y1 - y0); // right
+    const frame = this.add
+      .rectangle((x0 + x1) / 2, (y0 + y1) / 2, x1 - x0, y1 - y0)
+      .setStrokeStyle(4, 0xffe14a, 1)
+      .setDepth(116)
+      .setAlpha(0);
+    this.tweens.add({ targets: frame, alpha: 1, duration: 200 });
+    this.tweens.add({ targets: frame, scale: 1.02, duration: 460, yoyo: true, repeat: -1, ease: "Sine.inOut" });
+    objs.push(frame);
+    this.time.delayedCall(dur, () => {
+      for (const o of objs) {
+        this.tweens.killTweensOf(o);
+        this.tweens.add({ targets: o, alpha: 0, duration: 320, onComplete: () => o.destroy() });
+      }
+    });
   }
 
   // Recolour a car view to a colour id (swaps its sprite + updates its data).
@@ -1317,8 +1977,9 @@ export class GameScene extends Phaser.Scene {
     view.carImg.setScale((this.chestSize * 1.15) / (view.carImg.height || this.chestSize));
   }
 
-  // "Magnet": arm a one-shot tap on a board slime. A VIP car then appears at the
-  // board centre and slowly reels in every slime of that colour (ignores blockers).
+  // "Magnet": arm a one-shot tap on a board slime. A VIP car then appears and reels
+  // in the CLUSTER of same-colour slimes connected (edge-to-edge) to the tapped one
+  // — not every slime of that colour on the board.
   private boosterMagnet() {
     if (this.won || this.handMode || this.magnetMode) return;
     if (this.keysRemaining <= 0) {
@@ -1327,19 +1988,156 @@ export class GameScene extends Phaser.Scene {
     }
     if (!this.affordToast("magnet")) return;
     this.magnetMode = true;
-    this.toast("Tap a slime to pull all of its color");
+    this.toast("Tap a slime to pull its cluster");
+    // Defer one tick so the tap that pressed the booster button isn't captured.
     this.time.delayedCall(40, () =>
       this.input.once("pointerdown", (p: Phaser.Input.Pointer) => {
         this.magnetMode = false;
-        const idx = this.slimeAt(p.worldX, p.worldY);
+        const idx = this.nearestSlime(p.worldX, p.worldY);
         if (idx < 0) {
           this.toast("Cancelled");
           return;
         }
-        this.consumeBooster("magnet");
-        this.spawnVipCollector(this.level.board[idx]);
+        // Easy to mis-tap → confirm the picked cluster first.
+        this.confirmMagnet(idx);
       }),
     );
+  }
+
+  // Nearest real slime cell to a world point, within ~1.3 cells — a forgiving tap
+  // for the magnet, since small slimes are fiddly to hit dead-centre.
+  private nearestSlime(wx: number, wy: number): number {
+    const exact = this.slimeAt(wx, wy);
+    if (exact >= 0) return exact;
+    const { cols, rows } = this.level;
+    const c0 = Math.floor((wx - this.gridX) / this.cell);
+    const r0 = Math.floor((wy - this.gridY) / this.cell);
+    let best = -1;
+    let bestD = (this.cell * 1.3) ** 2;
+    for (let r = r0 - 1; r <= r0 + 1; r++) {
+      for (let c = c0 - 1; c <= c0 + 1; c++) {
+        if (c < 0 || c >= cols || r < 0 || r >= rows) continue;
+        const idx = r * cols + c;
+        if (!this.keys[idx] || isObstacle(this.level.board[idx])) continue;
+        const scx = this.gridX + c * this.cell + this.cell / 2;
+        const scy = this.gridY + r * this.cell + this.cell / 2;
+        const d = (wx - scx) ** 2 + (wy - scy) ** 2;
+        if (d < bestD) {
+          bestD = d;
+          best = idx;
+        }
+      }
+    }
+    return best;
+  }
+
+  // Show the picked colour (swatch + slime + count) and ask the player to confirm
+  // before the Magnet is actually spent. Cancel costs nothing. Game freezes so the
+  // board (and thus the count) can't change under the player mid-decision.
+  private confirmMagnet(startIdx: number) {
+    const color = this.level.board[startIdx];
+    const group = this.connectedSameColor(startIdx);
+    const total = group.length;
+    if (total === 0) {
+      this.toast("No slimes there");
+      return;
+    }
+    this.tutPaused = true;
+    const D = 400;
+    const pw = 300;
+    const ph = 250;
+    const x0 = GAME_W / 2 - pw / 2;
+    const y0 = GAME_H / 2 - ph / 2;
+    const dim = this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0x000000, 0.6).setDepth(D).setInteractive();
+    const panel = this.add.graphics().setDepth(D + 1);
+    panel.fillStyle(0xf7edd0, 1);
+    panel.fillRoundedRect(x0, y0, pw, ph, 20);
+    panel.lineStyle(4, 0x8a5a12, 1);
+    panel.strokeRoundedRect(x0, y0, pw, ph, 20);
+    const objs: Phaser.GameObjects.GameObject[] = [dim, panel];
+    const hex = COLORS[color] ?? 0x888888;
+    const swatch = this.add.circle(GAME_W / 2, y0 + 66, 40, hex).setStrokeStyle(4, shade(hex)).setDepth(D + 2);
+    objs.push(swatch);
+    if (this.textures.exists(`slime-${color}`)) {
+      const sl = this.add.image(GAME_W / 2, y0 + 66, `slime-${color}`).setDisplaySize(60, 60).setDepth(D + 3);
+      objs.push(sl);
+    }
+    const title = this.add
+      .text(GAME_W / 2, y0 + 126, "Pull THIS color?", {
+        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "20px", color: "#6a4a12",
+      })
+      .setOrigin(0.5)
+      .setDepth(D + 2);
+    const cnt = this.add
+      .text(GAME_W / 2, y0 + 158, `${total} slime${total > 1 ? "s" : ""} will board the VIP car`, {
+        fontFamily: "Arial, sans-serif", fontSize: "13px", color: "#6a4a12", align: "center",
+        wordWrap: { width: pw - 44 },
+      })
+      .setOrigin(0.5)
+      .setDepth(D + 2);
+    objs.push(title, cnt);
+    const close = () => {
+      objs.forEach((o) => o.destroy());
+      this.tutPaused = false;
+    };
+    const no = this.add
+      .text(GAME_W / 2 - 66, y0 + ph - 32, "CANCEL", {
+        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "15px", color: "#ffffff",
+        backgroundColor: "#b0392b", padding: { x: 16, y: 8 },
+      })
+      .setOrigin(0.5)
+      .setDepth(D + 2)
+      .setInteractive({ useHandCursor: true });
+    const yes = this.add
+      .text(GAME_W / 2 + 60, y0 + ph - 32, "USE", {
+        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "15px", color: "#ffffff",
+        backgroundColor: "#3a8a3a", padding: { x: 22, y: 8 },
+      })
+      .setOrigin(0.5)
+      .setDepth(D + 2)
+      .setInteractive({ useHandCursor: true });
+    objs.push(no, yes);
+    no.on("pointerdown", () => {
+      close();
+      this.toast("Cancelled");
+    });
+    yes.on("pointerdown", () => {
+      close();
+      this.consumeBooster("magnet");
+      this.spawnVipCollector(color, group);
+    });
+  }
+
+  // All slimes orthogonally connected to `startIdx` that share its colour — a
+  // flood-fill cluster where each cell touches the next by an EDGE. Obstacles,
+  // empty cells and different colours break the connection.
+  private connectedSameColor(startIdx: number): number[] {
+    const { cols, rows } = this.level;
+    const color = this.level.board[startIdx];
+    if (color < 0 || !this.keys[startIdx] || isObstacle(color)) return [];
+    const seen = new Set<number>([startIdx]);
+    const stack = [startIdx];
+    const out: number[] = [];
+    while (stack.length) {
+      const i = stack.pop()!;
+      out.push(i);
+      const r = Math.floor(i / cols);
+      const c = i % cols;
+      const neigh = [
+        r > 0 ? i - cols : -1, // up
+        r < rows - 1 ? i + cols : -1, // down
+        c > 0 ? i - 1 : -1, // left
+        c < cols - 1 ? i + 1 : -1, // right
+      ];
+      for (const n of neigh) {
+        if (n < 0 || seen.has(n)) continue;
+        if (this.keys[n] && this.level.board[n] === color) {
+          seen.add(n);
+          stack.push(n);
+        }
+      }
+    }
+    return out;
   }
 
   // Board cell index of the slime under a world point, or -1.
@@ -1349,16 +2147,15 @@ export class GameScene extends Phaser.Scene {
     const r = Math.floor((wy - this.gridY) / this.cell);
     if (c < 0 || c >= cols || r < 0 || r >= rows) return -1;
     const idx = r * cols + c;
-    return this.keys[idx] ? idx : -1;
+    // Magnet only works on real slimes, not obstacles.
+    return this.keys[idx] && !isObstacle(this.level.board[idx]) ? idx : -1;
   }
 
-  // A VIP car hovers at the board centre and reels in all matching slimes, one
-  // every ~220ms, then drives off once full (handled by the runner boarding code).
-  private spawnVipCollector(color: number) {
-    const total = this.keys.reduce(
-      (n, k, i) => n + (k && this.level.board[i] === color ? 1 : 0),
-      0,
-    );
+  // A VIP car appears and reels in the given cluster of slimes, one every ~90ms,
+  // then drives off once full (handled by the runner boarding code).
+  private spawnVipCollector(color: number, group: number[]) {
+    const remaining = group.filter((i) => this.keys[i] && this.level.board[i] === color);
+    const total = remaining.length;
     if (total === 0) {
       this.toast("No slimes of that color");
       return;
@@ -1383,9 +2180,17 @@ export class GameScene extends Phaser.Scene {
           timer.remove();
           return;
         }
-        const idx = this.findAnyColor(color);
+        // Next still-present slime in the tapped cluster.
+        let idx = -1;
+        while (remaining.length) {
+          const cand = remaining.shift()!;
+          if (this.keys[cand] && this.level.board[cand] === color) {
+            idx = cand;
+            break;
+          }
+        }
         if (idx < 0) {
-          timer.remove(); // all matching slimes are already reeling in / gone
+          timer.remove(); // whole cluster is already reeling in / gone
           return;
         }
         this.fireTo(view, idx); // slime runs to the VIP car; boards on arrival
@@ -1413,14 +2218,6 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0.5);
     container.add([img, countText]);
     return { chest: { color, count }, container, countText, carImg: img, inFlight: 0 };
-  }
-
-  // First remaining slime of a given colour (any position), for the magnet.
-  private findAnyColor(color: number): number {
-    for (let i = 0; i < this.keys.length; i++) {
-      if (this.keys[i] && this.level.board[i] === color) return i;
-    }
-    return -1;
   }
 
   // ---- Top HUD: settings (left) · level pill (center) · gold (right) ----
@@ -1474,18 +2271,9 @@ export class GameScene extends Phaser.Scene {
     pill.lineStyle(2, 0xffe9b0, 0.7);
     pill.strokeRoundedRect(pillLeft, y - 15, pillRight - pillLeft, 30, 15);
 
-    // coin
+    // coin — plain golden disc + dark-gold rim (matches the Home coin, no letter)
     const coinX = pillLeft + 16;
-    this.add.circle(coinX, y, 10, 0xf9c22e).setStrokeStyle(2, 0xc98a10).setDepth(D + 1);
-    this.add
-      .text(coinX, y - 1, "G", {
-        fontFamily: "Arial, sans-serif",
-        fontStyle: "bold",
-        fontSize: "12px",
-        color: "#8a5a10",
-      })
-      .setOrigin(0.5)
-      .setDepth(D + 2);
+    this.add.circle(coinX, y, 12, 0xf9c22e).setStrokeStyle(2, 0xc98a10).setDepth(D + 1);
     // amount (left-aligned, grows toward the plus)
     this.goldText = this.add
       .text(coinX + 15, y, String(this.gold), {
@@ -1543,6 +2331,21 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  // First-clear reward gate: returns true (and records it) only the FIRST time a
+  // given level is beaten, so replaying an easy level can't farm gold.
+  private claimFirstClearReward(levelNum: number): boolean {
+    try {
+      const raw = localStorage.getItem("pf_rewarded") ?? "[]";
+      const done = new Set<number>(JSON.parse(raw));
+      if (done.has(levelNum)) return false;
+      done.add(levelNum);
+      localStorage.setItem("pf_rewarded", JSON.stringify([...done]));
+      return true;
+    } catch {
+      return true; // storage unavailable — just award it (in-memory session)
+    }
+  }
+
   // Bump the saved progress so the level picker unlocks/star-marks levels.
   private unlockProgress(reached: number) {
     try {
@@ -1553,10 +2356,11 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  // Placeholder for a real store / in-app purchase. For now it grants a demo pack.
+  // Real store / IAP not wired up yet. For now the "+" hands out free gold with
+  // no limit (testing convenience).
   private buyGold() {
-    this.addGold(100);
-    this.toast("+100 Gold");
+    this.addGold(5000);
+    this.toast("+5000 Gold");
   }
 
   // Minimal settings overlay (placeholder — sound/music toggles come later).
@@ -1689,7 +2493,7 @@ export class GameScene extends Phaser.Scene {
         ease: "Quad.out",
       });
     }
-    this.smallNotice(`Tối đa ${MAX_ON_TRACK}/${MAX_ON_TRACK} xe trên đường!`);
+    this.smallNotice(`Max ${MAX_ON_TRACK}/${MAX_ON_TRACK} cars on the track!`);
   }
 
   private toast(msg: string) {
@@ -1754,6 +2558,77 @@ export class GameScene extends Phaser.Scene {
     g.destroy();
   }
 
+  // Simple hand-drawn stand-ins for the obstacle tiles + special cars until the real
+  // PNGs are dropped into public/art. Called only for keys whose file didn't load.
+  private makePlaceholderTexture(key: string, size = 128) {
+    if (this.textures.exists(key)) this.textures.remove(key);
+    const g = this.make.graphics({ x: 0, y: 0 }, false);
+    const rr = size * 0.22;
+    const tile = (fill: number, edge: number) => {
+      g.fillStyle(edge, 1);
+      g.fillRoundedRect(size * 0.05, size * 0.05, size * 0.9, size * 0.9, rr);
+      g.fillStyle(fill, 1);
+      g.fillRoundedRect(size * 0.09, size * 0.08, size * 0.82, size * 0.82, rr * 0.9);
+    };
+    const carBody = (fill: number) => {
+      g.fillStyle(0x2f3237, 1);
+      g.fillRoundedRect(size * 0.24, size * 0.34, size * 0.52, size * 0.5, size * 0.1); // shadow/base
+      g.fillStyle(fill, 1);
+      g.fillRoundedRect(size * 0.24, size * 0.3, size * 0.52, size * 0.5, size * 0.1); // body
+      g.fillStyle(0xffffff, 0.85);
+      g.fillCircle(size * 0.37, size * 0.4, size * 0.05); // headlights (eyes)
+      g.fillCircle(size * 0.63, size * 0.4, size * 0.05);
+    };
+    switch (key) {
+      case "rock-hard":
+        tile(0x646b76, 0x3a3f47); // dark slate = "unbreakable"
+        g.lineStyle(size * 0.03, 0x3a3f47, 0.9);
+        g.beginPath();
+        g.moveTo(size * 0.32, size * 0.24);
+        g.lineTo(size * 0.5, size * 0.5);
+        g.lineTo(size * 0.4, size * 0.72);
+        g.strokePath();
+        break;
+      case "rock-soft":
+        tile(0xd9c08a, 0xb0955a);
+        break;
+      case "rock-soft-cracked":
+        tile(0xd9c08a, 0xb0955a);
+        g.lineStyle(size * 0.045, 0x6a5326, 1);
+        g.beginPath();
+        g.moveTo(size * 0.5, size * 0.1);
+        g.lineTo(size * 0.42, size * 0.44);
+        g.lineTo(size * 0.6, size * 0.62);
+        g.lineTo(size * 0.48, size * 0.9);
+        g.strokePath();
+        break;
+      case "wood":
+        tile(0xb5834a, 0x7c5628);
+        g.lineStyle(size * 0.02, 0x7c5628, 0.9);
+        g.lineBetween(size * 0.09, size * 0.42, size * 0.91, size * 0.42);
+        g.lineBetween(size * 0.09, size * 0.66, size * 0.91, size * 0.66);
+        break;
+      case "car-hammer":
+        carBody(0x9aa0a6);
+        g.fillStyle(0x6a4a2a, 1);
+        g.fillRect(size * 0.47, size * 0.1, size * 0.06, size * 0.24); // handle
+        g.fillStyle(0x555b61, 1);
+        g.fillRoundedRect(size * 0.36, size * 0.06, size * 0.28, size * 0.12, size * 0.03); // head
+        break;
+      case "car-wood":
+        carBody(0x9c6b3f);
+        g.fillStyle(0xdadada, 1);
+        g.fillCircle(size * 0.5, size * 0.2, size * 0.14); // saw blade
+        g.fillStyle(0x8a8a8a, 1);
+        g.fillCircle(size * 0.5, size * 0.2, size * 0.05);
+        break;
+      default:
+        tile(0xcccccc, 0x888888);
+    }
+    g.generateTexture(key, size, size);
+    g.destroy();
+  }
+
   private trimTexture(key: string) {
     const tex = this.textures.get(key);
     if (!tex || tex.key === "__MISSING" || tex.has("trim")) return;
@@ -1799,7 +2674,9 @@ export class GameScene extends Phaser.Scene {
     const w = this.chestSize;
     const container = this.add.container(x, y);
 
-    const key = `car-${chest.color}`;
+    // Special cars use their own sprite; colour cars use the pre-coloured one.
+    const key =
+      chest.kind === "hammer" ? "car-hammer" : chest.kind === "wood" ? "car-wood" : `car-${chest.color}`;
     const hasTrim = this.textures.get(key).has("trim");
     const img = hasTrim ? this.add.image(0, 0, key, "trim") : this.add.image(0, 0, key);
     img.setScale((w * 1.15) / (img.height || w)); // car height ≈ collector size
@@ -1825,6 +2702,20 @@ export class GameScene extends Phaser.Scene {
       .setInteractive({ useHandCursor: true });
 
     container.add([img, countText, hit]);
+
+    // Placeholder special cars get a readable tag above them so hammer vs wood is
+    // obvious (removed automatically once real art replaces the texture).
+    if ((chest.kind === "hammer" || chest.kind === "wood") && this.missingArt.has(key)) {
+      const tag = chest.kind === "hammer" ? "HAMMER" : "WOOD";
+      const t = this.add
+        .text(0, -carH * 0.52, tag, {
+          fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: `${Math.round(w * 0.2)}px`,
+          color: "#ffffff", stroke: "#000000", strokeThickness: 3,
+        })
+        .setOrigin(0.5);
+      container.add(t);
+    }
+
     container.setData("hit", hit);
     return { chest, container, countText, carImg: img, inFlight: 0 };
   }
@@ -1844,23 +2735,24 @@ export class GameScene extends Phaser.Scene {
     const pos = this.findInInventory(view);
     if (!pos || pos.r !== 0) return; // only the front chest of a column launches
 
-    // Twin cars ("xe đôi") leave together — BOTH must be at the front of their
-    // columns; otherwise wait for the lagging one to reach the front.
-    const group = view.twin ? [view, view.twin] : [view];
+    // Linked cars leave together — EVERY member must be at the front of its column;
+    // otherwise wait for the lagging one(s) to reach the front.
+    const group = this.groupOf(view);
     for (const v of group) {
       const p = this.findInInventory(v);
       if (!p || p.r !== 0) {
-        this.smallNotice("Chờ cả 2 xe lên đầu hàng!");
+        this.smallNotice(group.length > 2 ? "Wait for all linked cars to reach the front!" : "Wait for both cars to reach the front!");
         return;
       }
     }
 
-    // Road must have room for the whole group (a twin needs 2 free slots).
+    // Road must have room for the whole group (a triple needs 3 free slots, etc.).
     if (this.active.length + this.pending.length + group.length > MAX_ON_TRACK) {
       this.trackFullNotice();
       return;
     }
 
+    this.playPop(); // same cheerful "pop" as sending a car out of a waiting bay
     for (const v of group) {
       const p = this.findInInventory(v)!;
       p.col.splice(p.r, 1); // r === 0 → front of its column
@@ -1873,6 +2765,9 @@ export class GameScene extends Phaser.Scene {
     if (this.tutStep === 1) {
       this.clearTutHint(); // step 1 done; wait for a car to park, then guide step 2
       this.tutStep = 2;
+    } else if (this.tutStep === 8) {
+      this.clearTutHint(); // twin intro done — player sent the pair off
+      this.tutStep = 0;
     }
   }
 
@@ -1880,28 +2775,73 @@ export class GameScene extends Phaser.Scene {
     if (this.won || this.handMode || this.magnetMode) return; // a booster claims this tap
     const view = this.slots[slotIndex];
     if (!view) return;
-    // Twin cars relaunch together (both are parked side by side).
-    const twinParked = !!view.twin && !view.twin.left && this.slots.includes(view.twin);
-    const group = twinParked ? [view, view.twin!] : [view];
+    // Linked cars relaunch together (all are parked side by side). Only the members
+    // still parked in bays join — any that already left are skipped.
+    const group = this.groupOf(view).filter((m) => this.slots.includes(m));
     if (this.active.length + this.pending.length + group.length > MAX_ON_TRACK) {
       this.trackFullNotice();
       return;
     }
+    this.playPop(); // cheerful "pop" as the car springs out of its bay
     for (const v of group) {
       const si = this.slots.indexOf(v);
       if (si >= 0) this.slots[si] = null;
       (v.container.getData("hit") as Phaser.GameObjects.Rectangle).disableInteractive();
+      // No in-place hop / hold: it goes straight to the ray. trySpawn glides it out
+      // next frame — the glide itself IS the motion, so it feels immediate & smooth.
       this.pending.push(v);
     }
     if (this.tutStep === 3) {
       this.clearTutHint(); // tutorial complete
       this.tutStep = 0;
     }
+
+    this.updateSlotWarning(); // a bay just freed → clear the full-queue warning
+  }
+
+  // Synthesize a short "pop" via Web Audio (no audio asset needed).
+  private playPop() {
+    try {
+      const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (!Ctx) return;
+      if (!this.audioCtx) this.audioCtx = new Ctx();
+      const ctx = this.audioCtx;
+      if (ctx.state === "suspended") void ctx.resume();
+      const t0 = ctx.currentTime;
+      // Body: a bright bubbly "pop" that springs UPWARD in pitch (matches the car
+      // hopping up out of its bay), quick attack + short decay.
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(320, t0);
+      osc.frequency.exponentialRampToValueAtTime(880, t0 + 0.05);
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.exponentialRampToValueAtTime(0.34, t0 + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.13);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(t0);
+      osc.stop(t0 + 0.15);
+      // Sparkle: a tiny high "ting" on top for crispness.
+      const ping = ctx.createOscillator();
+      const pg = ctx.createGain();
+      ping.type = "triangle";
+      ping.frequency.setValueAtTime(1500, t0 + 0.015);
+      pg.gain.setValueAtTime(0.0001, t0 + 0.015);
+      pg.gain.exponentialRampToValueAtTime(0.12, t0 + 0.025);
+      pg.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.08);
+      ping.connect(pg).connect(ctx.destination);
+      ping.start(t0 + 0.015);
+      ping.stop(t0 + 0.1);
+    } catch {
+      /* audio unavailable — ignore */
+    }
   }
 
   private trySpawn() {
     if (this.pending.length === 0) return;
     if (this.active.length >= MAX_ON_TRACK) return; // at most 5 cars on the ray at once
+    const head = this.pending[0];
+    if (head.launchAt && this.time.now < head.launchAt) return; // still doing its launch hop
     const N = this.track.length;
     const startClear = this.active.every((a) => {
       const d = (((a.pos - this.startIndex) % N) + N) % N;
@@ -1909,17 +2849,69 @@ export class GameScene extends Phaser.Scene {
     });
     if (!startClear) return;
 
-    const view = this.pending.shift()!;
-    const start = this.track[this.startIndex];
-    view.container.setScale(1);
-    view.container.setPosition(start.x, start.y);
-    this.active.push({
+    // Linked cars roll onto the ray TOGETHER, spaced a few nodes apart, co-spawned in
+    // one go (same glide duration) so none drifts ahead while a partner is still
+    // gliding. The group's members sit contiguously at the front of the queue.
+    let count = 1;
+    if (head.group) {
+      count = 0;
+      for (const p of this.pending) {
+        if (head.group.includes(p)) count++;
+        else break;
+      }
+    }
+    if (this.active.length + count > MAX_ON_TRACK) return;
+
+    const members = this.pending.splice(0, count);
+    if (count > 1) {
+      // member 0 = lead (furthest along), spaced back by TWIN_SPAWN_GAP each.
+      const posFor = (k: number) => {
+        const raw = this.startIndex + (count - 1 - k) * TWIN_SPAWN_GAP;
+        return this.openTrack ? Math.min(raw, N - 1) : raw % N;
+      };
+      let maxD = 0;
+      members.forEach((m, k) => {
+        const pos = posFor(k);
+        maxD = Math.max(maxD, Phaser.Math.Distance.Between(m.container.x, m.container.y, this.lerpX(pos), this.lerpY(pos)));
+      });
+      const dur = Phaser.Math.Clamp(maxD * 1.05, 180, 340);
+      members.forEach((m, k) => this.spawnCar(m, posFor(k), dur));
+    } else {
+      this.spawnCar(members[0], this.startIndex);
+    }
+  }
+
+  // Push one car onto the ray at `pos`, gliding it there from wherever it sits (a
+  // waiting bay / the lineup) and growing it back to full size — instead of a
+  // teleport. It only starts DRIVING once the glide finishes (entering → false).
+  private spawnCar(view: ChestView, pos: number, dur?: number) {
+    view.launchAt = undefined;
+    this.tweens.killTweensOf(view.container); // stop any lingering launch hop
+    view.container.clearMask(); // leaving the inventory viewport (Grab can pull a masked back car)
+    const tx = this.lerpX(pos);
+    const ty = this.lerpY(pos);
+    const a: ActiveChest = {
       view,
-      pos: this.startIndex,
-      lastNode: this.startIndex,
+      pos,
+      lastNode: Math.floor(pos),
       steps: 0,
       lastShot: 0,
       approaching: true, // drive in fast until the first slime is grabbed
+      entering: true, // glide onto the ray first, then start driving
+    };
+    this.active.push(a);
+    const dist = Phaser.Math.Distance.Between(view.container.x, view.container.y, tx, ty);
+    this.tweens.add({
+      targets: view.container,
+      x: tx,
+      y: ty,
+      scale: 1,
+      alpha: 1, // back-row lineup cars are dimmed — fade back to full on the way in
+      duration: dur ?? Phaser.Math.Clamp(dist * 1.05, 150, 300),
+      ease: "Cubic.out", // springs out fast from the bay, then eases in — feels instant
+      onComplete: () => {
+        a.entering = false; // hand off to the driving system
+      },
     });
   }
 
@@ -1930,10 +2922,13 @@ export class GameScene extends Phaser.Scene {
     this.animateBelt(dt); // the Line belt runs continuously
     this.drawTwinLinks(); // holding-hands link between twin cars
     if (this.won || this.lost) return;
+    if (this.tutPaused) return; // frozen while a tutorial is guiding the player
     const N = this.track.length;
     if (N === 0) return;
 
+    if (AUTO_CIRCLE) this.computeReachableColors(); // which colours can be shot right now
     this.trySpawn();
+    this.autoRelaunchBays(); // parked cars self-relaunch when their colour is reachable again
 
     // Live "cars on the ray" count on the start signal.
     if (this.signalCount) this.signalCount.setText(`${this.active.length}/${MAX_ON_TRACK}`);
@@ -1943,112 +2938,293 @@ export class GameScene extends Phaser.Scene {
     // tick — while their DRIVE speed stays exactly the same.
     const boost = this.queueEmpty();
 
+    const groupStepped = new Set<ActiveChest>();
     for (const a of [...this.active]) {
-      if (!this.active.includes(a)) continue; // pulled off by a twin partner this frame
-      // Car has finished its route and is parked-in-waiting: hold still (no moving,
-      // no firing) until the slimes already running to it have boarded, THEN pull
-      // into a bay — so those slimes never chase the car across into the waiting bay.
+      if (!this.active.includes(a)) continue; // pulled off by a group partner this frame
+      if (groupStepped.has(a)) continue; // already advanced as part of a group this frame
+      if (a.entering) continue; // still gliding onto the ray (tween-driven), not driving yet
+      // Route done but slimes are still running to it (anywhere in the group): keep
+      // DRIVING a bit further so they board on the ray (not chase it into a bay). Park
+      // the moment the WHOLE group's runners are aboard.
+      if (a.finishing && this.groupInFlight(a.view) <= 0) {
+        this.parkChest(a);
+        continue;
+      }
+      // Finished its route and holding-to-park: stay still until the group's last
+      // runners board, THEN pull into a bay — so runners never chase it into the bay.
       if (a.parkPending) {
-        if (a.view.inFlight <= 0) this.parkChest(a);
+        if (this.groupInFlight(a.view) <= 0) this.parkChest(a);
         continue;
       }
 
-      let gapAhead = N;
-      for (const b of this.active) {
-        if (b === a) continue;
-        const d = (((b.pos - a.pos) % N) + N) % N;
-        if (d > 0 && d < gapAhead) gapAhead = d;
-      }
-      // A just-spawned car drives in 2× until it grabs its first slime, so it isn't
-      // slow crossing the empty grass before reaching the grid.
-      const driveMul = a.approaching ? 2 : 1;
-      let adv = SPEED * driveMul * dt;
-      if (gapAhead - adv < MIN_GAP) adv = Math.max(0, gapAhead - MIN_GAP);
+      // Linked cars move as ONE rigid unit: every drivable member advances by the
+      // SMALLEST allowed step, so spacing stays exactly constant and they travel at
+      // identical speed (no catch-up wobble, no overlap). Works for 2, 3, … members.
+      const mates = a.view.group
+        ? this.active.filter((x) => a.view.group!.includes(x.view) && !x.parkPending && !x.entering)
+        : [a];
 
-      if (adv > 0) {
-        if (this.openTrack) {
-          // One-way line/U/arch: advance WITHOUT wrapping (no ring modulo) so the
-          // car never teleports from the end back to the start. When it reaches
-          // the final node it pulls straight into a waiting bay from there.
-          a.pos = Math.min(a.pos + adv, N - 1);
-          while (a.lastNode < Math.floor(a.pos)) {
-            a.lastNode++;
-            a.steps++;
-          }
-          if (a.pos >= N - 1) {
-            // reached the end: settle on the final node. If slimes are still running
-            // to it, wait for them to board before pulling into a bay.
-            const end = this.track[N - 1];
-            a.view.container.setPosition(end.x, end.y);
-            this.steerCar(a, dt);
-            if (a.view.inFlight > 0) {
-              a.parkPending = true;
-              a.view.waiting = true; // last runners rush in
-            } else this.parkChest(a);
-            continue;
-          }
-          a.view.container.setPosition(this.lerpX(a.pos), this.lerpY(a.pos));
-          this.steerCar(a, dt);
-        } else {
-          a.pos = (a.pos + adv) % N;
-          let guard = 0;
-          let parked = false;
-          while (a.lastNode !== Math.floor(a.pos) && guard++ < N) {
-            a.lastNode = (a.lastNode + 1) % N;
-            a.steps++;
-            if (a.steps >= N) {
-              // Completed a full loop without emptying. If slimes are still running
-              // to it, hold here until they board; otherwise park in a waiting slot.
-              if (a.view.inFlight > 0) {
-                a.parkPending = true;
-                a.view.waiting = true; // last runners rush in
-              } else this.parkChest(a);
-              parked = true;
-              break;
-            }
-          }
-          if (parked) continue;
-          a.view.container.setPosition(this.lerpX(a.pos), this.lerpY(a.pos));
-          // Turn the sprite to follow the road, smoothed so corners look fluid
-          // (only the sprite turns — the seat number stays upright).
-          this.steerCar(a, dt);
+      if (mates.length > 1) {
+        let adv = Infinity;
+        for (const m of mates) adv = Math.min(adv, this.freeAdvance(m, dt, boost));
+        for (const m of mates) {
+          if (!this.active.includes(m)) continue; // a partner parked the whole group already
+          const parked = this.stepCar(m, adv, dt, boost);
+          groupStepped.add(m);
+          if (!parked && !m.finishing) this.tryShoot(m, time, boost);
         }
-      }
-
-      // Shoot at any same-color key with a clear line of sight (any angle), gated
-      // by a cooldown. Once the queue (zone 3) is empty — no more cars left to send
-      // up — the remaining in-play cars pick 3× faster so the endgame isn't a grind.
-      const cooldown = boost ? SHOT_COOLDOWN / 3 : SHOT_COOLDOWN;
-      if (time - a.lastShot >= cooldown) {
-        // open seats = shown count minus critters already running to this car
-        let openSeats = a.view.chest.count - a.view.inFlight;
-        if (openSeats > 0) {
-          // Normal: grab the single nearest slime in sight. Boosted (queue empty):
-          // grab EVERY matching slime in the car's 3 lines of sight this tick, so it
-          // clears faster without driving any faster.
-          const targets = this.findLosTargets(a);
-          const take = boost ? targets.length : Math.min(1, targets.length);
-          let fired = false;
-          for (let k = 0; k < take && openSeats > 0; k++) {
-            this.fire(a, targets[k]);
-            openSeats--;
-            fired = true;
-          }
-          if (fired) {
-            a.lastShot = time;
-            a.approaching = false; // first slime grabbed → back to normal drive speed
-          }
-        }
+      } else {
+        const parked = this.stepCar(a, this.freeAdvance(a, dt, boost), dt, boost);
+        if (!parked && !a.finishing) this.tryShoot(a, time, boost); // finishing → just let last runners board
       }
     }
 
     this.updateRunners(dt);
   }
 
+  // How far this car may advance this frame: a single uniform speed for EVERY car
+  // (no "fresh car dashes in faster" — that read as jittery/uneven), clamped so it
+  // never comes within MIN_GAP of another car. Same-group members are excluded — a
+  // linked group's shared step is decided by the caller.
+  private freeAdvance(a: ActiveChest, dt: number, boost: boolean): number {
+    const N = this.track.length;
+    const mates = a.view.group;
+    let gapAhead = N;
+    for (const b of this.active) {
+      if (b === a) continue;
+      if (mates && mates.includes(b.view)) continue; // group moves together, don't self-block
+      const d = (((b.pos - a.pos) % N) + N) % N;
+      if (d > 0 && d < gapAhead) gapAhead = d;
+    }
+    let adv = SPEED * (boost ? 2 : 1) * dt; // endgame (queue empty) → drive 2× faster too
+    if (gapAhead - adv < MIN_GAP) adv = Math.max(0, gapAhead - MIN_GAP);
+    return adv;
+  }
+
+  // Advance a car by `adv` nodes and steer its sprite. Handles reaching the end of an
+  // open route / completing a ring lap → park (or hold for last runners). Returns true
+  // if the car left the ray this frame (or is now holding to park) → skip its shooting.
+  private stepCar(a: ActiveChest, adv: number, dt: number, boost: boolean): boolean {
+    const N = this.track.length;
+    if (adv <= 0) return false;
+    if (this.openTrack) {
+      // One-way line/U/arch: advance WITHOUT wrapping (no ring modulo) so the car
+      // never teleports from the end back to the start.
+      a.pos = Math.min(a.pos + adv, N - 1);
+      while (a.lastNode < Math.floor(a.pos)) {
+        a.lastNode++;
+        a.steps++;
+      }
+      if (a.pos >= N - 1) {
+        // Endgame (no cars left in the lineup) OR still-collectable (AUTO_CIRCLE): DON'T
+        // retire to a bay — loop back to the entrance and keep hunting slimes.
+        if (boost || this.canKeepCircling(a)) {
+          a.pos = this.startIndex;
+          a.lastNode = this.startIndex;
+          a.steps = 0;
+          a.view.container.setPosition(this.lerpX(a.pos), this.lerpY(a.pos));
+          this.steerCar(a, dt);
+          return false;
+        }
+        const end = this.track[N - 1];
+        a.view.container.setPosition(end.x, end.y);
+        this.steerCar(a, dt);
+        if (this.groupInFlight(a.view) > 0) {
+          a.parkPending = true;
+          a.view.waiting = true; // last runners rush in
+        } else this.parkChest(a);
+        return true;
+      }
+      a.view.container.setPosition(this.lerpX(a.pos), this.lerpY(a.pos));
+      this.steerCar(a, dt);
+      return false;
+    }
+    a.pos = (a.pos + adv) % N;
+    let guard = 0;
+    while (a.lastNode !== Math.floor(a.pos) && guard++ < N) {
+      a.lastNode = (a.lastNode + 1) % N;
+      a.steps++;
+      if (a.steps >= N) {
+        // Completed a full loop without emptying. Endgame (lineup empty) OR still able
+        // to collect more of its colour (AUTO_CIRCLE): keep looping instead of parking.
+        if (boost || this.canKeepCircling(a)) {
+          a.steps = 0;
+          continue;
+        }
+        // Still have slimes running to it: DON'T stop — drive a bit further (up to one
+        // more lap) so they board on the ray, then park (handled in the main loop the
+        // moment inFlight hits 0). Only if that extra lap also elapses do we hold/park.
+        if (this.groupInFlight(a.view) > 0 && !a.finishing) {
+          a.finishing = true;
+          a.view.waiting = true; // last runners rush in
+          a.steps = 0;
+          continue; // keep driving this frame
+        }
+        if (this.groupInFlight(a.view) > 0) {
+          a.parkPending = true;
+          a.view.waiting = true;
+        } else this.parkChest(a);
+        return true;
+      }
+    }
+    a.view.container.setPosition(this.lerpX(a.pos), this.lerpY(a.pos));
+    this.steerCar(a, dt);
+    return false;
+  }
+
+  // Fire at same-colour targets in the car's line of sight, gated by the shot cooldown.
+  private tryShoot(a: ActiveChest, time: number, boost: boolean) {
+    const cooldown = boost ? SHOT_COOLDOWN / 3 : SHOT_COOLDOWN;
+    if (time - a.lastShot < cooldown) return;
+    let openSeats = a.view.chest.count - a.view.inFlight;
+    if (openSeats <= 0) return;
+    // Normal: grab the single nearest slime in sight. Boosted (queue empty): grab
+    // EVERY matching slime in the car's 3 lines of sight this tick.
+    const targets = this.findLosTargets(a);
+    const take = boost ? targets.length : Math.min(1, targets.length);
+    let fired = false;
+    for (let k = 0; k < take && openSeats > 0; k++) {
+      const idx = targets[k];
+      if (!this.keys[idx]) continue; // already cleared this tick (e.g. same 2×2 unit)
+      // In-place effects (no runner): soft rock cracks/shatters, wood pops.
+      const code = this.level.board[idx];
+      const kind = isObstacle(code) ? obstacleKind(code) : null;
+      if (kind === "soft") this.hitSoftRock(a, idx);
+      else if (kind === "wood") this.collectWood(a, idx);
+      else this.fire(a, idx);
+      openSeats--;
+      fired = true;
+    }
+    if (fired) {
+      a.lastShot = time;
+      a.approaching = false; // first slime grabbed → back to normal drive speed
+    }
+  }
+
   // True when the lineup queue (zone 3) has no cars left to launch — i.e. nothing
   // more will be pushed up. Used to speed up pickups for the in-play cars.
   private queueEmpty(): boolean {
     return !this.invColumns.some((col) => col.some((v) => v.container.scene));
+  }
+
+  // ---- Linked-car group helpers (twin = 2, triple = 3, …) -------------
+  // All cars linked with `view`, in order; a solo car → just [view].
+  private groupOf(view: ChestView): ChestView[] {
+    return view.group ?? [view];
+  }
+  // Group members still in play (haven't driven off).
+  private liveGroup(view: ChestView): ChestView[] {
+    return this.groupOf(view).filter((m) => !m.left);
+  }
+  private isGrouped(view: ChestView): boolean {
+    return !!view.group && view.group.length > 1;
+  }
+  // Total in-flight runners across the whole group — so a group never parks/leaves
+  // while ANY member's critters are still running in.
+  private groupInFlight(view: ChestView): number {
+    return this.groupOf(view).reduce((n, m) => n + (m.left ? 0 : m.inFlight), 0);
+  }
+
+  // ---- Auto-drive helpers (AUTO_CIRCLE) -------------------------------
+  // Colours that have at least one slime CURRENTLY REACHABLE — i.e. the first
+  // occupied cell scanning inward from an edge (left/right/top/bottom) is a slime of
+  // that colour, so a car of that colour can actually shoot it (blocked-behind slimes
+  // don't count). Recomputed each frame in update(). This is the key signal: a car
+  // keeps circling only while its colour is reachable, and parks (freeing the slot)
+  // when it isn't — so blocked cars never hog the ray and deadlock the board.
+  private reachableColors = new Set<number>();
+  private computeReachableColors() {
+    this.reachableColors.clear();
+    const cols = this.level.cols, rows = this.level.rows;
+    const board = this.level.board;
+    const addHit = (hit: { idx: number; steps: number } | null) => {
+      if (!hit) return;
+      if (this.hiddenSet.has(hit.idx)) return; // a "?" slime isn't collectable yet
+      const code = board[hit.idx];
+      if (code >= 0 && code < HARD_ROCK) this.reachableColors.add(code); // exposed slime
+    };
+    // Cast the SAME 3 rays the car shoots (straight + two 45° diagonals) from every
+    // lane of every edge the track actually runs along — so this matches real LOS
+    // exactly (diagonals count), and edges the car never drives (e.g. a U's top) don't.
+    const k = this.trackKind;
+    const useBottom = k !== "arch"; // line / u / square / rect drive the bottom
+    const useTop = k === "arch" || k === "square" || k === "rect";
+    const useLeft = k === "u" || k === "arch" || k === "square" || k === "rect";
+    const useRight = useLeft;
+    for (let sc = 0; sc < cols; sc++) {
+      if (useBottom) {
+        addHit(this.rayHit(rows - 1, sc, -1, 0));
+        addHit(this.rayHit(rows - 1, sc - 1, -1, -1));
+        addHit(this.rayHit(rows - 1, sc + 1, -1, 1));
+      }
+      if (useTop) {
+        addHit(this.rayHit(0, sc, 1, 0));
+        addHit(this.rayHit(0, sc - 1, 1, -1));
+        addHit(this.rayHit(0, sc + 1, 1, 1));
+      }
+    }
+    for (let sr = 0; sr < rows; sr++) {
+      if (useLeft) {
+        addHit(this.rayHit(sr, 0, 0, 1));
+        addHit(this.rayHit(sr - 1, 0, -1, 1));
+        addHit(this.rayHit(sr + 1, 0, 1, 1));
+      }
+      if (useRight) {
+        addHit(this.rayHit(sr, cols - 1, 0, -1));
+        addHit(this.rayHit(sr - 1, cols - 1, -1, -1));
+        addHit(this.rayHit(sr + 1, cols - 1, 1, -1));
+      }
+    }
+  }
+
+  // Can THIS one car still grab something right now: a normal colour car with an open
+  // seat whose colour is currently reachable. (Obstacle cars are excluded from auto.)
+  private carCanCollect(v: ChestView): boolean {
+    if ((v.chest.kind ?? "color") !== "color") return false;
+    if (v.chest.count - v.inFlight <= 0) return false; // no free seat to fill
+    return this.reachableColors.has(v.chest.color);
+  }
+
+  // A car keeps circling (instead of parking) while it can still collect. Linked cars
+  // move as ONE unit, so the whole group keeps going if ANY member can still collect.
+  private canKeepCircling(a: ActiveChest): boolean {
+    if (!AUTO_CIRCLE) return false;
+    return this.liveGroup(a.view).some((m) => this.carCanCollect(m));
+  }
+
+  // A parked bay car "wants out" when it has a seat, its colour is reachable again (an
+  // outer ring was peeled), and no other active/pending car of that colour is already
+  // handling it.
+  private bayMemberWantsOut(c: ChestView): boolean {
+    if (!this.carCanCollect(c)) return false;
+    const color = c.chest.color;
+    const sameColour = (x: ChestView) => x.chest.color === color && (x.chest.kind ?? "color") === "color";
+    const busy =
+      this.active.some((a) => sameColour(a.view) && a.view.chest.count > 0) ||
+      this.pending.some((p) => sameColour(p) && p.chest.count > 0);
+    return !busy;
+  }
+
+  // Mechanic 2: a parked car (or linked group) hops back onto the ray by itself when it
+  // can collect again. Track cap (5) still applies — a triple needs 3 free slots, etc.
+  private autoRelaunchBays() {
+    if (!AUTO_CIRCLE) return;
+    if (this.tutStep > 0) return; // don't auto-play during the level-1 tutorial
+    if (this.handMode || this.magnetMode) return; // don't fight a booster mid-arm
+    for (let i = 0; i < this.slots.length; i++) {
+      const v = this.slots[i];
+      if (!v) continue;
+      if ((v.chest.kind ?? "color") !== "color") continue;
+      // A linked group relaunches together. If a live member isn't also parked, leave
+      // the group alone (don't split it) — let manual control handle that odd state.
+      const live = this.liveGroup(v);
+      if (live.some((m) => !this.slots.includes(m))) continue;
+      if (this.active.length + this.pending.length + live.length > MAX_ON_TRACK) continue; // no room
+      // relaunch if ANY member wants out (for a group, one member with work is enough)
+      if (!live.some((c) => this.bayMemberWantsOut(c))) continue;
+      this.relaunchFromSlot(i); // handles the whole group itself
+      return; // one launch per frame — next frame handles any others
+    }
   }
 
   // Point the car sprite along the road, but SMOOTHLY. Two things make corners
@@ -2088,8 +3264,16 @@ export class GameScene extends Phaser.Scene {
   // hit matches the car's colour, it grabs the NEAREST one. So a slime sitting
   // diagonally (not only straight ahead) is collectable too, while the clean
   // outside-in peeling still holds.
+  // What a given car is allowed to collect from a board cell code:
+  //   colour car → a slime of its own colour · hammer car → soft rock · wood car → wood.
+  private chestWants(chest: Chest, code: number): boolean {
+    if (chest.kind === "hammer") return isObstacle(code) && obstacleKind(code) === "soft";
+    if (chest.kind === "wood") return isObstacle(code) && obstacleKind(code) === "wood";
+    return code >= 0 && code < HARD_ROCK && code === chest.color; // a matching slime
+  }
+
   private findLosTargets(a: ActiveChest): number[] {
-    const color = a.view.chest.color;
+    const chest = a.view.chest;
     const cx = a.view.container.x;
     const cy = a.view.container.y;
     const cols = this.level.cols;
@@ -2139,7 +3323,8 @@ export class GameScene extends Phaser.Scene {
     const seen = new Set<number>();
     for (const ray of rays) {
       const hit = this.rayHit(ray.r, ray.c, ray.dr, ray.dc);
-      if (hit && this.level.board[hit.idx] === color && !seen.has(hit.idx)) {
+      // A still-hidden "?" slime can never be targeted (its colour is unknown).
+      if (hit && !this.hiddenSet.has(hit.idx) && this.chestWants(chest, this.level.board[hit.idx]) && !seen.has(hit.idx)) {
         seen.add(hit.idx);
         hits.push(hit);
       }
@@ -2198,21 +3383,124 @@ export class GameScene extends Phaser.Scene {
     this.fireTo(a.view, cellIdx);
   }
 
+  // A hammer car strikes a soft rock: crack on the first hit, shatter on the second.
+  // No runner boards — it's an in-place hit that consumes one of the car's swings.
+  private hitSoftRock(a: ActiveChest, idx: number) {
+    const key = this.keys[idx];
+    if (!key) return;
+    const view = a.view;
+    view.chest.count = Math.max(0, view.chest.count - 1); // one swing spent
+    view.countText.setText(String(view.chest.count));
+
+    this.aimBeam(view.container.x, view.container.y, key.x, key.y, 0xcaa06a);
+
+    const hp = ((key.getData("hp") as number) ?? 2) - 1;
+    if (hp <= 0) {
+      const cells = (key.getData("cells") as number[]) ?? [idx];
+      for (const ci of cells) this.keys[ci] = null; // a 2×2 soft rock clears all four
+      this.keysRemaining -= 1;
+      this.revealHiddenAround(cells);
+      this.explode(key.x, key.y, this.cell * 1.3, 12, 0xcaa06a, 6); // big rock burst
+      key.destroy();
+    } else {
+      key.setData("hp", hp);
+      const num = key.getData("hpText") as Phaser.GameObjects.Text | undefined;
+      if (num) num.setText(String(hp)); // remaining hits
+      const body = key.getData("body") as Phaser.GameObjects.Image;
+      body.setTexture("rock-soft-cracked");
+      body.setDisplaySize(key.width * 1.08, key.width * 1.08); // keep footprint after swap
+      this.tweens.add({ targets: key, angle: 8, duration: 55, yoyo: true }); // shake
+    }
+    Audio.board();
+    if (view.chest.count <= 0) this.finishCar(view); // out of swings → drive off
+    if (this.keysRemaining <= 0 && this.runners.length === 0) this.win();
+  }
+
+  // A wood car grabs a wood block: it pops in place with a small burst (no runner).
+  private collectWood(a: ActiveChest, idx: number) {
+    const key = this.keys[idx];
+    if (!key) return;
+    const view = a.view;
+    view.chest.count = Math.max(0, view.chest.count - 1);
+    view.countText.setText(String(view.chest.count));
+    this.aimBeam(view.container.x, view.container.y, key.x, key.y, 0x9a6b3f);
+    const cells = (key.getData("cells") as number[]) ?? [idx];
+    for (const ci of cells) this.keys[ci] = null;
+    this.keysRemaining -= 1;
+    this.revealHiddenAround(cells);
+    this.explode(key.x, key.y, this.cell * 0.95, 8, 0xb5834a, 5); // small wood burst
+    key.destroy();
+    Audio.board();
+    if (view.chest.count <= 0) this.finishCar(view);
+    if (this.keysRemaining <= 0 && this.runners.length === 0) this.win();
+  }
+
+  // A burst of chips + a flash ring where an obstacle is destroyed/collected.
+  private explode(x: number, y: number, radius: number, count: number, color: number, chip: number) {
+    for (let i = 0; i < count; i++) {
+      const ang = (Math.PI * 2 * i) / count + (i % 2) * 0.5;
+      const p = this.add.rectangle(x, y, chip, chip, color).setDepth(DEPTH_RUNNER + 1);
+      this.tweens.add({
+        targets: p,
+        x: x + Math.cos(ang) * radius,
+        y: y + Math.sin(ang) * radius,
+        angle: 180,
+        alpha: 0,
+        scale: 0.3,
+        duration: 340,
+        ease: "Quad.out",
+        onComplete: () => p.destroy(),
+      });
+    }
+    const ring = this.add.circle(x, y, radius * 0.5, color, 0.4).setDepth(DEPTH_RUNNER);
+    this.tweens.add({
+      targets: ring,
+      scale: 1.8,
+      alpha: 0,
+      duration: 260,
+      ease: "Quad.out",
+      onComplete: () => ring.destroy(),
+    });
+  }
+
   // Send the slime at cellIdx running to board `view` (a normal car OR the VIP
   // magnet car). Shared by the line-of-sight pickup and the Magnet booster.
   private fireTo(view: ChestView, cellIdx: number) {
     const key = this.keys[cellIdx]!;
-    this.keys[cellIdx] = null;
+    // Clear EVERY cell this tile occupies (a 2×2 wood clears all four at once), but
+    // it still counts as one collected unit / one seat.
+    const cells = (key.getData("cells") as number[]) ?? [cellIdx];
+    for (const ci of cells) this.keys[ci] = null;
     this.keysRemaining -= 1;
+    this.revealHiddenAround(cells); // an opened side reveals any adjacent "?" slime
     view.inFlight += 1; // reserve a seat so the car won't over-collect while this one runs
 
     // Rare treat: the slime that fills this car's LAST seat (count → 0) has a
     // 1-in-100 chance to be a bigger "Nice!" slime.
     const nice = view.inFlight === view.chest.count && Math.random() < 0.5; // 50% chance on a car's last slime
 
-    const color = COLORS[this.level.board[cellIdx]];
+    // Wood has no palette colour → use a wood-brown for its beam/sparkle/legs.
+    const boardCode = this.level.board[cellIdx];
+    const color = boardCode >= 0 && boardCode < HARD_ROCK ? COLORS[boardCode] : 0x9a6b3f;
     const s = this.cell;
     const legCol = shade(color, 0.5);
+
+    // 2-LAYER slime: the collected top uncovers a DIFFERENT-colour bottom slime in the
+    // same cell (a fresh tile pops in; keysRemaining already counted it). user 2026-07-24.
+    const lay2 = this.level.layer2;
+    if (lay2 && lay2[cellIdx] >= 0) {
+      const bottom = lay2[cellIdx];
+      lay2[cellIdx] = -1;
+      this.level.board[cellIdx] = bottom;
+      const cols2 = this.level.cols;
+      const bx = this.gridX + ((cellIdx % cols2) + 0.5) * this.cell;
+      const by = this.gridY + (Math.floor(cellIdx / cols2) + 0.5) * this.cell;
+      const nk = this.makeKey(bottom, bx, by, this.cell);
+      this.keys[cellIdx] = nk;
+      nk.setScale(0.5);
+      this.tweens.add({ targets: nk, scale: 1, duration: 170, ease: "Back.out" });
+      this.sparkle(bx, by, COLORS[bottom]);
+    }
 
     // quick "collect beam": a line flashes from the car to the critter it's
     // grabbing, then fades as the critter sets off running.
@@ -2295,8 +3583,9 @@ export class GameScene extends Phaser.Scene {
       // squash & stretch along the travel direction — a determined reach in the
       // final sprint makes it read as "straining to catch up"
       const st = 0.05 + speedFrac * 0.06 + closing * 0.16;
-      // grow up to +60% as it reaches the car; a rare "Nice!" slime is 120% of that
-      const base = 1.08 * (1 + closing * 0.6) * (r.nice ? 1.2 : 1);
+      // ~20% bigger overall than before; still grows as it reaches the car; a rare
+      // "Nice!" slime is 120% of that
+      const base = 1.3 * (1 + closing * 0.72) * (r.nice ? 1.2 : 1);
       if (Math.abs(vx) >= Math.abs(vy)) r.node.setScale(base * (1 + st), base * (1 - st * 0.6));
       else r.node.setScale(base * (1 - st * 0.6), base * (1 + st));
 
@@ -2310,21 +3599,22 @@ export class GameScene extends Phaser.Scene {
       if (dist <= step + 8) {
         // reached the car → NOW it boards: seat count drops, legs gone
         this.runners.splice(this.runners.indexOf(r), 1);
-        // little "hop aboard" pop: swell 10% bigger as it vanishes onto the car
+        // juicy "hop aboard" pop: swell BIG (×1.7) with a bouncy overshoot as it
+        // vanishes onto the car — reads as a satisfying "bụp" (user 2026-07-23).
         const n = r.node;
         this.tweens.add({
           targets: n,
-          scaleX: n.scaleX * 1.1,
-          scaleY: n.scaleY * 1.1,
+          scaleX: n.scaleX * 1.7,
+          scaleY: n.scaleY * 1.7,
           alpha: 0,
-          duration: 150,
+          duration: 140,
           ease: "Back.out",
           onComplete: () => n.destroy(),
         });
         car.inFlight = Math.max(0, car.inFlight - 1);
         car.chest.count = Math.max(0, car.chest.count - 1);
         car.countText.setText(String(car.chest.count));
-        Audio.board(); // cheerful blip as the slime hops aboard
+        Audio.pop(); // soft light "munch" pop as the slime hops aboard (gentler than board())
         if (r.nice) this.niceEffect(car.container.x, car.container.y); // rare treat!
         if (car.container.scene) this.pulse(car.container);
         if (car.chest.count <= 0) {
@@ -2339,83 +3629,40 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  // A punchy LIGHTNING zap from the car to the critter it's grabbing: a jagged
-  // bolt (coloured glow + white core) that flickers a few times, a muzzle spark at
-  // the car, and a bright impact flash + ring at the slime.
+  // A friendly "collect" spark when a car grabs a slime: a soft link that fades
+  // fast, a happy pop-ring at the slime, and a few little stars (in the slime's
+  // colour) reeled from the slime toward the car — like it's being picked up.
   private aimBeam(x0: number, y0: number, x1: number, y1: number, color: number) {
-    const g = this.add.graphics().setDepth(DEPTH_RUNNER + 2);
-    const drawBolt = () => {
-      g.clear();
-      const main = this.boltPoints(x0, y0, x1, y1);
-      g.lineStyle(8, color, 0.22); // soft outer glow
-      this.strokePolyline(g, main);
-      g.lineStyle(4, color, 0.7); // coloured body
-      this.strokePolyline(g, main);
-      g.lineStyle(1.6, 0xffffff, 1); // hot white core
-      this.strokePolyline(g, main);
-      // a couple of little forked branches for extra crackle
-      for (let b = 0; b < 2; b++) {
-        const t = 0.35 + b * 0.3;
-        const bx = x0 + (x1 - x0) * t;
-        const by = y0 + (y1 - y0) * t;
-        const branch = this.boltPoints(bx, by, bx + (Math.random() * 2 - 1) * 18, by + (Math.random() * 2 - 1) * 18);
-        g.lineStyle(1.4, 0xffffff, 0.8);
-        this.strokePolyline(g, branch);
-      }
-    };
-    drawBolt();
+    // soft, gentle link (no harsh bolt)
+    const g = this.add.graphics().setDepth(DEPTH_RUNNER + 1);
+    g.lineStyle(5, color, 0.25);
+    g.lineBetween(x0, y0, x1, y1);
+    g.lineStyle(1.5, 0xffffff, 0.55);
+    g.lineBetween(x0, y0, x1, y1);
+    this.tweens.add({ targets: g, alpha: 0, duration: 200, ease: "Quad.out", onComplete: () => g.destroy() });
 
-    // flicker: redraw a fresh jagged path a few times
-    const flick = this.time.addEvent({ delay: 40, repeat: 3, callback: drawBolt });
+    // cheerful pop-ring at the slime
+    const ring = this.add.circle(x1, y1, 7).setStrokeStyle(3, color, 0.9).setDepth(DEPTH_RUNNER + 2);
+    this.tweens.add({ targets: ring, scale: 2.2, alpha: 0, duration: 340, ease: "Quad.out", onComplete: () => ring.destroy() });
 
-    // muzzle spark at the car end
-    const muzzle = this.add.circle(x0, y0, 6, 0xffffff, 0.9).setDepth(DEPTH_RUNNER + 2);
-    this.tweens.add({ targets: muzzle, scale: 1.8, alpha: 0, duration: 200, ease: "Quad.out", onComplete: () => muzzle.destroy() });
-
-    // impact flash + expanding ring at the slime
-    const flash = this.add.circle(x1, y1, 9, 0xffffff, 0.95).setDepth(DEPTH_RUNNER + 2);
-    this.tweens.add({ targets: flash, scale: 2.6, alpha: 0, duration: 280, ease: "Quad.out", onComplete: () => flash.destroy() });
-    const ring = this.add.circle(x1, y1, 6).setStrokeStyle(3, color, 0.95).setDepth(DEPTH_RUNNER + 2);
-    this.tweens.add({ targets: ring, scale: 3, alpha: 0, duration: 320, ease: "Quad.out", onComplete: () => ring.destroy() });
-
-    // fade the whole bolt out, then clean up
-    this.tweens.add({
-      targets: g,
-      alpha: 0,
-      duration: 200,
-      delay: 110,
-      ease: "Quad.in",
-      onComplete: () => {
-        flick.remove();
-        g.destroy();
-      },
-    });
-  }
-
-  // A jagged "lightning" path between two points: perpendicular jitter, largest in
-  // the middle and tapering to 0 at both ends so it still hits car & slime cleanly.
-  private boltPoints(x0: number, y0: number, x1: number, y1: number): { x: number; y: number }[] {
-    const dx = x1 - x0;
-    const dy = y1 - y0;
-    const len = Math.hypot(dx, dy) || 1;
-    const px = -dy / len;
-    const py = dx / len; // perpendicular unit vector
-    const segs = Math.max(4, Math.round(len / 16));
-    const amp = Math.min(16, len * 0.18);
-    const pts: { x: number; y: number }[] = [];
-    for (let i = 0; i <= segs; i++) {
-      const t = i / segs;
-      const off = i === 0 || i === segs ? 0 : (Math.random() * 2 - 1) * amp * Math.sin(Math.PI * t);
-      pts.push({ x: x0 + dx * t + px * off, y: y0 + dy * t + py * off });
+    // little stars pop at the slime, then get gently reeled toward the car
+    for (let i = 0; i < 4; i++) {
+      const s = this.add.star(x1, y1, 5, 2.2, 4.6, color).setDepth(DEPTH_RUNNER + 2);
+      const t = 0.4 + 0.5 * (i / 3); // travel partway to the car
+      const tx = x1 + (x0 - x1) * t;
+      const ty = y1 + (y0 - y1) * t;
+      this.tweens.add({
+        targets: s,
+        x: tx,
+        y: ty,
+        scale: { from: 1.1, to: 0.2 },
+        alpha: { from: 1, to: 0 },
+        angle: 160,
+        duration: 300 + i * 30,
+        ease: "Quad.out",
+        onComplete: () => s.destroy(),
+      });
     }
-    return pts;
-  }
-
-  private strokePolyline(g: Phaser.GameObjects.Graphics, pts: { x: number; y: number }[]) {
-    g.beginPath();
-    g.moveTo(pts[0].x, pts[0].y);
-    for (let i = 1; i < pts.length; i++) g.lineTo(pts[i].x, pts[i].y);
-    g.strokePath();
   }
 
   // A small dust puff kicked up at a running critter's feet.
@@ -2453,24 +3700,56 @@ export class GameScene extends Phaser.Scene {
     this.tweens.add({ targets: c, scale: 1.14, duration: 80, yoyo: true });
   }
 
-  // Draw the "holding hands" rope between each live twin pair (skipped when they
-  // are far apart, e.g. mid-transition, so no long line stretches across screen).
+  // Draw the "holding hands" rope between consecutive members of each live linked
+  // group (skipped when they are far apart, e.g. mid-transition, so no long line
+  // stretches across screen). A triple gets two ropes, etc.
   private drawTwinLinks() {
     const g = this.twinLinkG;
     if (!g) return;
     g.clear();
-    for (const [a, b] of this.twinPairs) {
+    for (const group of this.carGroups) {
+     for (let seg = 0; seg + 1 < group.length; seg++) {
+      const a = group[seg];
+      const b = group[seg + 1];
       if (a.left || b.left || !a.container.scene || !b.container.scene) continue;
       const ax = a.container.x;
       const ay = a.container.y;
       const bx = b.container.x;
       const by = b.container.y;
-      if (Phaser.Math.Distance.Between(ax, ay, bx, by) > this.chestSize * 3.5) continue;
-      g.lineStyle(4, 0xffcf6a, 0.95);
-      g.lineBetween(ax, ay, bx, by);
+      const dist = Phaser.Math.Distance.Between(ax, ay, bx, by);
+      // Draw the rope even when the twins are pulled far apart — different queue rows,
+      // or spread out while lining up. Only skip a truly screen-spanning stretch (e.g.
+      // a mid-launch tween with one car still in the queue) to avoid a stray line.
+      if (dist > GAME_W * 0.95) continue;
+
+      // A rope that droops gently downward, like two hands linked between the cars.
+      const mx = (ax + bx) / 2;
+      const my = (ay + by) / 2;
+      const sag = Math.min(dist * 0.22, this.chestSize * 0.5);
+      const cx = mx;
+      const cy = my + sag; // control point pulled down by "gravity"
+      const N = 14;
+      const pts: Phaser.Math.Vector2[] = [];
+      for (let i = 0; i <= N; i++) {
+        const t = i / N;
+        const it = 1 - t;
+        const x = it * it * ax + 2 * it * t * cx + t * t * bx;
+        const y = it * it * ay + 2 * it * t * cy + t * t * by;
+        pts.push(new Phaser.Math.Vector2(x, y));
+      }
+
+      g.lineStyle(12, 0xff7a4d, 0.25); // soft warm glow
+      g.strokePoints(pts, false, false);
+      g.lineStyle(7, 0xff9d5a, 1); // main ribbon (warm coral-orange)
+      g.strokePoints(pts, false, false);
+      g.lineStyle(2.4, 0xffe9cf, 0.9); // bright highlight
+      g.strokePoints(pts, false, false);
+
+      // rounded "hands" where the rope meets each car
       g.fillStyle(0xfff3d0, 1);
-      g.fillCircle(ax + (bx - ax) / 3, ay + (by - ay) / 3, 3.5); // little hands
-      g.fillCircle(ax + (2 * (bx - ax)) / 3, ay + (2 * (by - ay)) / 3, 3.5);
+      g.fillCircle(pts[2].x, pts[2].y, 5);
+      g.fillCircle(pts[N - 2].x, pts[N - 2].y, 5);
+     }
     }
   }
 
@@ -2521,12 +3800,11 @@ export class GameScene extends Phaser.Scene {
 
   private finishCar(view: ChestView) {
     if (view.left) return; // already leaving
-    // Twin cars only leave when BOTH are full — the finished one keeps travelling
-    // (empty) alongside its partner until the partner fills too.
-    const twin = view.twin;
-    if (twin && !twin.left && twin.chest.count > 0) return;
-    this.leaveCar(view);
-    if (twin && !twin.left) this.leaveCar(twin);
+    // Linked cars only leave when EVERY member is full — a finished one keeps travelling
+    // (empty) alongside its group until the others fill too, then they all leave together.
+    const mates = this.liveGroup(view);
+    if (mates.some((m) => m.chest.count > 0)) return;
+    for (const m of mates) this.leaveCar(m);
   }
 
   private leaveCar(view: ChestView) {
@@ -2551,41 +3829,62 @@ export class GameScene extends Phaser.Scene {
     this.removeActive(a);
     a.view.waiting = false; // no longer waiting on runners
 
-    // Twin cars park TOGETHER: pull the partner off the road too and bay them side
-    // by side. Needs two free bays or the waiting queue overflows → game over.
-    const twin = a.view.twin;
-    if (twin && !twin.left) {
-      const frees = this.freeSlots(2);
-      if (frees.length < 2) {
-        this.lose();
+    // Linked cars park TOGETHER and MUST sit side by side. Left-pack the cars already
+    // waiting so the N rightmost bays are free & adjacent, then bay the group there.
+    // If fewer than N bays are free the queue can't hold the group → game over.
+    if (this.isGrouped(a.view)) {
+      const members = this.liveGroup(a.view); // ordered, includes `a`
+      const need = members.length;
+      const total = this.slots.length;
+      const occ = this.slots.reduce((n, s) => n + (s ? 1 : 0), 0);
+      if (occ > total - need) {
+        this.lose(a);
         return;
       }
-      const twinActive = this.active.find((x) => x.view === twin);
-      if (twinActive) {
-        this.removeActive(twinActive);
-        twin.waiting = false;
+      // pull any still-driving members off the ray so the whole group bays together
+      for (const m of members) {
+        if (m === a.view) continue;
+        const act = this.active.find((x) => x.view === m);
+        if (act) {
+          this.removeActive(act);
+          m.waiting = false;
+        }
       }
-      this.parkIntoSlot(a.view, frees[0]);
-      this.parkIntoSlot(twin, frees[1]);
+      this.compactSlots(); // slide waiting cars left so bays occ..occ+need-1 are free
+      members.forEach((m, k) => this.parkIntoSlot(m, occ + k));
       return;
     }
 
     const free = this.slots.findIndex((s) => s === null);
     if (free < 0) {
       // Waiting queue is full and yet another car needs a bay → game over.
-      this.lose();
+      this.lose(a);
       return;
     }
     this.parkIntoSlot(a.view, free);
   }
 
-  // Up to n free waiting-bay indices (in order).
-  private freeSlots(n: number): number[] {
-    const out: number[] = [];
-    for (let i = 0; i < this.slots.length && out.length < n; i++) {
-      if (this.slots[i] === null) out.push(i);
-    }
-    return out;
+  // Left-pack every parked car (order preserved) so any gaps end up on the right and
+  // the free bays are contiguous. Used before parking a twin pair so it always lands
+  // side by side. Moved cars slide over and have their relaunch tap rewired.
+  private compactSlots() {
+    const cars = this.slots.filter((s): s is ChestView => s !== null);
+    for (let i = 0; i < this.slots.length; i++) this.slots[i] = null;
+    cars.forEach((view, i) => {
+      this.slots[i] = view;
+      if (Math.abs(view.container.x - this.slotXs[i]) > 0.5) {
+        this.tweens.add({
+          targets: view.container,
+          x: this.slotXs[i],
+          y: this.slotY,
+          duration: 240,
+          ease: "Cubic.out",
+        });
+      }
+      const hit = view.container.getData("hit") as Phaser.GameObjects.Rectangle;
+      hit.removeAllListeners("pointerdown");
+      hit.on("pointerdown", () => this.relaunchFromSlot(i));
+    });
   }
 
   // Slide one car into a specific waiting bay and wire its relaunch tap.
@@ -2611,11 +3910,18 @@ export class GameScene extends Phaser.Scene {
     hit.removeAllListeners("pointerdown");
     hit.on("pointerdown", () => this.relaunchFromSlot(slotIndex));
 
-    // Tutorial step 2: the first car to park → point the hand at its bay.
+    // Tutorial step 2: the first car to park → point the hand at its bay. Wait for
+    // the slide-in tween to settle before dimming, so the spotlight lands on the car.
     if (this.tutStep === 2) {
       this.tutStep = 3;
-      this.showTutHint(this.slotXs[slotIndex], this.slotY, "Tap the parked car\nto send it out again!");
+      this.time.delayedCall(700, () => {
+        if (this.tutStep === 3 && !this.won && !this.lost) {
+          this.showTutHint(this.slotXs[slotIndex], this.slotY, "Tap the parked car\nto send it out again!", SLOT_SIZE * 0.9);
+        }
+      });
     }
+
+    this.updateSlotWarning(); // may now be full → flash the bays
   }
 
   private removeActive(a: ActiveChest) {
@@ -2625,32 +3931,138 @@ export class GameScene extends Phaser.Scene {
 
   // ---- Lose -----------------------------------------------------------
 
-  private lose() {
+  private lose(pending?: ActiveChest) {
     if (this.won || this.lost) return;
     this.lost = true;
+    this.failedThisAttempt = true; // a loss means a later win is worth 1 rock, not 2
     Audio.finish(); // (placeholder sfx)
+
+    const REVIVE_COST = 900;
+    const canAfford = this.gold >= REVIVE_COST;
+    const cx = GAME_W / 2;
+    const cy = GAME_H / 2;
+    const objs: Phaser.GameObjects.GameObject[] = [];
+
+    // Opaque cover with a soft warm-dark gradient (brown → near-black) instead of a
+    // flat fill, so the popup reads on a moody backdrop.
+    const cover = this.add.graphics().setDepth(399);
+    cover.fillGradientStyle(0x3c2c22, 0x3c2c22, 0x140d09, 0x140d09, 1);
+    cover.fillRect(cx - (GAME_W + 240) / 2, cy - (GAME_H + 240) / 2, GAME_W + 240, GAME_H + 240);
+    objs.push(cover);
     const dim = this.add
-      .rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0x000000, 0.6)
+      .rectangle(cx, cy, GAME_W + 240, GAME_H + 240, 0x000000, 0.001)
       .setDepth(400)
       .setInteractive();
-    this.add
-      .text(GAME_W / 2, GAME_H / 2 - 34, "HÀNG ĐỢI ĐẦY! 😵", {
-        fontFamily: "Arial, sans-serif",
-        fontStyle: "bold",
-        fontSize: "24px",
-        color: "#ffd0d0",
-      })
-      .setOrigin(0.5)
-      .setDepth(401);
-    this.add
-      .text(GAME_W / 2, GAME_H / 2 + 12, "Chạm để chơi lại màn này", {
-        fontFamily: "Arial, sans-serif",
-        fontSize: "15px",
-        color: "#ffe08a",
-      })
-      .setOrigin(0.5)
-      .setDepth(401);
-    dim.on("pointerdown", () => this.startLevel(this.levelNum));
+    objs.push(dim);
+
+    // Hero art ("OUT OF SPACE!" — already carries its own title & hint text).
+    const imgSize = Math.min(GAME_W - 56, 300);
+    const heroCY = cy - 92;
+    let heroBottom = heroCY;
+    if (this.textures.exists("out-of-space")) {
+      const hero = this.add.image(cx, heroCY, "out-of-space").setDepth(401);
+      const ts = imgSize / hero.width;
+      hero.setScale(ts * 0.4);
+      this.tweens.add({ targets: hero, scaleX: ts, scaleY: ts, duration: 360, ease: "Back.out" });
+      heroBottom = heroCY + (hero.height * ts) / 2;
+      objs.push(hero);
+    } else {
+      objs.push(
+        this.add
+          .text(cx, heroCY, "QUEUE FULL! 😵", {
+            fontFamily: "Arial, sans-serif",
+            fontStyle: "bold",
+            fontSize: "23px",
+            color: "#ffd0c4",
+          })
+          .setOrigin(0.5)
+          .setDepth(401)
+      );
+      heroBottom = heroCY + 20;
+    }
+
+    // Small rounded button helper (rounded rect + centred label + invisible hit zone).
+    const mkBtn = (
+      bx: number,
+      by: number,
+      bw: number,
+      bh: number,
+      label: string,
+      fill: number,
+      stroke: number,
+      onClick: () => void,
+      enabled = true
+    ) => {
+      const r = Math.min(bh / 2, 16);
+      const g = this.add.graphics().setDepth(402);
+      g.fillStyle(enabled ? fill : 0xa39b8c, 1);
+      g.fillRoundedRect(bx - bw / 2, by - bh / 2, bw, bh, r);
+      g.lineStyle(3, enabled ? stroke : 0x7d766a, 1);
+      g.strokeRoundedRect(bx - bw / 2, by - bh / 2, bw, bh, r);
+      objs.push(g);
+      objs.push(
+        this.add
+          .text(bx, by, label, {
+            fontFamily: "Arial, sans-serif",
+            fontStyle: "bold",
+            fontSize: `${Math.round(bh * 0.34)}px`,
+            color: enabled ? "#ffffff" : "#efe9dc",
+            align: "center",
+          })
+          .setOrigin(0.5)
+          .setDepth(403)
+      );
+      if (enabled) {
+        const hit = this.add
+          .rectangle(bx, by, bw, bh, 0xffffff, 0.001)
+          .setDepth(404)
+          .setInteractive({ useHandCursor: true });
+        hit.on("pointerdown", onClick);
+        objs.push(hit);
+      }
+    };
+
+    const closeAll = () => objs.forEach((o) => o.destroy());
+
+    // REVIVE: pay gold, clear the 5 waiting bays (cars drive up & off), then park
+    // the car that couldn't fit — and resume play.
+    const revive = () => {
+      if (this.gold < REVIVE_COST) return;
+      this.addGold(-REVIVE_COST);
+      this.lost = false;
+      closeAll();
+      const parked = this.slots.filter(Boolean) as ChestView[];
+      for (const v of parked) this.leaveCar(v); // drift up & leave → free the slot
+      if (pending) this.parkChest(pending);
+    };
+
+    // Revive button (green, big). Greyed out with a hint if the player can't pay.
+    const btnW = Math.min(GAME_W - 70, 280);
+    const reviveY = heroBottom + 34;
+    mkBtn(
+      cx,
+      reviveY,
+      btnW,
+      60,
+      canAfford ? `REVIVE   ${REVIVE_COST} 🪙` : `Need ${REVIVE_COST} 🪙 to revive`,
+      0x35b04a,
+      0x1f7d33,
+      revive,
+      canAfford
+    );
+
+    // Secondary row: replay this level | back to Home.
+    const gap = 14;
+    const bw = (btnW - gap) / 2;
+    const by = reviveY + 60;
+    mkBtn(cx - gap / 2 - bw / 2, by, bw, 46, "Replay", 0xd98a2b, 0xa5610f, () => {
+      closeAll();
+      this.startLevel(this.levelNum);
+    });
+    mkBtn(cx + gap / 2 + bw / 2, by, bw, 46, "Home", 0x6d7b8a, 0x49525d, () => {
+      closeAll();
+      this.scene.start("select");
+    });
   }
 
   // ---- Win ------------------------------------------------------------
@@ -2659,42 +4071,142 @@ export class GameScene extends Phaser.Scene {
     if (this.won) return;
     this.won = true;
     const next = this.levelNum + 1;
-    const reward = 50; // flat gold earned for clearing a level
-    this.addGold(reward);
+    // Gold is granted only the FIRST time a level is cleared (no replay farming).
+    const firstClear = this.claimFirstClearReward(this.levelNum);
+    const reward = firstClear ? 50 : 0;
+    if (reward > 0) this.addGold(reward);
     this.unlockProgress(next); // record on the picker that this level is beaten
+
+    // Lucky Clover event: award clovers + auto-grant any milestone rewards reached.
+    // Unlocks after Level 10; every win from then on collects clovers (2 for a clean
+    // first-try clear, else 1). isEventUnlocked() reads the progress we just saved.
+    let cloverAward: ReturnType<typeof awardClovers> | undefined;
+    if (this.levelNum >= EVENT_UNLOCK_LEVEL && isEventUnlocked() && !isEventComplete()) {
+      cloverAward = awardClovers(cloversForWin(firstClear, this.failedThisAttempt));
+      for (const m of cloverAward.granted) this.grantEventReward(m.reward);
+    }
+    const cx = GAME_W / 2;
+    const cy = GAME_H / 2;
+    // Opaque, over-sized cover that fully HIDES the game board/UI behind it. Soft
+    // sunny gradient (warm cream → grass green) instead of a flat fill.
+    const cover = this.add.graphics().setDepth(399);
+    cover.fillGradientStyle(0xfdf6d0, 0xfdf6d0, 0xb7dd9a, 0xb7dd9a, 1);
+    cover.fillRect(cx - (GAME_W + 240) / 2, cy - (GAME_H + 240) / 2, GAME_W + 240, GAME_H + 240);
     const dim = this.add
-      .rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0x000000, 0.55)
+      .rectangle(cx, cy, GAME_W + 240, GAME_H + 240, 0x000000, 0.001)
+      .setDepth(400)
       .setInteractive();
-    const t1 = this.add
-      .text(GAME_W / 2, GAME_H / 2 - 40, `LEVEL ${this.levelNum} COMPLETE! 🎉`, {
-        fontFamily: "Arial, sans-serif",
-        fontStyle: "bold",
-        fontSize: "24px",
-        color: TEXT_LIGHT,
-      })
-      .setOrigin(0.5);
-    const tg = this.add
-      .text(GAME_W / 2, GAME_H / 2 - 4, `+${reward}  🪙`, {
-        fontFamily: "Arial, sans-serif",
-        fontStyle: "bold",
-        fontSize: "20px",
-        color: "#ffe14a",
-      })
-      .setOrigin(0.5);
+
+    // Hero art ("VICTORY" — already carries its own banner text). Pops in.
+    const imgSize = Math.min(GAME_W - 40, 330);
+    const heroCY = cy - 70;
+    let heroBottom = heroCY;
+
+    let hero: Phaser.GameObjects.Image | undefined;
+    if (this.textures.exists("victory")) {
+      hero = this.add.image(cx, heroCY, "victory").setDepth(401);
+      const ts = imgSize / hero.width;
+      hero.setScale(ts * 0.2);
+      this.tweens.add({ targets: hero, scaleX: ts, scaleY: ts, duration: 440, ease: "Back.out" });
+      heroBottom = heroCY + (hero.height * ts) / 2;
+    }
+    const t1 = this.textures.exists("victory")
+      ? undefined
+      : this.add
+          .text(cx, heroCY, `LEVEL ${this.levelNum} COMPLETE! 🎉`, {
+            fontFamily: "Arial, sans-serif",
+            fontStyle: "bold",
+            fontSize: "24px",
+            color: "#2f6a2f",
+          })
+          .setOrigin(0.5)
+          .setDepth(401);
+    if (t1) heroBottom = heroCY + 18;
+
+    // Stack the reward lines under the hero with a running cursor.
+    const extra: Phaser.GameObjects.GameObject[] = [];
+    const line = (y: number, msg: string, size: number, color: string, bold = true) =>
+      this.add
+        .text(cx, y, msg, {
+          fontFamily: "Arial, sans-serif",
+          fontStyle: bold ? "bold" : "normal",
+          fontSize: `${size}px`,
+          color,
+          stroke: "#ffffff",
+          strokeThickness: 3,
+          align: "center",
+        })
+        .setOrigin(0.5)
+        .setDepth(401);
+
+    let infoY = heroBottom + 22;
+    // Only show the "+50" line on a first clear; replays award nothing.
+    if (reward > 0) {
+      extra.push(line(infoY, `+${reward}  🪙`, 20, "#b5720a"));
+      infoY += 30;
+    }
+    // Lucky Clover progress lines (only while the event is running).
+    if (cloverAward) {
+      extra.push(line(infoY, `+${cloverAward.gained}  ${CLOVER_ICON} ${EVENT_NAME}`, 18, "#2f7a34"));
+      infoY += 26;
+      for (const m of cloverAward.granted) {
+        extra.push(line(infoY, `🎉 Reward: ${rewardLabel(m.reward)}`, 16, "#2a7a2a"));
+        infoY += 24;
+      }
+      const p = cloverAward.progress;
+      if (!p.done && p.next) {
+        extra.push(line(infoY, `${p.remaining} more → ${rewardLabel(p.next.reward)}`, 13, "#3a6a3a", false));
+        infoY += 24;
+      } else if (p.done) {
+        extra.push(line(infoY, `${EVENT_NAME} event complete! 🏆`, 14, "#2f7a34"));
+        infoY += 24;
+      }
+    }
+
     const t2 = this.add
-      .text(GAME_W / 2, GAME_H / 2 + 30, "Tap to return home", {
+      .text(cx, infoY + 12, "Tap to return home", {
         fontFamily: "Arial, sans-serif",
+        fontStyle: "bold",
         fontSize: "15px",
-        color: "#ffe08a",
+        color: "#3a6a3a",
       })
-      .setOrigin(0.5);
+      .setOrigin(0.5)
+      .setDepth(401);
     // After finishing a level, return to the Home map (not straight to the next).
     dim.on("pointerdown", () => {
       dim.destroy();
-      t1.destroy();
-      tg.destroy();
+      cover.destroy();
+      hero?.destroy();
+      t1?.destroy();
+      for (const o of extra) o.destroy();
       t2.destroy();
       this.scene.start("select");
     });
+  }
+
+  // ---- Lucky Clover: grant a milestone reward -------------------------
+
+  private grantEventReward(r: EventReward) {
+    if (r.kind === "gold") this.addGold(r.amount);
+    else if (r.kind === "booster") this.grantEventBooster(r.key);
+    else {
+      this.addGold(r.gold);
+      this.grantEventBooster(r.key);
+    }
+  }
+
+  // Add one of a booster to the player's stock AND unlock it (gift), so an event
+  // reward is usable even before its normal unlock level is reached.
+  private grantEventBooster(key: string) {
+    this.boosterCounts[key] = (this.boosterCounts[key] ?? 0) + 1;
+    this.saveBoosterCounts();
+    try {
+      const g = new Set((localStorage.getItem("pf_boost_gifted") ?? "").split(",").filter(Boolean));
+      g.add(key);
+      localStorage.setItem("pf_boost_gifted", [...g].join(","));
+    } catch {
+      /* storage unavailable */
+    }
+    this.drawBoosters();
   }
 }

@@ -2,11 +2,38 @@ import { COLOR_COUNT } from "./palette";
 import { DESIGNED_LEVELS } from "../levels/designed";
 
 // A "chest" collects keys of its own color. `count` = how many keys it needs.
+// `kind` picks what it can collect: "color" (default) grabs same-colour slimes,
+// "hammer" breaks soft rocks (2 hits each), "wood" grabs wood blocks.
 export interface Chest {
-  color: number; // color id (index into COLORS)
+  color: number; // color id (index into COLORS); ignored for hammer/wood cars
   count: number;
   pairId?: number; // twin cars: two chests sharing a pairId always move together
+  kind?: "color" | "hammer" | "wood";
 }
+
+// Obstacle cell codes in `board` (kept well above the colour range 0..18 so old
+// levels are unaffected). >= 90 means "obstacle".
+//   90 = hard rock (1×1) · 95 = hard rock (2×2)  — never removable
+//   92 = wood (1×1)      · 97 = wood (2×2)        — needs a wood car
+//   soft rock carries HP in the ones digit: 1×1 = 100+hp (101..104), 2×2 = 200+hp (201..204)
+export const HARD_ROCK = 90;
+export const BIG_HARD = 95;
+export const WOOD = 92;
+export const BIG_WOOD = 97;
+export type ObstacleKind = "hard" | "soft" | "wood";
+// Build a soft-rock code: hp = hits to break (1..4), big = the 2×2 variant.
+export const softRock = (hp: number, big = false) => (big ? 200 : 100) + Math.max(1, Math.min(4, hp));
+
+export const isObstacle = (v: number) => v >= HARD_ROCK;
+export const isSoftRock = (v: number) => (v >= 101 && v <= 104) || (v >= 201 && v <= 204);
+export const softHp = (v: number) => v % 10; // hits-to-break of a soft rock (1..4)
+// "Big" 2×2 obstacles: place the code at the TOP-LEFT cell of a 2×2 block, the other
+// three cells -1. The game expands it to fill (and block) all four cells.
+export const isBigObstacle = (v: number) => v === BIG_HARD || v === BIG_WOOD || (v >= 201 && v <= 204);
+export const obstacleKind = (v: number): ObstacleKind =>
+  isSoftRock(v) ? "soft" : v === WOOD || v === BIG_WOOD ? "wood" : "hard";
+export const isRemovable = (v: number) =>
+  (v >= 0 && v < HARD_ROCK) || (isObstacle(v) && obstacleKind(v) !== "hard");
 
 // The 5 road shapes a level can use. All wrap a unified critter grid; the road
 // runs in the margin OUTSIDE the design cells (drawn a fixed width, ~car-sized).
@@ -26,6 +53,12 @@ export interface Level {
   chests: Chest[];
   // Road shape. The cell size auto-shrinks so any grid (up to ~40×40) fits.
   track?: TrackKind;
+  // TWO-LAYER slimes: layer2[i] = the colour hidden UNDER cell i (or -1 / undefined).
+  // Collecting the top slime reveals this bottom colour instead of clearing the cell.
+  layer2?: number[];
+  // HIDDEN "?" slimes: hidden[i] = the real colour of a covered cell (or -1). It shows
+  // a "?" and can't be collected until a 4-neighbour opens, then its colour is revealed.
+  hidden?: number[];
 }
 
 // Difficulty tiers: every 5th level is HARD, every 15th is SUPER-HARD.
@@ -79,10 +112,56 @@ function generateChests(board: number[], seed: number): Chest[] {
   return chests;
 }
 
+// Isolated obstacle test level (open via ?level=999). Demonstrates all three
+// obstacle types + the hammer & wood cars, without touching the real levels.
+//   0 = outer slime ring · 91 = soft-rock ring · 3 = inner slimes · 92 = wood ·
+//   90 = one hard rock that stays at the end.
+function obstacleDemo(): Level {
+  // 14×14: a slime border wrapping four 6×6 quadrants, each tiled with 2×2 (BIG)
+  // obstacles — top-left = HARD, top-right = SOFT, bottom-left = WOOD, and the
+  // bottom-right quadrant is ordinary 1×1 slimes.
+  const N = 14;
+  const board = new Array(N * N).fill(0); // slime-0 everywhere (border + carved below)
+  for (let r = 1; r <= 12; r++) {
+    for (let c = 1; c <= 12; c++) {
+      board[r * N + c] = r >= 7 && c >= 7 ? 3 : -1; // slime quadrant, else clear for obstacles
+    }
+  }
+  // Place a 2×2 BIG obstacle anchor every other cell (fills each quadrant: 3×3 = 9).
+  const fill = (r0: number, c0: number, code: number) => {
+    for (let r = r0; r < r0 + 6; r += 2)
+      for (let c = c0; c < c0 + 6; c += 2) board[r * N + c] = code;
+  };
+  fill(1, 1, BIG_HARD); // top-left = hard rock
+  fill(7, 1, BIG_WOOD); // bottom-left = wood
+  // top-right = soft rocks with HP cycling 1..4 so the number readout is visible
+  let k = 0;
+  for (let r = 1; r < 7; r += 2)
+    for (let c = 7; c < 13; c += 2) board[r * N + c] = softRock(1 + (k++ % 4), true);
+
+  return {
+    cols: N,
+    rows: N,
+    board,
+    track: "square",
+    chests: [
+      { color: 0, count: 28 },
+      { color: 0, count: 28 }, // 52 border slimes
+      { color: 3, count: 20 },
+      { color: 3, count: 20 }, // 36 inner slimes
+      { color: 0, kind: "wood", count: 10 }, // 9 big wood units
+      { color: 0, kind: "hammer", count: 14 },
+      { color: 0, kind: "hammer", count: 14 }, // 9 soft rocks, HP 1..4 (~21 hits)
+    ],
+  };
+}
+
 export function makeLevel(levelNum = 1): Level {
-  // Per-number default road shape; a designed level's own `track` overrides it.
-  // (No "line" in the early levels; the inverted-U "arch" is disabled — use "u".)
-  const defaultTrack: TrackKind = levelNum === 1 || levelNum === 2 ? "u" : "square";
+  if (levelNum === 999) return obstacleDemo();
+
+  // Every level uses the SQUARE ring road now (U/arch/line shapes were dropped);
+  // a designed level's own `track` still overrides this if it ever sets one.
+  const defaultTrack: TrackKind = "square";
 
   // Hand-designed level for this number takes priority; otherwise fall back to
   // the procedurally-generated placeholder so the game still has infinite levels.
@@ -95,6 +174,8 @@ export function makeLevel(levelNum = 1): Level {
       board: [...designed.board],
       chests: designed.chests.map((c) => ({ ...c })),
       track: designed.track ?? defaultTrack,
+      layer2: designed.layer2 ? [...designed.layer2] : undefined,
+      hidden: designed.hidden ? [...designed.hidden] : undefined,
     };
   }
 

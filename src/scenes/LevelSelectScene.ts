@@ -1,6 +1,16 @@
 import Phaser from "phaser";
 import { GAME_W, GAME_H } from "./GameScene";
 import { levelDifficulty, type Difficulty } from "../game/level";
+import {
+  getProgress,
+  isEventUnlocked,
+  isEventComplete,
+  rewardLabel,
+  CLOVER_ICON,
+  EVENT_NAME,
+  MILESTONES,
+  type EventReward,
+} from "../game/cloverEvent";
 
 const LEVEL_COUNT = 60; // how many levels the map shows (all tappable — pick any)
 const SPACING = 104; // vertical gap between level nodes
@@ -11,6 +21,7 @@ interface NodeHit {
   x: number;
   worldY: number;
   r: number;
+  locked: boolean; // sequential mode: not yet reachable (level > progress)
 }
 
 // Home screen: a long, SCROLLABLE "climb the map" of hexagon level nodes. Drag to
@@ -36,6 +47,8 @@ export class LevelSelectScene extends Phaser.Scene {
     this.load.image("avatar", "art/slime-3.png"); // a cute face for the profile chip
     // Start-nav mascot. Placeholder for now → swap to the real cute-slime art when ready.
     this.load.image("start-slime", "art/slime-3.png");
+    // Lucky Clover event: booster sprites for the reward previews (clover drawn/emoji).
+    for (const b of ["add", "hand", "refresh", "magnet"]) this.load.image(`booster-${b}`, `art/booster-${b}.png`);
   }
 
   create() {
@@ -46,7 +59,9 @@ export class LevelSelectScene extends Phaser.Scene {
     this.gold = this.readInt("pf_gold", 0);
     const progress = Math.max(1, this.readInt("pf_progress", 1));
 
-    this.viewTop = 88;
+    // Lucky Clover event bar sits between the top bar and the map when active.
+    const showEvent = isEventUnlocked() && !isEventComplete();
+    this.viewTop = showEvent ? 194 : 88;
     this.viewBottom = GAME_H - 152;
     this.nodes = [];
 
@@ -56,6 +71,7 @@ export class LevelSelectScene extends Phaser.Scene {
     this.buildPlay(progress);
     this.buildBottomNav();
     this.setupScroll();
+    if (showEvent) this.buildEventBar();
 
     // Discoverability: make it clear every level is pickable.
     this.add
@@ -129,14 +145,20 @@ export class LevelSelectScene extends Phaser.Scene {
     const d = levelDifficulty(level);
     const cleared = level < progress;
     const current = level === progress;
+    // Sequential mode locks anything past the reached level; "Any Level" unlocks all.
+    const locked = !this.freeSelect() && level > progress;
     const x = this.waveX(level);
     const y = this.worldY(level);
     const R = BASE_R + (d === "superhard" ? 9 : d === "hard" ? 5 : 0); // harder = bigger
 
-    const col = current ? { face: 0xffc63a, edge: 0xcf8410, hi: 0xffe9a8 } : this.diffColors(d);
+    const col = locked
+      ? { face: 0x8b98a1, edge: 0x566068, hi: 0xc4cdd3 } // greyed-out lock
+      : current
+        ? { face: 0xffc63a, edge: 0xcf8410, hi: 0xffe9a8 }
+        : this.diffColors(d);
 
-    // SUPER-HARD gets a pulsing danger ring; the current level a warm glow.
-    if (d === "superhard") {
+    // SUPER-HARD gets a pulsing danger ring; the current level a warm glow. (Not when locked.)
+    if (d === "superhard" && !locked) {
       const ring = this.add.circle(x, y, R + 12, 0xff2f6e, 0.28);
       map.add(ring);
       this.tweens.add({ targets: ring, scale: 1.14, alpha: 0.12, duration: 850, yoyo: true, repeat: -1, ease: "Sine.inOut" });
@@ -154,7 +176,8 @@ export class LevelSelectScene extends Phaser.Scene {
     this.hex(g, x, y - R * 0.3, R * 0.6, col.hi, 0.55); // glossy top bevel
     g.lineStyle(current ? 4 : d === "normal" ? 2.5 : 3.5, current ? 0xfff4cf : col.edge, 1);
     this.hexStroke(g, x, y, R);
-    if (cleared && !current) g.setAlpha(0.72); // beaten levels dim back
+    if (locked) g.setAlpha(0.6);
+    else if (cleared && !current) g.setAlpha(0.72); // beaten levels dim back
     map.add(g);
 
     const num = this.add
@@ -167,11 +190,15 @@ export class LevelSelectScene extends Phaser.Scene {
         strokeThickness: current ? 6 : 5,
       })
       .setOrigin(0.5);
-    if (cleared && !current) num.setAlpha(0.85);
+    if (locked) num.setAlpha(0.55);
+    else if (cleared && !current) num.setAlpha(0.85);
     map.add(num);
 
-    // Beaten levels get a little star; the current level a "you are here" arrow.
-    if (cleared && !current) {
+    // Locked → padlock badge; beaten → star; current → warm glow (above).
+    if (locked) {
+      const lock = this.add.text(x + R - 5, y - R + 5, "🔒", { fontSize: "15px" }).setOrigin(0.5);
+      map.add(lock);
+    } else if (cleared && !current) {
       const star = this.add.text(x + R - 6, y - R + 4, "⭐", { fontSize: "16px" }).setOrigin(0.5);
       map.add(star);
     }
@@ -179,11 +206,12 @@ export class LevelSelectScene extends Phaser.Scene {
     // Difficulty flair — always visible so hard tiers read at a glance.
     if (d !== "normal") {
       const icon = this.add.text(x, y - R - 4, d === "superhard" ? "💀" : "🔥", { fontSize: "20px" }).setOrigin(0.5, 1);
+      if (locked) icon.setAlpha(0.5);
       map.add(icon);
       this.diffTag(map, x, y + R + 3, d);
     }
 
-    this.nodes.push({ level, x, worldY: y, r: R });
+    this.nodes.push({ level, x, worldY: y, r: R, locked });
   }
 
   private diffTag(map: Phaser.GameObjects.Container, x: number, y: number, d: Difficulty) {
@@ -260,6 +288,16 @@ export class LevelSelectScene extends Phaser.Scene {
     for (const n of this.nodes) {
       const sy = this.map.y + n.worldY;
       if (Math.hypot(px - n.x, py - sy) <= n.r + 6) {
+        if (n.locked) {
+          // Sequential mode: can't jump ahead. Red deny pulse + hint.
+          const ring = this.add
+            .circle(n.x, sy, n.r, 0xffffff, 0.001)
+            .setStrokeStyle(4, 0xe23b3b, 0.9)
+            .setDepth(200);
+          this.tweens.add({ targets: ring, scale: 1.4, alpha: 0, duration: 240, onComplete: () => ring.destroy() });
+          this.toast("Locked — finish the levels in order");
+          return;
+        }
         // quick "you picked it" pop, then launch that level
         const ring = this.add
           .circle(n.x, sy, n.r, 0xffffff, 0.001)
@@ -284,7 +322,8 @@ export class LevelSelectScene extends Phaser.Scene {
     this.add.image(42, y + 2, "avatar").setDisplaySize(46, 46).setDepth(D + 1);
 
     this.statPill(148, y, 96, 0xef3f5a, "❤", "5", "MAX");
-    this.statPill(300, y, 108, 0x2a2a3a, "🪙", String(this.gold), "＋");
+    // Gold coin: a slightly bigger golden disc with a dark-gold rim, no letter.
+    this.statPill(300, y, 108, 0xf9c22e, "", String(this.gold), "＋", "#8a5a10", 0xc98a10, 17);
 
     const s = this.add
       .circle(GAME_W - 34, y, 22, 0x2f6fd0, 1)
@@ -292,18 +331,156 @@ export class LevelSelectScene extends Phaser.Scene {
       .setDepth(D)
       .setInteractive({ useHandCursor: true });
     this.add.text(GAME_W - 34, y - 1, "⚙", { fontSize: "24px", color: "#ffffff" }).setOrigin(0.5).setDepth(D + 1);
-    s.on("pointerdown", () => this.toast("Settings — coming soon"));
+    s.on("pointerdown", () => this.openSettings());
   }
 
-  private statPill(x: number, y: number, w: number, color: number, icon: string, value: string, tail: string) {
+  // Level-select mode: false = Sequential (default), true = Any Level.
+  private freeSelect(): boolean {
+    try {
+      return localStorage.getItem("pf_freeselect") === "1";
+    } catch {
+      return false;
+    }
+  }
+  private setFreeSelect(v: boolean) {
+    try {
+      localStorage.setItem("pf_freeselect", v ? "1" : "0");
+    } catch {
+      /* storage unavailable */
+    }
+  }
+
+  // ---- Settings popup -------------------------------------------------
+  private openSettings() {
+    const D = 400;
+    const pw = 320;
+    const ph = 250;
+    const x0 = GAME_W / 2 - pw / 2;
+    const y0 = GAME_H / 2 - ph / 2;
+    const objs: Phaser.GameObjects.GameObject[] = [];
+
+    const dim = this.add
+      .rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0x000000, 0.6)
+      .setDepth(D)
+      .setInteractive();
+    const panel = this.add.graphics().setDepth(D + 1);
+    panel.fillStyle(0xf7edd0, 1);
+    panel.fillRoundedRect(x0, y0, pw, ph, 20);
+    panel.lineStyle(4, 0x8a5a12, 1);
+    panel.strokeRoundedRect(x0, y0, pw, ph, 20);
+    objs.push(dim, panel);
+
+    objs.push(
+      this.add
+        .text(GAME_W / 2, y0 + 28, "Settings", {
+          fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "22px", color: "#6a4a12",
+        })
+        .setOrigin(0.5)
+        .setDepth(D + 2),
+      this.add
+        .text(x0 + 22, y0 + 66, "Level Select", {
+          fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "16px", color: "#6a4a12",
+        })
+        .setOrigin(0, 0.5)
+        .setDepth(D + 2),
+      this.add
+        .text(x0 + 22, y0 + 88, "How you choose which level to play", {
+          fontFamily: "Arial, sans-serif", fontSize: "12px", color: "#8a6a2a",
+        })
+        .setOrigin(0, 0.5)
+        .setDepth(D + 2),
+    );
+
+    // Two-option segmented toggle: Sequential | Any Level.
+    const free = this.freeSelect();
+    const segY = y0 + 128;
+    const segW = (pw - 44 - 12) / 2;
+    const segH = 46;
+    const mkSeg = (bx: number, label: string, sub: string, on: boolean, onPick: () => void) => {
+      const g = this.add.graphics().setDepth(D + 2);
+      g.fillStyle(on ? 0x35b04a : 0xe4d3a3, 1);
+      g.fillRoundedRect(bx, segY, segW, segH, 12);
+      g.lineStyle(3, on ? 0x1f7d33 : 0xb79a5a, 1);
+      g.strokeRoundedRect(bx, segY, segW, segH, 12);
+      objs.push(g);
+      objs.push(
+        this.add
+          .text(bx + segW / 2, segY + 15, label, {
+            fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "15px",
+            color: on ? "#ffffff" : "#6a4a12",
+          })
+          .setOrigin(0.5)
+          .setDepth(D + 3),
+        this.add
+          .text(bx + segW / 2, segY + 33, sub, {
+            fontFamily: "Arial, sans-serif", fontSize: "10px",
+            color: on ? "#eafff0" : "#8a6a2a",
+          })
+          .setOrigin(0.5)
+          .setDepth(D + 3),
+      );
+      const hit = this.add
+        .rectangle(bx + segW / 2, segY + segH / 2, segW, segH, 0xffffff, 0.001)
+        .setDepth(D + 4)
+        .setInteractive({ useHandCursor: true });
+      hit.on("pointerdown", onPick);
+      objs.push(hit);
+    };
+    const close = () => objs.forEach((o) => o.destroy());
+    // Picking a DIFFERENT mode saves it and rebuilds the map (locks update live).
+    mkSeg(x0 + 22, "Sequential", "In order", !free, () => {
+      if (!free) return close();
+      this.setFreeSelect(false);
+      this.scene.restart();
+    });
+    mkSeg(x0 + 22 + segW + 12, "Any Level", "Free pick", free, () => {
+      if (free) return close();
+      this.setFreeSelect(true);
+      this.scene.restart();
+    });
+
+    const closeBtn = this.add
+      .text(GAME_W / 2, y0 + ph - 26, "CLOSE", {
+        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "15px", color: "#ffffff",
+        backgroundColor: "#8a5a12", padding: { x: 24, y: 8 },
+      })
+      .setOrigin(0.5)
+      .setDepth(D + 3)
+      .setInteractive({ useHandCursor: true });
+    objs.push(closeBtn);
+    closeBtn.on("pointerdown", close);
+    dim.on("pointerdown", close);
+  }
+
+  private statPill(
+    x: number,
+    y: number,
+    w: number,
+    color: number,
+    icon: string,
+    value: string,
+    tail: string,
+    iconTextColor = "#ffffff",
+    rim = 0xffffff,
+    iconR = 15,
+  ) {
     const D = 60;
     const g = this.add.graphics().setDepth(D);
     g.fillStyle(0x0e2f2b, 0.85);
     g.fillRoundedRect(x - w / 2, y - 17, w, 34, 17);
     g.lineStyle(2.5, 0xffe08a, 0.6);
     g.strokeRoundedRect(x - w / 2, y - 17, w, 34, 17);
-    this.add.circle(x - w / 2 + 17, y, 15, color).setStrokeStyle(2, 0xffffff, 0.85).setDepth(D + 1);
-    this.add.text(x - w / 2 + 17, y - 1, icon, { fontSize: "15px" }).setOrigin(0.5).setDepth(D + 2);
+    this.add.circle(x - w / 2 + 17, y, iconR, color).setStrokeStyle(2, rim, 0.85).setDepth(D + 1);
+    if (icon)
+      this.add
+        .text(x - w / 2 + 17, y - 1, icon, {
+          fontFamily: "Arial, sans-serif",
+          fontStyle: "bold",
+          fontSize: "15px",
+          color: iconTextColor,
+        })
+        .setOrigin(0.5)
+        .setDepth(D + 2);
     this.add
       .text(x - w / 2 + 36, y, value, { fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "16px", color: "#ffffff" })
       .setOrigin(0, 0.5)
@@ -397,6 +574,242 @@ export class LevelSelectScene extends Phaser.Scene {
   }
 
   // ---- helpers --------------------------------------------------------
+  // A reward's icon (coin for Gold, booster sprite for Booster, both for Grand),
+  // centred at (x,y) sized ~s. Returns created objects (for modal cleanup).
+  private drawRewardIcon(
+    x: number, y: number, s: number, reward: EventReward, depth: number,
+  ): Phaser.GameObjects.GameObject[] {
+    const out: Phaser.GameObjects.GameObject[] = [];
+    const coin = (cx: number, cy: number, r: number) =>
+      out.push(this.add.circle(cx, cy, r, 0xf9c22e).setStrokeStyle(Math.max(2, r * 0.2), 0xc98a10).setDepth(depth));
+    const boosterImg = (cx: number, cy: number, size: number, key: string) => {
+      if (this.textures.exists(`booster-${key}`)) out.push(this.add.image(cx, cy, `booster-${key}`).setDisplaySize(size, size).setDepth(depth));
+      else coin(cx, cy, size * 0.5);
+    };
+    if (reward.kind === "gold") coin(x, y, s * 0.5);
+    else if (reward.kind === "booster") boosterImg(x, y, s, reward.key);
+    else {
+      coin(x - s * 0.16, y, s * 0.42);
+      boosterImg(x + s * 0.2, y, s * 0.66, reward.key);
+    }
+    return out;
+  }
+
+  // A clover medallion: dark disc + gold ring + 🍀 emoji, centred at (x,y).
+  private drawCloverMedallion(x: number, y: number, r: number, depth: number): Phaser.GameObjects.GameObject[] {
+    const g = this.add.graphics().setDepth(depth);
+    g.fillStyle(0x1a3a1c, 1);
+    g.fillCircle(x, y, r);
+    g.lineStyle(3, 0xefd98a, 1);
+    g.strokeCircle(x, y, r);
+    const leaf = this.add.text(x, y + 1, CLOVER_ICON, { fontSize: `${Math.round(r * 1.15)}px` }).setOrigin(0.5).setDepth(depth + 1);
+    return [g, leaf];
+  }
+
+  // ---- Lucky Clover event bar (Home) — "Sunny Banner" style ----------
+  private buildEventBar() {
+    const p = getProgress();
+    const D = 74;
+    const x0 = 10;
+    const w = GAME_W - 20;
+    const y0 = 100;
+    const h = 74;
+
+    // Card: soft shadow + forest-foliage green gradient (matches the bushes in the
+    // background) + soft sunlit-gold border (matches the yellow flowers).
+    const shadow = this.add.graphics().setDepth(D - 1);
+    shadow.fillStyle(0x000000, 0.26);
+    shadow.fillRoundedRect(x0, y0 + 5, w, h, 20);
+    const card = this.add.graphics().setDepth(D);
+    card.fillGradientStyle(0x4a7a3c, 0x4a7a3c, 0x2c5330, 0x2c5330, 1);
+    card.fillRoundedRect(x0, y0, w, h, 20);
+    card.lineStyle(3, 0xefd98a, 1);
+    card.strokeRoundedRect(x0, y0, w, h, 20);
+    card.lineStyle(1, 0xffffff, 0.14);
+    card.strokeRoundedRect(x0 + 3, y0 + 3, w - 6, h - 6, 17);
+
+    // Ribbon banner across the top edge (warm flower-yellow).
+    const ribLabel = this.add
+      .text(GAME_W / 2, y0, `${CLOVER_ICON}  LUCKY CLOVER  ${CLOVER_ICON}`, {
+        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "13px", color: "#33280c",
+      })
+      .setOrigin(0.5)
+      .setDepth(D + 3);
+    const rw = ribLabel.width + 34;
+    const rh = 24;
+    const rib = this.add.graphics().setDepth(D + 2);
+    rib.fillStyle(0x000000, 0.22);
+    rib.fillRoundedRect(GAME_W / 2 - rw / 2, y0 - rh / 2 + 3, rw, rh, rh / 2);
+    rib.fillGradientStyle(0xf6d55a, 0xf6d55a, 0xe7bb3e, 0xe7bb3e, 1);
+    rib.fillRoundedRect(GAME_W / 2 - rw / 2, y0 - rh / 2, rw, rh, rh / 2);
+    rib.lineStyle(2, 0xfff2c8, 1);
+    rib.strokeRoundedRect(GAME_W / 2 - rw / 2, y0 - rh / 2, rw, rh, rh / 2);
+    ribLabel.setDepth(D + 3); // keep label above the ribbon fill
+
+    // Clover medallion (left).
+    const mx = x0 + 42;
+    const my = y0 + 44;
+    this.drawCloverMedallion(mx, my, 26, D + 1);
+
+    // Middle: big count, pip bar, next-reward line.
+    const textX = mx + 40;
+    const chipCx = x0 + w - 40;
+    const chipLeft = chipCx - 28;
+
+    const big = this.add
+      .text(textX, y0 + 28, p.done ? "DONE" : `${p.total}`, {
+        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "22px", color: "#fbfae8",
+      })
+      .setOrigin(0, 0.5)
+      .setDepth(D + 2);
+    this.add
+      .text(textX + big.width + 6, y0 + 31, p.done ? "" : `/ ${p.next!.threshold}  ·  ${p.remaining} more`, {
+        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "12px", color: "#dcecc6",
+      })
+      .setOrigin(0, 0.5)
+      .setDepth(D + 2);
+
+    // Pip progress bar.
+    const pipN = 12;
+    const pipGap = 3;
+    const pipsW = chipLeft - 8 - textX;
+    const pipW = (pipsW - (pipN - 1) * pipGap) / pipN;
+    const pipY = y0 + 45;
+    const onCount = p.done ? pipN : Math.round(p.fraction * pipN);
+    const pips = this.add.graphics().setDepth(D + 1);
+    for (let i = 0; i < pipN; i++) {
+      const px = textX + i * (pipW + pipGap);
+      if (i < onCount) {
+        pips.fillGradientStyle(0xf6d55a, 0xf6d55a, 0xe8b23a, 0xe8b23a, 1);
+        pips.fillRoundedRect(px, pipY, pipW, 9, 4);
+      } else {
+        pips.fillStyle(0x0d2b12, 0.55);
+        pips.fillRoundedRect(px, pipY, pipW, 9, 4);
+      }
+    }
+
+    // Next-reward line.
+    this.add
+      .text(textX, y0 + 61, p.done ? "All rewards claimed!" : `Next: ${rewardLabel(p.next!.reward)}`, {
+        fontFamily: "Arial, sans-serif", fontSize: "12px", color: "#e9f4d6",
+      })
+      .setOrigin(0, 0.5)
+      .setDepth(D + 1);
+
+    // Reward preview chip (right).
+    const chip = this.add.graphics().setDepth(D + 1);
+    chip.fillStyle(0x173318, 0.92);
+    chip.fillRoundedRect(chipCx - 28, my - 28, 56, 56, 14);
+    chip.lineStyle(2.5, 0xefd98a, 1);
+    chip.strokeRoundedRect(chipCx - 28, my - 28, 56, 56, 14);
+    if (!p.done) this.drawRewardIcon(chipCx, my, 40, p.next!.reward, D + 2);
+    else this.add.text(chipCx, my, "🏆", { fontSize: "30px" }).setOrigin(0.5).setDepth(D + 2);
+
+    // Whole card tappable → the reward roadmap.
+    const hit = this.add
+      .rectangle(x0 + w / 2, y0 + h / 2, w, h, 0xffffff, 0.001)
+      .setDepth(D + 4)
+      .setInteractive({ useHandCursor: true });
+    hit.on("pointerdown", () => this.showEventRoadmap());
+  }
+
+  // A modal roadmap: a vertical ladder of milestone rewards with icons — claimed
+  // (green ✓), the next one (glowing), and upcoming (locked).
+  private showEventRoadmap() {
+    const p = getProgress();
+    const D = 400;
+    const pw = 340;
+    const ph = 468;
+    const x0 = GAME_W / 2 - pw / 2;
+    const y0 = GAME_H / 2 - ph / 2;
+    const objs: Phaser.GameObjects.GameObject[] = [];
+
+    const dim = this.add
+      .rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0x000000, 0.62)
+      .setDepth(D)
+      .setInteractive();
+    const panel = this.add.graphics().setDepth(D + 1);
+    panel.fillStyle(0x1e3a20, 1);
+    panel.fillRoundedRect(x0, y0, pw, ph, 22);
+    panel.lineStyle(4, 0xefd98a, 1);
+    panel.strokeRoundedRect(x0, y0, pw, ph, 22);
+    objs.push(dim, panel);
+
+    // Header medallion + title.
+    const hx = x0 + 40;
+    const hy = y0 + 38;
+    objs.push(...this.drawCloverMedallion(hx, hy, 24, D + 2));
+    objs.push(
+      this.add.text(hx + 36, y0 + 26, EVENT_NAME.toUpperCase(), {
+        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "18px", color: "#f4ecc6",
+      }).setOrigin(0, 0.5).setDepth(D + 2),
+      this.add.text(hx + 36, y0 + 48, `${p.total} ${CLOVER_ICON}  ·  ${p.claimed}/${MILESTONES.length} rewards`, {
+        fontFamily: "Arial, sans-serif", fontSize: "12px", color: "#bfe0b0",
+      }).setOrigin(0, 0.5).setDepth(D + 2),
+    );
+
+    // Ladder window around the current milestone.
+    const start = Math.max(0, Math.min(p.claimed - 2, MILESTONES.length - 8));
+    const rows = MILESTONES.slice(Math.max(0, start), Math.max(0, start) + 8);
+    const nodeX = x0 + 42;
+    const top = y0 + 84;
+    const step = 42;
+
+    // Connector line behind the nodes.
+    const conn = this.add.graphics().setDepth(D + 2);
+    conn.lineStyle(4, 0x2f5a33, 1);
+    conn.lineBetween(nodeX, top, nodeX, top + (rows.length - 1) * step);
+    objs.push(conn);
+
+    rows.forEach((m, i) => {
+      const ny = top + i * step;
+      const claimed = m.index <= p.claimed;
+      const isNext = m.index === p.claimed + 1;
+      const ring = claimed ? 0x6fc24a : isNext ? 0xefd98a : 0x437049;
+      const labelColor = claimed ? "#b6e6a4" : isNext ? "#f4ecc6" : "#a2c0a6";
+
+      const node = this.add.graphics().setDepth(D + 3);
+      node.fillStyle(0x122e17, 1); node.fillCircle(nodeX, ny, 17);
+      node.lineStyle(3, ring, 1); node.strokeCircle(nodeX, ny, 17);
+      objs.push(node);
+      objs.push(...this.drawRewardIcon(nodeX, ny, 24, m.reward, D + 4));
+
+      if (claimed) {
+        const chk = this.add.text(nodeX + 13, ny - 13, "✓", {
+          fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "13px", color: "#ffffff",
+          backgroundColor: "#2f9f4a", padding: { x: 3, y: 0 },
+        }).setOrigin(0.5).setDepth(D + 5);
+        objs.push(chk);
+      } else if (isNext) {
+        const glow = this.add.circle(nodeX, ny, 22).setStrokeStyle(2, 0xefd98a, 0.7).setDepth(D + 3);
+        this.tweens.add({ targets: glow, scale: 1.25, alpha: 0.2, duration: 780, yoyo: true, repeat: -1 });
+        objs.push(glow);
+      }
+
+      objs.push(
+        this.add.text(nodeX + 32, ny - 8, rewardLabel(m.reward), {
+          fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "14px", color: labelColor,
+        }).setOrigin(0, 0.5).setDepth(D + 3),
+        this.add.text(nodeX + 32, ny + 9, claimed ? "Claimed" : `${m.threshold} ${CLOVER_ICON}`, {
+          fontFamily: "Arial, sans-serif", fontSize: "11px", color: claimed ? "#7ab585" : "#92b498",
+        }).setOrigin(0, 0.5).setDepth(D + 3),
+      );
+    });
+
+    const close = this.add
+      .text(GAME_W / 2, y0 + ph - 28, "CLOSE", {
+        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "15px", color: "#33280c",
+        backgroundColor: "#efd98a", padding: { x: 26, y: 9 },
+      })
+      .setOrigin(0.5)
+      .setDepth(D + 4)
+      .setInteractive({ useHandCursor: true });
+    objs.push(close);
+    const kill = () => objs.forEach((o) => o.destroy());
+    close.on("pointerdown", kill);
+    dim.on("pointerdown", kill);
+  }
+
   private toast(msg: string) {
     const t = this.add
       .text(GAME_W / 2, GAME_H * 0.34, msg, {

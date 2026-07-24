@@ -2,6 +2,14 @@ import Phaser from "phaser";
 import { GAME_W, GAME_H } from "./GameScene";
 import { Audio } from "../game/audio";
 
+// Fade out and remove the pre-boot loading screen baked into index.html.
+function hideBootScreen() {
+  const el = document.getElementById("boot");
+  if (!el) return;
+  el.classList.add("hide");
+  setTimeout(() => el.remove(), 350);
+}
+
 // First screen on launch: the "Hop In!" poster, full-screen, tap to play.
 export class SplashScene extends Phaser.Scene {
   constructor() {
@@ -13,6 +21,10 @@ export class SplashScene extends Phaser.Scene {
   }
 
   create() {
+    // The instant HTML boot screen (index.html #boot) has done its job now that
+    // the engine is up and the poster is decoded — fade it out.
+    hideBootScreen();
+
     // Dev convenience: ?level=N jumps straight into the game, skipping the splash.
     if (new URLSearchParams(location.search).has("level")) {
       this.scene.start("game");
@@ -55,6 +67,19 @@ export class SplashScene extends Phaser.Scene {
       repeat: -1,
       ease: "Sine.inOut",
     });
+
+    // Build version (bottom, small) — so you can confirm a fresh deploy loaded.
+    this.add
+      .text(GAME_W / 2, GAME_H - 16, `v${__APP_VERSION__} · ${__APP_BUILD__}`, {
+        fontFamily: "Arial, sans-serif",
+        fontStyle: "bold",
+        fontSize: "12px",
+        color: "#ffffff",
+        stroke: "#5a3a12",
+        strokeThickness: 3,
+      })
+      .setOrigin(0.5, 1)
+      .setAlpha(0.85);
 
     // Tap anywhere → fade to the level picker. Also unlock audio here (this is the
     // first user gesture, which browsers require before any sound can play).

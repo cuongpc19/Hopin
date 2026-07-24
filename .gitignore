@@ -17,6 +17,9 @@ public/art/level art/
 # so it can be restored if needed, but out of the repo.
 public/art/Notused/
 
+# Local scratch/junk folder — not part of the game or build.
+/Manythings/
+
 # Logs
 logs/
 *.log
