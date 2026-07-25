@@ -533,6 +533,52 @@ Ví dụ đã build L30 (super-hard, viền mỏng):
      bản "u" trước đo 19%). tester đã mô phỏng "bay juggle".
 
 ────────────────────────────────────────────────────────────────────────────
+17) TRAY MODE + TWO-LAYER SẠCH + PACK L126-185 (2026-07-25)
+────────────────────────────────────────────────────────────────────────────
+4 CƠ CHẾ MỚI (theo yêu cầu user):
+• XE "?" CHÔN hiện MÀU THẬT MỜ (nhạt về xanh, BURIED_TINT) thay vì úp tối kín —
+  gợi ý màu lờ mờ nhưng vẫn giấu chính xác + số ghế tới khi lên đầu cột.
+• NHÓM XE (đôi/ba): ưu tiên CÙNG HÀNG; nếu không đủ chỗ, đặt KHÁC HÀNG nhưng
+  trong 3 hàng ĐẦU (dây nối ngắn, xuất hiện sớm) — pickGroups thêm pass early
+  cross-row (vẫn qua solvable). ⚠ ĐÃ SỬA BUG distinctify: revert cũ chỉ khôi
+  phục vị trí nhóm, không khôi phục ô bị swap -> nhân bản/mất xe -> sập bảng màu
+  (5 màu top -> xe chỉ 1-2 màu -> unsolvable). Giờ snapshot TOÀN BỘ order.
+• SLIME "?" gom thành MẢNG liền (BFS blob) thay vì rải rác — makeHidden.
+• TWO-LAYER SẠCH (thay L2RICH rải màu lung tung, xấu): makeTwoLayerPicture —
+  tô chủ thể X màu -> TOP = giảm còn Y màu (sạch, đẹp), ĐÁY (layer2) = các màu
+  chi tiết bị gộp đi (X−Y màu, mạch lạc vì là ảnh thật). Bảng màu top/đáy RỜI
+  nhau -> tổng X màu "trong cuộc" nhưng nhìn chỉ Y. CSV cột 18 "l1"=Y (env L1COLORS).
+  Tuner GHIM top (không giảm màu), chỉ sweep số xe + nhóm.
+
+TRAY MODE (khay 1 chiều) — CSV cột 19 "tray"=1 (env TRAY), Level.tray:
+• Bấm xe hàng xếp -> vào Ô KHAY trống kế (1→5), KHÔNG ra thẳng ray. Xe khay tự
+  phóng khi màu lộ, ăn, rồi VỀ ĐÚNG khay (giữ chỗ), chỉ rời khi hết ghế. KHÔNG
+  rút xe ra / KHÔNG juggle. Thua = 5 khay đầy xe kẹt màu + không xe nào chạy.
+  Game: reuse autoRelaunchBays (mở khóa AUTO_CIRCLE), traySlot giữ chỗ, checkTrayStuck.
+• Bot: playAverage nhánh tray (tất định hơn nhiều -> ĐO WINRATE CHÍNH XÁC như
+  user muốn). solvable() sẵn có = đúng model tray (không juggle).
+• ⭐ PHÁT HIỆN: CÙNG 1 level, tray đo ~8% còn non-tray đo ~43% — bot juggle làm
+  non-tray DỄ hơn nhiều. Nên 2 mode cần params KHÁC cho cùng target:
+  NON-TRAY = 5 line + đáy nhiều màu (l1 thấp) [5 line cần cho solver sống với
+  đáy nhiều màu]; TRAY = 4 line + đáy 2 màu (l1 cao). Difficulty non-tray xuống
+  10% rất khó (juggle quá mạnh) — non-tray super hay dừng ~15-23%.
+
+PACK L126-185 (60 level, N_LEVELS=185): mỗi mode 30 = 10 super(10%)+10 hard(25%)
++10 tb(35%) @0.9, mỗi loại 5 ảnh × 2 cỡ (31,35). Non-Tray L126-155, Tray L156-185.
+Ảnh xen-kẽ (train/pencils/robot/dino/star/airplane/bus/fish/cat/owl/bear/mushroom/
+elephant/goldfish/spacecat). gen-pack-rows.mjs sinh CSV; cột 20 "img" gán ảnh/level.
+• KQ (40 lượt, đúng mode+lane): 60/60 SOLVABLE. Tray bám target tốt (super 3-15,
+  medium 30-53). Non-tray spread rộng hơn, vài level dễ (L127 48, L135/148/149 68-80).
+• ⚠ SOLVABILITY two-layer LƯỢNG TỬ + theo ẢNH: l1 thấp 1 nấc = wedge, cao 1 nấc =
+  dễ; không có mức giữa. super-35 cần l1 5-6; medium 31 cần l1 6 vài ảnh. l1 mỗi
+  level đã ghi vào CSV cột 18 (không phải out-of-band).
+• CÒN LẠI: seed-sweep các outlier non-tray (127,135,148,149...) nếu muốn sát target;
+  bot 0.9 vốn nhiễu -> PLAYTEST của user là thước đo cuối.
+CHỖ CHỈNH: makeTwoLayerPicture / makeHidden / pickGroups(early+restore) / playAverage
+  (nhánh tray) trong build-levels.mjs; GameScene (trayMode/parkChest/relaunchFromSlot/
+  autoRelaunchBays/checkTrayStuck/BURIED_TINT); level.ts (lanes/tray). set-l1.mjs sửa l1.
+
+────────────────────────────────────────────────────────────────────────────
 GHI CHÚ CHUNG
 ────────────────────────────────────────────────────────────────────────────
 • Stack: Phaser 3 + TypeScript + Vite. Chạy web; sau đóng gói APK bằng Capacitor.

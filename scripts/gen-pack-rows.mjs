@@ -12,13 +12,16 @@ const SUBJ = {
   hard:   ["7_airplane_toys.png", "5_bus_objects.png", "5_fish_animals1.png", "7_cat_animals1.png", "7_owl_animals1.png"],
   medium: ["6_elephant_toys.png", "6_goldfish_toys.png", "7_bear_animals1.png", "7_mushroom_heroes.png", "6_spacecat_heroes.png"],
 };
-// l1 (top colour count) kept HIGH so only ~2 colours drop to the hidden bottom — a
-// scatter of 5 bottom colours + few lanes wedges even the perfect solver. Difficulty
-// comes from the hidden 2-colour bottom + burial + "?" + interleaved art + groups.
+// The two modes need DIFFERENT params for the SAME target: NON-TRAY's juggle bot is
+// forgiving (a bottom-2 level reads ~43%), so non-tray goes HARDER — 5 lanes (needed
+// for the perfect solver to survive a many-colour hidden bottom) + a lower l1 (more
+// hidden colours). TRAY has no juggle (much harder already), so a bottom-2 level lands
+// near target — 4 lanes + high l1. Difficulty = hidden bottom + burial + "?" + groups.
 const P = {
-  super:  { target: 10, mau: 9, l1: 5, lanes: 4, bury: 0.6, xedoi: 1, tier: "super" },
-  hard:   { target: 25, mau: 9, l1: 5, lanes: 4, bury: 0.4, xedoi: 1, tier: "hard" },
-  medium: { target: 35, mau: 9, l1: 6, lanes: 4, bury: 0.2, xedoi: 0, tier: "hard" },
+  // [tier, target, l1_nontray, lanes_nontray, l1_tray, lanes_tray, bury, xedoi]
+  super:  { target: 10, mau: 9, ntL1: 4, ntLanes: 5, trL1: 5, trLanes: 4, bury: 0.6, xedoi: 1, tier: "super" },
+  hard:   { target: 25, mau: 9, ntL1: 5, ntLanes: 5, trL1: 6, trLanes: 4, bury: 0.4, xedoi: 1, tier: "hard" },
+  medium: { target: 35, mau: 9, ntL1: 6, ntLanes: 5, trL1: 7, trLanes: 5, bury: 0.2, xedoi: 0, tier: "hard" },
 };
 const DIFFS = ["super", "hard", "medium"];
 const SIZES = [31, 35];
@@ -26,7 +29,9 @@ const SIZES = [31, 35];
 // row: lvl,tier,target,max màu,maxxe,minxe,xedoi,track,max slim,slime_ref,win_ref,skill,xe_ref,màu_ref,kích thước,line,chôn,l1,tray,img
 function row(n, d, size, subj, tray) {
   const p = P[d];
-  return [n, p.tier, p.target, p.mau, 55, 25, p.xedoi, "square", "auto", "", "", 0.9, "", "", size, p.lanes, p.bury, p.l1, tray, subj].join(",");
+  const l1 = tray ? p.trL1 : p.ntL1;
+  const lanes = tray ? p.trLanes : p.ntLanes;
+  return [n, p.tier, p.target, p.mau, 55, 25, p.xedoi, "square", "auto", "", "", 0.9, "", "", size, lanes, p.bury, l1, tray, subj].join(",");
 }
 
 const rows = [];
