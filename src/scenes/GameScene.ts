@@ -2775,7 +2775,8 @@ export class GameScene extends Phaser.Scene {
     // stay a mystery until it reaches the front of its column (see revealBuried).
     if (chest.buried) {
       img.setTint(BURIED_TINT); // multiply toward pale blue → faded real colour
-      img.setAlpha(0.4); // …and ghost it right down so the colour is only a faint hint
+      img.setAlpha(0.2); // …ghost it WAY down (user: siêu nhạt, khó đoán màu) — full colour
+                         // only returns on reveal (reaches column front, or tapped to a bay)
       countText.setVisible(false);
       const q = this.add
         .text(0, 0, "?", {
@@ -2799,6 +2800,7 @@ export class GameScene extends Phaser.Scene {
     if (!view.chest.buried) return;
     view.chest.buried = false;
     view.carImg.clearTint();
+    view.carImg.setAlpha(1); // undo the ghost — full real colour on reveal
     view.countText.setVisible(true);
     view.qMark?.destroy();
     view.qMark = undefined;
