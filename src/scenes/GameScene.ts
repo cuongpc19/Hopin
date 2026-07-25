@@ -892,7 +892,6 @@ export class GameScene extends Phaser.Scene {
 
   // A smooth sandy/earth patch under the grid so the slimes stand on a defined clearing
   // (instead of blending into the grass) — a soft rim + top highlight, no gritty texture.
-  // @ts-expect-error currently unused — the brown/sand mat under the slimes was dropped
   private buildGroundMat(cols: number, rows: number) {
     const gw = cols * this.cell, gh = rows * this.cell;
     const pad = Math.round(this.cell * 0.85);
