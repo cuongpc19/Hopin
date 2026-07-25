@@ -65,6 +65,7 @@ export interface Level {
 export type Difficulty = "normal" | "hard" | "superhard";
 
 export function levelDifficulty(n: number): Difficulty {
+  if (n >= 200 && n <= 300) return "normal"; // kid pack: all easy — no HARD/SUPER badges
   if (n % 15 === 0) return "superhard";
   if (n % 5 === 0) return "hard";
   return "normal";

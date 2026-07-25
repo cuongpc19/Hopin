@@ -12,7 +12,7 @@ import {
   type EventReward,
 } from "../game/cloverEvent";
 
-const LEVEL_COUNT = 60; // how many levels the map shows (all tappable — pick any)
+const LEVEL_COUNT = 300; // how many levels the map shows — covers the kid pack at L200-300
 const SPACING = 104; // vertical gap between level nodes
 const BASE_R = 34; // base hex radius (harder tiers are bigger)
 
@@ -354,9 +354,10 @@ export class LevelSelectScene extends Phaser.Scene {
   private openSettings() {
     const D = 400;
     const pw = 320;
-    const ph = 250;
+    const ph = 346;
     const x0 = GAME_W / 2 - pw / 2;
     const y0 = GAME_H / 2 - ph / 2;
+    const progress = Math.max(1, this.readInt("pf_progress", 1));
     const objs: Phaser.GameObjects.GameObject[] = [];
 
     const dim = this.add
@@ -437,6 +438,56 @@ export class LevelSelectScene extends Phaser.Scene {
       if (free) return close();
       this.setFreeSelect(true);
       this.scene.restart();
+    });
+
+    // ---- Jump to a level by number --------------------------------------
+    // Type any level number and start it straight away (handy for testing / replaying
+    // far-ahead levels without scrolling the whole map). makeLevel() has a procedural
+    // fallback, so every number 1..LEVEL_COUNT is playable even if it isn't hand-designed.
+    objs.push(
+      this.add
+        .text(x0 + 22, segY + segH + 24, "Jump to Level", {
+          fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "16px", color: "#6a4a12",
+        })
+        .setOrigin(0, 0.5)
+        .setDepth(D + 2),
+      this.add
+        .text(x0 + 22, segY + segH + 44, `Type a number (1–${LEVEL_COUNT}) to start there`, {
+          fontFamily: "Arial, sans-serif", fontSize: "12px", color: "#8a6a2a",
+        })
+        .setOrigin(0, 0.5)
+        .setDepth(D + 2),
+    );
+
+    const jumpY = segY + segH + 60;
+    const jumpH = 46;
+    const jumpW = pw - 44;
+    const jumpG = this.add.graphics().setDepth(D + 2);
+    jumpG.fillStyle(0x2f6fd0, 1);
+    jumpG.fillRoundedRect(x0 + 22, jumpY, jumpW, jumpH, 12);
+    jumpG.lineStyle(3, 0x1c4a94, 1);
+    jumpG.strokeRoundedRect(x0 + 22, jumpY, jumpW, jumpH, 12);
+    const jumpLabel = this.add
+      .text(GAME_W / 2, jumpY + jumpH / 2, "✏  Enter Level Number", {
+        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "16px", color: "#ffffff",
+      })
+      .setOrigin(0.5)
+      .setDepth(D + 3);
+    const jumpHit = this.add
+      .rectangle(x0 + 22 + jumpW / 2, jumpY + jumpH / 2, jumpW, jumpH, 0xffffff, 0.001)
+      .setDepth(D + 4)
+      .setInteractive({ useHandCursor: true });
+    objs.push(jumpG, jumpLabel, jumpHit);
+    jumpHit.on("pointerdown", () => {
+      const raw = window.prompt(`Start at which level? (1–${LEVEL_COUNT})`, String(progress));
+      if (raw == null) return; // cancelled
+      const n = parseInt(raw.trim(), 10);
+      if (!Number.isFinite(n) || n < 1 || n > LEVEL_COUNT) {
+        this.toast(`Enter a number from 1 to ${LEVEL_COUNT}`);
+        return;
+      }
+      close();
+      this.scene.start("game", { level: n });
     });
 
     const closeBtn = this.add

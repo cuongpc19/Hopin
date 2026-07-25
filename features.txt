@@ -6,9 +6,17 @@
 
 
 ────────────────────────────────────────────────────────────────────────────
-0) XE TỰ LÁI 🚗 — CHẠY TIẾP / TỰ LÊN LẠI (MỚI NHẤT, có thể tắt)
+0) XE TỰ LÁI 🚗 — CHẠY TIẾP / TỰ LÊN LẠI  [ĐÃ TẮT 2026-07-25]
 ────────────────────────────────────────────────────────────────────────────
-Mục tiêu: người chơi KHÔNG phải bấm xe nhiều. Xe tự quản lý theo màu.
+>>> ĐÃ TẮT (user 2026-07-25): auto-drive làm độ khó thành NHỊ PHÂN (~95% hoặc ~5%,
+    không tune được winrate) -> phá hệ thống thiết kế level. Đặt AUTO_CIRCLE = false
+    trong GameScene.ts -> game về hành vi CŨ: xe chạy hết vòng thì ĐỖ, BẤM để phóng
+    lại. Telegraph + modal "Self-Driving Cars!" tự tắt theo cờ. Tester (build-levels.mjs)
+    cũng đổi mặc định về MANUAL (AUTO_DRIVE = env AUTODRIVE==="1", mặc định false) ->
+    số winrate/thiết kế level cũ có hiệu lực lại. Code auto-drive GIỮ NGUYÊN sau cờ để
+    bật lại (AUTO_CIRCLE = true) nếu cần. Mô tả bên dưới là khi BẬT.
+
+Mục tiêu (khi bật): người chơi KHÔNG phải bấm xe nhiều. Xe tự quản lý theo màu.
 • Chạy hết vòng mà màu của xe VẪN CÒN ĂN ĐƯỢC (có slime cùng màu đang "lộ" —
   bắn tới được) -> xe cứ chạy tiếp, không về bãi. Chỉ về bãi khi không ăn được
   (màu bị chặn trong hoặc đã hết). Track vẫn tối đa 5 xe.
@@ -27,8 +35,20 @@ Mục tiêu: người chơi KHÔNG phải bấm xe nhiều. Xe tự quản lý t
     lúc; nối dây giữa các thành viên. Code: ChestView.group (thay cho .twin).
 • Vẫn phải bấm để phóng xe LẦN ĐẦU từ hàng chờ (zone 3) — chỉ tự động phần
   phóng-lại-từ-bãi.
+• BÁO TRƯỚC KHI TỰ LÊN (telegraph, đã làm RÕ HƠN): xe đỗ ở bãi khi biết còn
+  slime ăn được sẽ NHÚN BẬT mạnh (bob -14px + phình ×1.18) + MŨI TÊN ⬆ xanh nảy
+  phía trên + VÒNG vàng nhấp nháy quanh ô, ~0.52s để user thấy "nó sắp nhảy lên",
+  RỒI mới phóng. Cả nhóm xe nhún cùng lúc. Hủy telegraph nếu mất việc (xe khác
+  cùng màu ăn trước) / bấm tay / booster / tutorial / có xe khác về đỗ (reshuffle).
+  Code: armBay / disarmBay / disarmAllBays + const AUTO_RELAUNCH_TELEGRAPH_MS.
+• GIỚI THIỆU 1 LẦN: [ĐÃ GỠ 2026-07-25] modal "Self-Driving Cars!" (maybeShowAutoDriveIntro
+  / showAutoDriveIntroModal) đã bị XOÁ khỏi GameScene.ts vì auto-drive đã tắt — không
+  cần dạy nữa. Nếu bật lại AUTO_CIRCLE thì phải viết lại tutorial này (không còn code).
+  Key pf_autodrive_intro không còn dùng.
 • ROLLBACK: đặt AUTO_CIRCLE = false trong GameScene.ts để về hành vi cũ.
   Code: computeReachableColors / canKeepCircling / autoRelaunchBays (GameScene.ts).
+
+KEY localStorage: pf_autodrive_intro = đã xem modal giới thiệu xe tự lái chưa.
 
 
 ────────────────────────────────────────────────────────────────────────────
@@ -216,7 +236,8 @@ Lệnh:
 • SLIME 2 LỚP (level.layer2[i] = màu ẩn dưới ô i): ăn lớp trên -> slime màu
   khác pop ra ở đúng ô đó (dấu góc gập trắng đánh dấu ô 2 lớp). Xe được cấp
   thêm capacity cho lớp dưới. Có ở hard/super từ L35 + toàn bộ pack L101-120.
-• SLIME "?" (level.hidden[i] = màu thật): hiện dấu ? xám, KHÔNG bắn được khi
+• SLIME "?" (level.hidden[i] = màu thật): slime ĐEN + dấu ? trắng TO ĐẬM
+  (2026-07-25: đổi từ xám nhỏ sang đen/to cho dễ nhìn), KHÔNG bắn được khi
   còn ẩn; mở 1 ô cạnh -> lộ màu thật (pop). board vẫn giữ màu thật (solver
   đúng); chỉ là ẩn với người chơi. Cùng phạm vi level như 2 lớp.
 • XE BA (3 xe khác màu chung pairId): logic như xe đôi (đi/đỗ/rời cùng nhau,
@@ -232,6 +253,186 @@ CHỖ CHỈNH: src/game/level.ts (layer2/hidden), GameScene.ts (markTwoLayer,
   makeHiddenKey, revealHiddenAround, fireTo), scripts/build-levels.mjs
   (makeLayer2, makeHidden, pickGroups deep-first, --seedoff, --test1).
 
+
+────────────────────────────────────────────────────────────────────────────
+11) KID PACK L200-300 (2026-07-24) — pack cho bé
+────────────────────────────────────────────────────────────────────────────
+>>> BUILD LẠI 2026-07-25: toàn bộ L200-300 đã REBUILD thành LEVEL ẢNH 35×35 kiểu
+    mục 13 (build-one.mjs whole-image), KHÔNG còn dùng pipeline build-levels.mjs
+    (tuner/xe đôi/viền xanh) mô tả bên dưới. Mỗi level = 1 ảnh mosaic 35×35 (~1089
+    slime, ~110-115 xe, 8 màu + nền), ảnh xoay vòng từ 48 ảnh (easylevel + hard).
+    Lệnh đã chạy (tuần tự, ghi đè designed.json từng level):
+      for lvl in 200..300: BOARD=35 node scripts/build-one.mjs "<ảnh>" -1 $lvl 8
+    Mô tả pipeline cũ (tuner) bên dưới giữ lại để tham khảo / nếu muốn dựng lại.
+
+• 101 level DỄ (L200-300) cho con của user chơi. Độ khó lặp CHU KỲ L2->L8
+  (target 95/95/70/60/100/90/100, skill 0.4-0.7), tier luôn "normal".
+• Chủ thể to hết cỡ (max slim 750), ảnh dễ thương từ easylevel.
+• VIỀN chỉ dùng màu XANH dịu mắt: COOL_IDS = [3 xanh lá, 4 xanh ngọc,
+  5 xanh dương, 15 xanh nhạt] (addOuterLayers nhận tham số palette).
+• Xe đôi MỌI level (1-2 cặp theo chu kỳ); xe ba mỗi 10 level (206,216,...,296).
+• Thi thoảng: slime 2 LỚP mỏng 10%% (mỗi 4 level: 202,206,...), slime "?" 8%%
+  (mỗi 5 level: 203,208,...). Vẫn dễ — tuner đo kèm layer2 nên target giữ nguyên.
+• Config: các dòng lvl 200-300 (tier "kid") trong winratedesign1.csv.
+• Game side: levelDifficulty() trả "normal" cho 200-300 (không badge 💀/🔥);
+  LevelSelectScene LEVEL_COUNT 60 -> 300. L121-199 là gap (procedural fallback);
+  bé vào pack bằng Settings ⚙ -> Any Level rồi chạm L200, hoặc mở ?level=200.
+• Build lại riêng pack:  node scripts/build-levels.mjs --config
+  "Manythings/Design winrate/winratedesign1.csv" --only 200,...,300
+• KẾT QUẢ ĐO (2026-07-24, 40 lượt/level): 101/101 lệch ≤10 điểm so target
+  (95/101 trong ±8). Tổng 130 xe đôi, 10 level xe ba, 25 level 2-lớp,
+  20 level "?". 12 level lệch ban đầu sửa bằng nudge màu + seed-sweep
+  (--seedoff); refs đã ghi vào CSV.
+
+12) NHẢY THẲNG TỚI LEVEL + TINH CHỈNH (2026-07-24)
+────────────────────────────────────────────────────────────────────────────
+• Settings ⚙ có mục "Jump to Level": chạm "Enter Level Number" -> nhập số
+  (1–300) -> vào chơi ngay level đó. Không cần cuộn map. makeLevel() có
+  fallback procedural nên số nào cũng chơi được. (LevelSelectScene.openSettings)
+• Màn Victory / Out of Space giờ chờ 1 nhịp (750ms / 650ms) mới hiện, thay vì
+  bật ngay khi ván kết thúc — đỡ giật. (GameScene showWinModal/showLoseModal)
+• Fix: launch nhóm xe liên kết (xe đôi / xe 3) không còn spawn đè lên xe đang
+  chạy vòng. Trước chỉ kiểm tra node xuất phát; giờ kiểm tra CẢ dải node nhóm
+  sẽ chiếm (xe 3 chiếm tới +10 node). (GameScene.trySpawn)
+
+13) PICTURE-LEVEL — BUILD BOARD TỪ ẢNH NHÂN VẬT (mosaic) (cập nhật 2026-07-25)
+────────────────────────────────────────────────────────────────────────────
+>>> ĐỌC MỤC NÀY để hiểu CÁCH BUILD BOARD picture-level. Đây là quy trình chuẩn.
+
+Ý tưởng: các slime ghép lại thành hình 1 nhân vật (như tranh cross-stitch). Ngoài
+pack chuẩn 25×25, board có thể TO hơn (31/39) cho mosaic mịn hơn.
+
+CÔNG CỤ: scripts/build-one.mjs — patch THẲNG 1 level vào src/levels/designed.json
+(KHÔNG đụng level khác). Preview PNG: scripts/_level-preview/one-L<level>.png.
+
+LỆNH:
+  node scripts/build-one.mjs <ảnh> <cell> <level> <K> <SIZE>
+    <ảnh>  : PNG nhân vật đã cắt (nền trong suốt).
+    <cell> : -1 = "whole-image" (file 1-nhân-vật, KHUYÊN DÙNG).
+             0..9 = cắt 1 ô của ảnh lưới sprite 5×2 (0-4 hàng trên, 5-9 hàng dưới).
+    <level>: số level cần ghi.
+    <K>    : số MÀU THẬT = con số đầu tên file (vd 6_train_toys.png -> K=6).
+    <SIZE> : cỡ board. 25=slime CHUẨN (như level thường), 31=nét vừa (KHUYÊN DÙNG
+             cho đại trà), 39=nét nhất (nhưng ~140 xe/level, rất dài). Cũng đặt được
+             qua env BOARD; đối số positional thắng khi có cả hai.
+  Vd:  node scripts/build-one.mjs "public/art/level art/sliced/_hard/6_train_toys.png" -1 501 6 31
+
+THƯ VIỆN NHÂN VẬT (đã cắt sẵn + đặt tên "{sốmàuthật}_{tên}_{bộ}.png"):
+  public/art/level art/sliced/_simple/     (≤4 màu  -> xếp vào level DỄ)
+  public/art/level art/sliced/_hard/       (5-6 màu -> level KHÓ)
+  public/art/level art/sliced/_superhard/  (≥7 màu  -> level SIÊU KHÓ)
+  (bản gốc theo bộ: sliced/{toys,flashcard,heroes,animals2,objects}/ và art/level art/1/)
+  Quy tắc: ÍT màu -> level dễ, NHIỀU màu -> level khó.
+
+RECIPE (build-one.mjs tự làm hết — KHÔNG cần sửa):
+  1. Cắt nền: flood 4 góc (backgroundMask) bỏ nền trong suốt + màu góc; crop sát chủ thể.
+  2. Hạ mẫu xuống lưới SIZE-2 (MARGIN=1 chừa 1 ô viền); canh giữa board SIZE×SIZE.
+  3. Snap màu "trung thực + tươi": gom về K màu dùng nhiều nhất trong palette BRIGHT
+     = 16 màu (19 TRỪ 3 màu xỉn 13/16/18). VẪN GIỮ đen/trắng/xám/nâu/tan -> penguin
+     đen, gấu nâu ĐÚNG màu, không bị lệch xanh.
+  4. Full-fill nền (FILL_BG mặc định bật): lấp TOÀN BỘ ô trống trong khung bằng 1 màu
+     tương phản nhất (BRIGHT trừ trắng 8 + tan 14, chọn theo max-min distance tới mọi
+     màu chủ thể). -> chủ thể lấp kín khung, nền 1 màu sạch, ~84.6% ô có slime (25×25),
+     chừa đúng 1 ô viền cách đường ray. (Ép nền cố định: env BG_ID=<id>.)
+
+IN-GAME (ĐÃ XONG, ĐỪNG sửa GameScene sizing):
+  slime TỰ CO theo SIZE: STD=Math.max(25,cols,rows) -> cell nhỏ lại khi board>25;
+  capCell chặn cols*cell không vượt vùng trong ray -> KHÔNG BAO GIỜ TRÀN đường ray.
+  25=slime chuẩn, 31/39 nhỏ dần vừa khít. Mỗi level tự mang cỡ qua cols/rows.
+  Chỗ: GameScene.ts ~L754 (STD), L758 (cell), L761 (capCell), L1021 (setDisplaySize).
+
+KIỂM TRA: LUÔN mở preview scripts/_level-preview/one-L<level>.png xem hình có đọc
+  được không. designed.json được bundle + HMR full-reload; sau build mở đúng số
+  level (?level=NNN) để xem (map Home chỉ vẽ tới 300 node).
+
+ĐIỂM YẾU ĐÃ BIẾT:
+  • Chủ thể THÂN TRẮNG (vd panda) bị flood nhầm thành nền -> hỏng (thân trắng rò ra
+    viền trắng ngoài). TRÁNH dùng, hoặc soi preview kỹ.
+  • Xe (chests) = generateChests đơn giản (chia mỗi màu cụm 8-12, cap≈slime nên
+    winnable) — CHƯA qua tuner win-rate như pack chuẩn. Độ khó/solvability chưa
+    đảm bảo; sẽ có tuner riêng sau.
+  • Level cũ (vd L25) build bằng recipe CŨ nên còn khung trắng (nền thẻ bị giữ) —
+    build lại bằng recipe này sẽ ra nền 1 màu tương phản sạch.
+
+HIỆN CÓ: L500-506 = các bản test train/cat/penguin ở 25/31/39 (chọn cỡ mặc định).
+
+────────────────────────────────────────────────────────────────────────────
+14) CÔNG THỨC LEVEL SUPER HARD (note theo yêu cầu user, 2026-07-25)
+────────────────────────────────────────────────────────────────────────────
+SUPER HARD ở đâu:
+• Campaign chính: mỗi level 15 (L15,30,45,...,90). Target 25%%; riêng các mốc
+  30 (L30/60/90) là "brutal" target 10%%. Đo ở skill 0.75-0.8 (L15 ở 0.8).
+• Advanced pack L101-120: mỗi level chia hết 5 (105,110,115,120) là super,
+  target 15-20%%, skill cao 0.8/0.9/0.98.
+• Ngay SAU mỗi hard/super luôn có level thở (n%%5==1): target ~100, 6 màu.
+
+6 ĐÒN BẨY ĐỘ KHÓ (xếp theo thứ tự nên dùng):
+1. NHIỀU MÀU: đặt "max màu" trong CSV cao — TRẦN CỨNG 12 (user 2026-07-25:
+   quá 12 màu nhìn rối; build clamp MAX_COLORS=12, CSV cũng đã hạ hết về 12).
+   Nhiều màu = xe khó khớp lớp ngoài -> phải đỗ chờ. Build coi đây là TRẦN:
+   nếu quá khó nó tự giảm màu từng nấc (reduceColors gộp màu hiếm vào gần nhất).
+2. CHÔN XE (burial): xe màu vòng NGOÀI bị đẩy sâu trong hàng chờ (bias 0->0.78,
+   calibrateOrder sweep tự chọn). Người chơi phải đỗ xe "sai màu" vào 5 ô bãi
+   để mở cột -> áp lực tắc bãi = nguyên nhân thua chính.
+3. XE ĐÔI + XE BA: nhóm phải phóng cùng lúc + cần N ô bãi CẠNH NHAU để đỗ ->
+   dễ nghẽn. Super có 3 đôi + 1 ba (vd L30). Nếu hard/super vẫn QUÁ DỄ, build
+   TỰ THÊM xe đôi từng cặp (trần: super 6 đôi, hard 4 đôi). Nhóm được đặt
+   SÂU cuối hàng chờ (deep-first) để không wedge level.
+4. SLIME 2 LỚP: phủ ~20-25%% chủ thể (patch giữa bàn, patch to chia 2 màu đáy).
+   Ăn lớp trên -> lòi màu khác = tải thêm mà không nhìn thấy trước.
+5. SLIME "?": ~12-14%% ô trong bị che -> không lập kế hoạch trước được.
+6. COUNT XE 15-35 slime/xe (ideal ~25): độ khó KHÔNG đến từ việc nhồi xe
+   hay màu bừa (xe nhiều = dễ hơn vì nhiều lần phóng; màu nhồi = bàn lem).
+
+QUY TRÌNH (lặp cho tới khi đạt target):
+① Ghi dòng level vào winratedesign1.csv: target / max màu / maxxe / minxe /
+   xedoi / skill. ② Build: node scripts/build-levels.mjs --config
+   "Manythings/Design winrate/winratedesign1.csv" --only N. ③ Đo 40 lượt:
+   --test1 N (hoặc --report cả file, tự ghi report.json). ④ Lệch thì chỉnh:
+   quá DỄ -> tăng màu / thêm xe đôi; quá KHÓ -> giảm màu / tăng minxe.
+⑤ SKILL >= 0.9 (pack): winrate là "vách đá" 0%%/100%%, chỉnh knob bị lật
+   ngẫu nhiên -> dùng SEED-SWEEP: build lại với --seedoff 1..5 (đổi thứ tự
+   chôn xe), giữ seed đầu tiên đo lọt band. Đây là cách đã chốt cả pack
+   L101-120 (8-28%%) và L10/L30.
+
+LƯU Ý QUAN TRỌNG (2026-07-24): bot đo CHƯA mô phỏng xe tự lái -> winrate
+thật CAO hơn số đo, lệch nhất ở hard/super (L30 đo 10%% mà chơi thấy dễ).
+Viền 2 màu phủ rộng là "mồi" cho xe tự lái (luôn lộ ngoài cùng -> xe viền
+tự quay vòng ăn sạch, không chiếm bãi). Đang chờ dạy bot ở session khác;
+trước đó coi số đo là CẬN DƯỚI độ dễ. Muốn super khó thật ngay: giảm độ
+phủ viền hoặc trộn viền 3-4 màu.
+
+CHỖ CHỈNH: scripts/build-levels.mjs -> tuneToTarget (twinCap, vòng giảm màu,
+  vòng thêm xe đôi), layer2FracFor / hiddenFracFor / triplesFor (phạm vi cơ
+  chế), calibrateOrder + sweepCars (chọn bias/số xe), --seedoff / --test1 /
+  --report; config: Manythings/Design winrate/winratedesign1.csv.
+
+────────────────────────────────────────────────────────────────────────────
+15) REBUILD TOÀN BỘ L1-120 THEO RECIPE PICTURE + KÍCH THƯỚC MỚI (2026-07-25)
+────────────────────────────────────────────────────────────────────────────
+• Cả 120 level build lại bằng RECIPE PICTURE (mục 13) ngay trong build-levels.mjs:
+  ảnh nhân vật sliced/ (_simple ≤6 màu cfg / _hard 7-9 / _superhard ≥10), snap màu
+  THẬT (giữ đen/trắng/nâu; bỏ 3 màu xỉn 13/16/18), nền 1 màu tương phản full-fill,
+  margin 1 ô. KHÔNG viền trang trí, KHÔNG relief-reduce, KHÔNG maxSlime (cột
+  "kích thước" quyết định số slime).
+• KÍCH THƯỚC per-level từ CSV cột 15: L1-2=25, L3-10=31, L11-104=35, L105-120=39.
+  BOARD_SIZE giờ là biến (let), set mỗi level; game tự co slime (STD/capCell).
+• L106-120 MỚI (user order): 15 level ultra, target 5%%/10%%, skill ghi 0.98
+  (bot skill=1 là tất định -> đo 0/100, không căn được; 0.98 = sát 1 nhất đo được).
+• KẾT QUẢ ĐO (40 lượt, bot auto-drive): 110/120 trong ±8 điểm target, CẢ 120
+  trong ±10, 120/120 perfect-solver giải được. Max lệch 10.
+• CÁCH CĂN (3 vòng): A) xe đôi CSV theo độ lệch; B) LỚP 2 ẨN qua env L2FRAC
+  (không phá tranh — chìa khóa cho level ít màu mà target thấp); C) seed-sweep
+  --seedoff 1..5 (yêu cầu solvable + lọt band).
+• ⚠ TRẠNG THÁI NGOÀI CSV (phải nhớ khi rebuild lẻ 1 level):
+  - L2FRAC (lớp 2 ẩn) đã gắn qua env: 0.22 -> L18,24,27,37,57,63,64,74,78,80,87;
+    0.12 -> L43,53,59,67,92,98,99; 0.1 -> L23,34; L2FRAC=0 (TẮT rule mặc định
+    pack) -> L105,109,111,114,115,117,120 (lớp 2 mặc định làm 39×39 không giải nổi).
+  - Nhiều level chốt ở --seedoff ≠0 (22,45,48,53,58,62,70,80,87,88,90,97,99,100,
+    102,105,109,111,115,117,120...). Rebuild lẻ KHÔNG kèm đúng env/seedoff sẽ
+    làm lệch lại -> sau khi rebuild lẻ LUÔN đo lại --test1 và chỉnh.
+• Bàn 39×39 + lớp 2 ẩn = bot hoàn hảo cũng nghẹt bãi (unsolvable) — ĐÃ bỏ lớp 2
+  ở pack; độ khó pack đến từ 39×39 + 8 màu + chôn xe + xe đôi/ba ở skill 0.98.
 
 ────────────────────────────────────────────────────────────────────────────
 GHI CHÚ CHUNG

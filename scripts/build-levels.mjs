@@ -27,7 +27,21 @@ const OUT = path.join(ROOT, "src/levels/designed.json");
 const PREVIEW_DIR = process.env.PREVIEW_DIR ||
   path.join(ROOT, "scripts/_level-preview");
 const DRY = process.argv.includes("--dry");
+// The shipped game is MANUAL (AUTO_CIRCLE disabled 2026-07-25 — auto-drive made difficulty
+// binary/untunable), so the win-rate tester models manual play by DEFAULT. Set AUTODRIVE=1
+// to measure the auto-drive variant. See playAverage()'s autoDrive branch.
+const AUTO_DRIVE = process.env.AUTODRIVE === "1";
 const N_LEVELS = 120; // 100 main + 20 "advanced" hard/super (L101-120, user 2026-07-24)
+// KID pack L200-300 (user 2026-07-24): easy levels for the user's child. The L2..L8
+// difficulty cycle repeats (targets/skill from the CSV), subjects at max size, borders
+// only in cool greens/blues (dịu mắt), twins everywhere + a triple every 10th level,
+// occasional THIN 2-layer / hidden-"?" sprinkles. Always tier-"normal".
+// HARD colour cap (user 2026-07-25): a board may NEVER exceed 12 distinct colours —
+// more reads as visual noise. Config values above 12 are clamped here.
+const MAX_COLORS = 12;
+const KID_LO = 200, KID_HI = 300;
+const isKid = (n) => n >= KID_LO && n <= KID_HI;
+const COOL_IDS = [3, 4, 5, 15]; // green, teal, blue, light-blue — kid border palette
 // --seedoff K: alternate deterministic seed family (used by the seed-sweep tuner to
 // hunt a burial order whose win-rate lands in band on chaotic high-skill levels).
 const SEED_OFF = (() => { const i = process.argv.indexOf("--seedoff"); return i >= 0 ? (parseInt(process.argv[i + 1], 10) || 0) : 0; })();
@@ -42,7 +56,13 @@ const hexToRgb = (h) => { h = h.replace("#", ""); return [parseInt(h.slice(0, 2)
 const baseRgb = BASE_HEX.map(hexToRgb);
 const BASE_N = BASE_HEX.length;
 const EMPTY = -1;
-const BOARD_SIZE = 25, IMG_INNER = 25;
+// BOARDSIZE= env overrides the grid size for a --only rebuild (default 25). The game
+// auto-shrinks cells for boards >25 (GameScene STD=max(25,cols,rows)), so a single level
+// can be bigger. Other levels keep their own cols/rows in designed.json.
+// 2026-07-25: BOARD_SIZE is now MUTABLE — the main loop sets it per level from the
+// CSV's "kích thước" column (picture-recipe levels), restoring DEFAULT_BOARD otherwise.
+let BOARD_SIZE = Number(process.env.BOARDSIZE) || 25;
+const DEFAULT_BOARD = BOARD_SIZE, IMG_INNER = BOARD_SIZE;
 // "màu tươi": avoid the dark ids that read too dark — black 12, maroon/plum 18, dark
 // grey 10, brown 11, dark blue 13, dark green 16, grey 9 (user 2026-07-24). All new
 // colours (ensureColors, borders, vivid mapping) draw from BRIGHT only.
@@ -231,6 +251,80 @@ function buildFromImage(src, IW, IH, opts) {
   const full = new Array(BOARD_SIZE * BOARD_SIZE).fill(EMPTY);
   const ox = Math.floor((BOARD_SIZE - sw) / 2), oy = Math.floor((BOARD_SIZE - sh) / 2);
   for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) full[(oy + y) * BOARD_SIZE + (ox + x)] = sub[y * sw + x];
+  return full;
+}
+
+// ---- PICTURE recipe (features.txt mục 13, user 2026-07-25) -------------------
+// True-colour mosaic: crop subject, snap to the K most-used colours of the PIC
+// palette (19 minus muddy 13/16/18 — KEEPS black/white/grey/brown so a penguin is
+// black and a bear is brown), then FULL-FILL the inner square with ONE bright bg
+// colour that contrasts every subject colour. 1-cell empty margin all around.
+// Uses the CURRENT (per-level) BOARD_SIZE. Colours total = Ksub + 1 bg ≤ MAX_COLORS.
+const PIC_DARK = new Set([13, 16, 18]);
+const PIC_IDS = []; for (let i = 0; i < BASE_N; i++) if (!PIC_DARK.has(i)) PIC_IDS.push(i);
+const PIC_RGB = PIC_IDS.map((id) => baseRgb[id]);
+const PIC_MARGIN = 1; // empty cells at the border (SAFE_MARGIN in build-one.mjs)
+function buildPicture(src, IW, IH, K) {
+  const maxSide = BOARD_SIZE - 2 * PIC_MARGIN;
+  // crop to subject bbox (same working pass as buildFromImage)
+  let rx = 0, ry = 0, rw = IW, rhi = IH;
+  const LW = 140; let ww, wh;
+  if (IW >= IH) { ww = LW; wh = Math.max(2, Math.round(LW * IH / IW)); } else { wh = LW; ww = Math.max(2, Math.round(LW * IW / IH)); }
+  const wk = sampleGrid(src, IW, IH, 0, 0, IW, IH, ww, wh);
+  const wbg = backgroundMask(wk.px, wk.alpha, ww, wh, 46);
+  let minx = ww, miny = wh, maxx = -1, maxy = -1;
+  for (let y = 0; y < wh; y++) for (let x = 0; x < ww; x++) { const i = y * ww + x; if (!wbg[i] && wk.alpha[i] >= 128) { if (x < minx) minx = x; if (x > maxx) maxx = x; if (y < miny) miny = y; if (y > maxy) maxy = y; } }
+  if (maxx >= minx) {
+    const padX = Math.round((maxx - minx + 1) * 0.02) + 1, padY = Math.round((maxy - miny + 1) * 0.02) + 1;
+    minx = Math.max(0, minx - padX); miny = Math.max(0, miny - padY); maxx = Math.min(ww - 1, maxx + padX); maxy = Math.min(wh - 1, maxy + padY);
+    rx = minx / ww * IW; ry = miny / wh * IH; rw = (maxx - minx + 1) / ww * IW; rhi = (maxy - miny + 1) / wh * IH;
+  }
+  // segment at high res, then sample to the final sub-grid
+  const HS = Math.min(320, Math.max(128, maxSide * 8)); let hw, hh;
+  if (rw >= rhi) { hw = HS; hh = Math.max(2, Math.round(HS * rhi / rw)); } else { hh = HS; hw = Math.max(2, Math.round(HS * rw / rhi)); }
+  const hi = sampleGrid(src, IW, IH, rx, ry, rw, rhi, hw, hh);
+  const hmask = backgroundMask(hi.px, hi.alpha, hw, hh, 46);
+  let cw, rh;
+  if (rw >= rhi) { cw = maxSide; rh = Math.max(2, Math.round(maxSide * rhi / rw)); } else { rh = maxSide; cw = Math.max(2, Math.round(maxSide * rw / rhi)); }
+  const N = cw * rh, kind = new Array(N).fill("empty"), cellCol = new Array(N);
+  for (let fy = 0; fy < rh; fy++) for (let fx = 0; fx < cw; fx++) {
+    const hx0 = Math.floor(fx * hw / cw), hx1 = Math.max(hx0 + 1, Math.floor((fx + 1) * hw / cw));
+    const hy0 = Math.floor(fy * hh / rh), hy1 = Math.max(hy0 + 1, Math.floor((fy + 1) * hh / rh));
+    let subN = 0, bgN = 0; const ss = [0, 0, 0];
+    for (let hy = hy0; hy < hy1; hy++) for (let hx = hx0; hx < hx1; hx++) {
+      const h = hy * hw + hx; if (hi.alpha[h] < 128) continue;
+      if (hmask[h]) bgN++; else { subN++; ss[0] += hi.px[h][0]; ss[1] += hi.px[h][1]; ss[2] += hi.px[h][2]; }
+    }
+    const fi = fy * cw + fx; if (subN + bgN === 0) continue;
+    if (subN >= bgN) { kind[fi] = "sub"; cellCol[fi] = [ss[0] / subN, ss[1] / subN, ss[2] / subN]; }
+  }
+  const fg = []; for (let i = 0; i < N; i++) if (kind[i] === "sub") fg.push(i);
+  if (fg.length === 0) return null;
+  // snap subject to the K most-used PIC colours (true-colour: black/brown/white kept)
+  const cov = new Array(PIC_IDS.length).fill(0);
+  for (const i of fg) cov[nearestIdx(cellCol[i], PIC_RGB)]++;
+  const pickIds = PIC_IDS.map((_, i) => i).filter((i) => cov[i] > 0).sort((a, b) => cov[b] - cov[a]).slice(0, Math.max(2, K));
+  const pickRgb = pickIds.map((i) => PIC_RGB[i]);
+  const sub = new Array(N).fill(EMPTY);
+  for (const i of fg) sub[i] = PIC_IDS[pickIds[nearestIdx(cellCol[i], pickRgb)]];
+  // centre into the BOARD_SIZE canvas
+  const full = new Array(BOARD_SIZE * BOARD_SIZE).fill(EMPTY);
+  const ox = Math.floor((BOARD_SIZE - cw) / 2), oy = Math.floor((BOARD_SIZE - rh) / 2);
+  for (let y = 0; y < rh; y++) for (let x = 0; x < cw; x++) full[(oy + y) * BOARD_SIZE + (ox + x)] = sub[y * cw + x];
+  // FULL-FILL bg: one bright colour most distinct from EVERY subject colour
+  const used = [...new Set(full.filter((v) => v >= 0))];
+  const usedRgb = used.map((id) => baseRgb[id]);
+  const cands = PIC_IDS.filter((id) => id !== 8 && id !== 14 && !used.includes(id));
+  let bgId = cands[0] ?? 3, bd = -1;
+  for (const id of cands) {
+    let mn = Infinity;
+    for (const c of usedRgb) { const d = dist2(baseRgb[id], c); if (d < mn) mn = d; }
+    if (mn > bd) { bd = mn; bgId = id; }
+  }
+  const lo = PIC_MARGIN, hi2 = BOARD_SIZE - 1 - PIC_MARGIN;
+  for (let r = lo; r <= hi2; r++) for (let c = lo; c <= hi2; c++) {
+    const i = r * BOARD_SIZE + c; if (full[i] === EMPTY) full[i] = bgId;
+  }
   return full;
 }
 
@@ -536,6 +630,13 @@ function orderByDifficulty(carList, board, track, targetBias, seed) {
 // technically-winnable level. skill∈[0,1] (1≈perfect). Monte-Carlo over trials.
 function playAverage(board, cols, rows, order, track, opts) {
   const { skill, bays, perRow, rng } = opts;
+  // AUTO_CIRCLE (shipped default): once launched, cars self-manage — they keep circling
+  // while their colour is reachable (never idling in a bay) and a parked car auto-hops
+  // back onto the ray the moment its colour is reachable again. So the player makes NO
+  // mistakes on the bay/relaunch axis; the only skill-gated choices left are the queue
+  // launches (which column-front to send, and which front to park to reveal deeper cars).
+  // Set opts.autoDrive = false to model the OLD manual "tap to park / relaunch" game.
+  const autoDrive = opts.autoDrive !== false;
   const edges = trackEdges(track);
   const singlePass = track === "line" || track === "u" || track === "arch";
   const occ = board.slice();
@@ -571,8 +672,40 @@ function playAverage(board, cols, rows, order, track, opts) {
     parked.push(columns[j].shift());
     return true;
   };
+  // AUTO_CIRCLE: greedily play every already-committed car that can collect right now —
+  // a productive parked SOLO, or a fully-parked productive GROUP — with NO player slip.
+  // Models auto-relaunch-from-bays + keep-circling: a productive car never sits idle in a
+  // bay, so bays only ever hold cars whose colour is currently BLOCKED. Loops because each
+  // collect can expose more. Returns true if it made any progress.
+  const autoRelaunch = () => {
+    let progressed = false;
+    for (;;) {
+      const E = exposedTiles(occ, cols, rows, edges);
+      const S = new Set(); for (const i of E) S.add(occ[i]);
+      let acted = false;
+      for (const c of parked) { // productive parked solo → relaunch & collect
+        if (c.grouped || c.cap <= 0 || !S.has(c.color)) continue;
+        doCollect(c);
+        if (c.cap === 0) removeCar(c);
+        acted = progressed = true; break;
+      }
+      if (acted) continue;
+      for (const g of groups) { // fully-parked productive group → relaunch together
+        if (g.every((c) => c.cap === 0)) continue;
+        if (!g.every((c) => parked.includes(c))) continue;
+        if (!g.some((c) => c.cap > 0 && S.has(c.color))) continue;
+        for (const c of g) doCollect(c);
+        if (g.every((c) => c.cap === 0)) for (const c of g) removeCar(c); // all empty → leave together
+        acted = progressed = true; break;
+      }
+      if (!acted) break;
+    }
+    return progressed;
+  };
   let guard = 0;
   while (remaining > 0 && guard++ < order.length * 6 + 200) {
+    if (parked.length > peak) peak = parked.length;
+    if (autoDrive) { autoRelaunch(); if (remaining === 0) break; } // bays self-clear productive cars
     if (parked.length > peak) peak = parked.length;
     const E = exposedTiles(occ, cols, rows, edges);
     const S = new Set(); for (const i of E) S.add(occ[i]);
@@ -580,8 +713,10 @@ function playAverage(board, cols, rows, order, track, opts) {
     // productive solo cars (parked + column fronts)
     for (const p of parked) if (!p.grouped && S.has(p.color)) prod.push({ kind: "s", car: p, gain: gainOf(p.color, E) });
     for (let j = 0; j < perRow; j++) { const f = columns[j][0]; if (f && !f.grouped && S.has(f.color)) prod.push({ kind: "s", car: f, gain: gainOf(f.color, E) }); }
-    // productive READY groups (ALL members at column-fronts or parked). Launch only if
-    // the whole group fully collects OR there are groupSize bays free to park together.
+    // productive READY groups (ALL members at column-fronts or parked). Under auto-drive a
+    // productive group is ALWAYS launchable — it circles the track & PEELS (freeing bays as
+    // buried colours surface), needing bays only IF still blocked afterwards (handled at
+    // launch). The manual game keeps the old "needs groupSize bays free up-front" gate.
     for (const g of groups) {
       if (g.every((c) => c.cap === 0)) continue;
       if (!g.every((c) => isFront(c) || parked.includes(c))) continue;
@@ -589,23 +724,43 @@ function playAverage(board, cols, rows, order, track, opts) {
       const own = g.filter((c) => parked.includes(c)).length;
       const canPark = parked.length - own <= bays - g.length;
       const fullClear = g.every((c) => gainOf(c.color, E) >= c.cap);
-      if (canPark || fullClear) prod.push({ kind: "g", g, gain: g.reduce((s, c) => s + gainOf(c.color, E), 0) });
+      if (autoDrive || canPark || fullClear) prod.push({ kind: "g", g, gain: g.reduce((s, c) => s + gainOf(c.color, E), 0) });
     }
     if (prod.length) {
       const slip = rng() > skill;
-      if (slip && rng() < 0.4 && parkOne()) continue; // perception miss → needless park
+      if (!autoDrive && slip && rng() < 0.4 && parkOne()) continue; // manual only: perception miss → needless park (auto-drive never needlessly parks)
       let ch;
-      if (!slip) { prod.sort((a, b) => b.gain - a.gain); ch = prod[0]; }
-      else ch = prod[Math.floor(rng() * prod.length)];
+      if (!slip) {
+        // Bay-aware smart play — keep waiting-bay space free so linked groups (which need
+        // groupSize ADJACENT bays to park) never get wedged out by blocked solos. Priority:
+        //  1) relaunch a PARKED car that will fully EMPTY → frees a bay
+        //  2) a READY group → launch before another move buries a member (twins early)
+        //  3) a solo that fully EMPTIES this visit → never needs a bay (bay-neutral)
+        //  4) else the highest-gain move (peels the most → exposes more for everyone)
+        const pick = (arr) => { arr.sort((a, b) => b.gain - a.gain); return arr[0]; };
+        const freeing = prod.filter((p) => p.kind === "s" && parked.includes(p.car) && p.gain >= p.car.cap);
+        const grp = prod.filter((p) => p.kind === "g");
+        const clean = prod.filter((p) => p.kind === "s" && p.gain >= p.car.cap);
+        ch = freeing.length ? pick(freeing) : grp.length ? pick(grp) : clean.length ? pick(clean) : pick(prod);
+      } else ch = prod[Math.floor(rng() * prod.length)];
       if (ch.kind === "s") {
         const car = ch.car, wasParked = parked.includes(car);
-        doCollect(car);
-        if (car.cap === 0) removeCar(car);
-        else if (!wasParked) { removeCar(car); if (parked.length < bays) parked.push(car); }
-      } else { // group: launch ALL together, then park all if not fully cleared
+        removeCar(car);           // take it off the queue / out of its bay to circle the track
+        doCollect(car);           // circle & peel its colour
+        if (autoDrive) autoRelaunch(); // peeling surfaced buried colours → parked cars self-clear, freeing bays
+        if (car.cap > 0) {        // still blocked → it must wait in a bay
+          if (parked.length < bays) parked.push(car);
+          else if (!wasParked) return { win: false, peak }; // out of space
+          else parked.push(car);  // it came from a bay → its slot is still counted
+        }
+      } else { // group: the whole group circles the track & peels together
         for (const c of ch.g) removeCar(c);
         for (const c of ch.g) doCollect(c);
-        if (!ch.g.every((c) => c.cap === 0)) for (const c of ch.g) parked.push(c); // room guaranteed
+        if (autoDrive) autoRelaunch(); // peeling frees bays before the group needs to park
+        if (!ch.g.every((c) => c.cap === 0)) { // not all empty → the group waits together
+          if (parked.length + ch.g.length > bays) return { win: false, peak }; // out of space
+          for (const c of ch.g) parked.push(c);
+        }
       }
       continue;
     }
@@ -622,15 +777,25 @@ function playAverage(board, cols, rows, order, track, opts) {
       if (!g.every((c) => c.cap === 0)) for (const c of g) parked.push(c);
       sent = true; break;
     }
-    if (!sent) return { win: false, peak };
+    if (!sent) {
+      if (process.env.TRACE === "1") {
+        const E = exposedTiles(occ, cols, rows, edges); const S = new Set(); for (const i of E) S.add(occ[i]);
+        const bayCol = parked.map((c) => c.color + ":" + c.cap + (c.grouped ? "G" : "")).join(" ");
+        const frontCol = columns.map((col) => col[0] ? col[0].color + ":" + col[0].cap + (col[0].grouped ? "G" : "") : "-").join(" ");
+        const rem = {}; for (const v of occ) if (v >= 0 && v < 90) rem[v] = (rem[v] || 0) + 1;
+        const bayRem = parked.map((c) => c.color + "→" + (rem[c.color] || 0) + "left").join(" ");
+        console.error(`LOSE g=${guard} rem=${remaining} bays=${parked.length}/${bays} [${bayCol}] fronts=[${frontCol}] exposed=[${[...S].join(",")}] bayColoursLeftOnBoard: ${bayRem}`);
+      }
+      return { win: false, peak };
+    }
   }
   return { win: remaining === 0, peak };
 }
-function testerReport(board, cols, rows, order, track, { skill = 0.6, trials = 40, seed = 1, bays = 5, perRow = 4, layer2 = null } = {}) {
+function testerReport(board, cols, rows, order, track, { skill = 0.6, trials = 40, seed = 1, bays = 5, perRow = 4, layer2 = null, autoDrive = AUTO_DRIVE } = {}) {
   let wins = 0, peakSum = 0;
   for (let t = 0; t < trials; t++) {
     const rng = makeRng(seed + t * 7919 + 1);
-    const r = playAverage(board, cols, rows, order, track, { skill, bays, perRow, rng, layer2 });
+    const r = playAverage(board, cols, rows, order, track, { skill, bays, perRow, rng, layer2, autoDrive });
     if (r.win) wins++;
     peakSum += r.peak;
   }
@@ -885,14 +1050,18 @@ function reduceColors(board, k, seed) {
 // from L3 on (user 2026-07-23). All rings share the SAME 2 colours → a clean border.
 // `inset` (default 0) leaves that many empty cells around the border so slime never
 // touches the frame (user 2026-07-24: "slime sát viền quá").
-function addOuterLayers(board, cols, rows, layers, seed, fillTo, inset = 0) {
+// `palette` (optional) restricts the ring colours to that list — the kid pack passes
+// COOL_IDS so borders are always soothing greens/blues (user 2026-07-24).
+function addOuterLayers(board, cols, rows, layers, seed, fillTo, inset = 0, palette = null) {
   let b = board.slice();
   const rng = makeRng(seed);
   const present = new Set(b.filter((v) => v >= 0));
-  const avail = BRIGHT_IDS.filter((id) => !present.has(id)); // bright border colours only
+  const pool = palette || BRIGHT_IDS; // bright border colours only
+  let avail = pool.filter((id) => !present.has(id));
+  if (palette && avail.length < 2) avail = pool.slice(); // stay in-palette even if the subject reuses it
   const ring = [];
   for (let k = 0; k < 2 && avail.length; k++) ring.push(avail.splice(Math.floor(rng() * avail.length), 1)[0]);
-  if (!ring.length) ring.push(0, 3);
+  if (!ring.length) ring.push(...(palette ? palette.slice(0, 2) : [0, 3]));
   for (let layer = 0; layer < layers; layer++) {
     if (fillTo != null && slimeCount(b) / (cols * rows) >= fillTo) break;
     const toFill = [];
@@ -937,18 +1106,22 @@ function twinsFor(n, diff) {
 // xe ba (triple, 3-car group): starts at L17; 1 on L20,25,30,45; the advanced pack
 // (L101-120) gets one on every 3rd level (user 2026-07-24).
 function triplesFor(n) {
+  if (isKid(n)) return (n - KID_LO) % 10 === 6 ? 1 : 0; // thi thoảng xe ba
   if (n >= 101) return n % 3 === 0 ? 1 : 0;
   return n >= 17 && [20, 25, 30, 45].includes(n) ? 1 : 0;
 }
 // The ADVANCED pack L101-120 is all hard/super (every 5th = super).
 function packDiff(n) {
+  if (isKid(n)) return "normal"; // kid pack: always easy (targets come from the CSV cycle)
   if (n <= 100) return difficulty(n);
   return n % 5 === 0 ? "superhard" : "hard";
 }
 // 2-LAYER slime coverage per level: hard/super from L35 get a hidden bottom patch
 // (~18% of the subject; super ~25%). L1-30 stay as approved (demo on L2 aside).
 function layer2FracFor(n, diff, cfg) {
+  if (process.env.L2FRAC != null) return Number(process.env.L2FRAC); // env override (e.g. add a 2-layer "màng" to a normally-flat level for extra difficulty)
   if (cfg && cfg.layer2Frac != null) return cfg.layer2Frac;
+  if (isKid(n)) return (n - KID_LO) % 4 === 2 ? 0.10 : 0; // thi thoảng, mỏng — vẫn dễ
   if (n >= 101) return diff === "superhard" ? 0.2 : 0.15; // advanced pack: always (thinner → smoother win landscape)
   if (n < 35 || diff === "normal") return 0;
   return diff === "superhard" ? 0.25 : 0.18;
@@ -956,6 +1129,7 @@ function layer2FracFor(n, diff, cfg) {
 // hidden "?" coverage: hard/super from L35, ~10% of interior cells (super ~14%).
 function hiddenFracFor(n, diff, cfg) {
   if (cfg && cfg.hiddenFrac != null) return cfg.hiddenFrac;
+  if (isKid(n)) return (n - KID_LO) % 5 === 3 ? 0.08 : 0; // thi thoảng "?" — nhẹ nhàng
   if (n >= 101) return diff === "superhard" ? 0.14 : 0.12; // advanced pack: always
   if (n < 35 || diff === "normal") return 0;
   return diff === "superhard" ? 0.14 : 0.10;
@@ -981,7 +1155,7 @@ function tuneToTarget(board0, track, target, n, diff, ov = {}) {
   // and we bias selection toward the 15-35 band (cars ∈ [slime/35 .. slime/15]) nearest
   // the ideal ≈ slime/25. `minxe` is a hard floor that takes PRIORITY over `maxxe` (user
   // 2026-07-23). Difficulty comes from colours + burial (not tiny cars); too-hard → drop màu.
-  const ceilColors = Math.min(ov.colors != null ? ov.colors : baseColorsFor(target), Math.floor(slime / 3));
+  const ceilColors = Math.min(MAX_COLORS, ov.colors != null ? ov.colors : baseColorsFor(target), Math.floor(slime / 3));
 
   const evalN = (board, N) => calibrateOrder(allocateCars(board, N, l2extra), board, BOARD_SIZE, BOARD_SIZE, track, target, opt);
   const sweepCars = (board) => {
@@ -1021,7 +1195,10 @@ function tuneToTarget(board0, track, target, n, diff, ov = {}) {
   // HARD / SUPER still too EASY (colours + burial + cars can't reach the low target)?
   // Add xe đôi — the twin constraint (launch together, park 2 adjacent bays) ratchets
   // difficulty up. Bump one pair at a time until on target or the twin cap (user 2026-07-24).
-  const twinCap = diff === "superhard" ? 6 : 4;
+  // Only AUTO-add twins when the config didn't pin a twin count. An explicit xedoi (incl.
+  // 0) is respected — twins make the win-rate landscape binary/steep, so a level you want
+  // smoothly tunable should set xedoi=0 and get its difficulty from colours + burial.
+  const twinCap = ov.twins != null ? twinsN : (diff === "superhard" ? 6 : 4);
   let tg = 0;
   while (diff !== "normal" && best.win > target + 8 && twinsN < twinCap && tg++ < 6) {
     twinsN++;
@@ -1198,9 +1375,82 @@ if (process.argv.includes("--test1")) {
   const cfgPath = ci >= 0 && process.argv[ci + 1] && !process.argv[ci + 1].startsWith("--") ? path.join(ROOT, process.argv[ci + 1]) : null;
   const cfgm = cfgPath ? loadConfig(cfgPath) : null;
   const c = (cfgm && cfgm.get(k)) || {};
-  const skill = c.skill != null ? c.skill : 0.6;
+  const skill = process.env.SKILL != null ? Number(process.env.SKILL) : (c.skill != null ? c.skill : 0.6);
   const r = testerReport(L.board, L.cols, L.rows, L.chests, L.track || "square", { skill, trials: 40, seed: k * 101 + 1, layer2: L.layer2 || null });
   console.log("WIN=" + Math.round(r.winRate * 100));
+  process.exit(0);
+}
+
+// ---- --diag N: per-level diagnostic — colour/car coverage, solvable(), perfect-play trace.
+// Flags levels where a board colour has fewer cars than slimes (unwinnable). ----
+if (process.argv.includes("--diag")) {
+  const k = parseInt(process.argv[process.argv.indexOf("--diag") + 1], 10);
+  const data = JSON.parse(fs.readFileSync(OUT, "utf8"));
+  const L = data[k];
+  const track = L.track || "square";
+  const colors = {}; for (const v of L.board) if (v >= 0 && v < 90) colors[v] = (colors[v] || 0) + 1;
+  const carCap = {}; for (const c of L.chests) carCap[c.color] = (carCap[c.color] || 0) + c.count;
+  const pairs = L.chests.filter((c) => c.pairId != null).length;
+  console.log(`L${k} track=${track} cols=${L.cols} colours=${Object.keys(colors).length} cars=${L.chests.length} pairIdChests=${pairs} layer2=${!!L.layer2} hidden=${!!L.hidden}`);
+  console.log(`slime/colour:`, JSON.stringify(colors));
+  console.log(`carCap/colour:`, JSON.stringify(carCap));
+  // capacity sanity: every colour's cars must hold >= its slime count
+  for (const c of Object.keys(colors)) if ((carCap[c] || 0) < colors[c]) console.log(`  ⚠ colour ${c}: cap ${carCap[c] || 0} < slimes ${colors[c]}`);
+  const sv = solvable(L.board, L.cols, L.rows, L.chests, track, 5, 4, L.layer2 || null);
+  console.log(`solvable() perfect-player = ${sv}`);
+  const rng = makeRng(k * 101 + 1);
+  const r = playAverage(L.board, L.cols, L.rows, L.chests, track, { skill: 1, bays: 5, perRow: 4, rng, layer2: L.layer2 || null, autoDrive: true });
+  console.log(`playAverage(skill=1, autoDrive) → win=${r.win} peakBays=${r.peak}`);
+  process.exit(0);
+}
+
+// ---- --fixcars 45,60: regenerate a level's CARS to match its EXISTING board+layer2 --
+// Preserves board / picture / hidden / layer2 / track exactly — only rebuilds the chests
+// so every colour (top + layer2 bottom) has enough capacity. Fixes levels that shipped
+// with uncollectable colours (a build-time board/car desync). `--dry` previews only.
+if (process.argv.includes("--fixcars")) {
+  const arg = process.argv[process.argv.indexOf("--fixcars") + 1] || "";
+  const ids = arg.split(",").map(Number).filter((n) => n > 0);
+  const ci = process.argv.indexOf("--config");
+  const cfgPath = ci >= 0 && process.argv[ci + 1] && !process.argv[ci + 1].startsWith("--") ? path.join(ROOT, process.argv[ci + 1]) : null;
+  const cfg = cfgPath ? loadConfig(cfgPath) : null;
+  const data = JSON.parse(fs.readFileSync(OUT, "utf8"));
+  const needOf = (L) => { const m = new Map(); for (const v of L.board) if (v >= 0 && v < 90) m.set(v, (m.get(v) || 0) + 1); if (L.layer2) for (const v of L.layer2) if (v >= 0) m.set(v, (m.get(v) || 0) + 1); return m; };
+  const missing = (L) => { const nd = needOf(L); const car = new Map(); for (const c of L.chests) if ((c.kind || "color") === "color") car.set(c.color, (car.get(c.color) || 0) + c.count); const bad = []; for (const [c, n] of nd) if ((car.get(c) || 0) < n) bad.push(`${c}:${car.get(c) || 0}/${n}`); return bad; };
+  for (const id of ids) {
+    const L = data[id];
+    if (!L) { console.log(`L${id} MISSING`); continue; }
+    const track = L.track || "square";
+    const skill = (cfg && cfg.get(id) && cfg.get(id).skill != null) ? cfg.get(id).skill : 0.6;
+    const diff = difficulty(id);
+    const target = (cfg && cfg.get(id) && cfg.get(id).target != null) ? cfg.get(id).target : targetWin(id, diff);
+    const beforeBad = missing(L);
+    const beforeWin = Math.round(testerReport(L.board, L.cols, L.rows, L.chests, track, { skill, trials: 40, seed: id * 101 + 1, layer2: L.layer2 || null }).winRate * 100);
+    let l2counts = null;
+    if (L.layer2) { l2counts = new Map(); for (const v of L.layer2) if (v >= 0) l2counts.set(v, (l2counts.get(v) || 0) + 1); }
+    const nd = needOf(L); const totalNeed = [...nd.values()].reduce((a, b) => a + b, 0);
+    const minN = nd.size, maxN = Math.min(72, Math.max(minN + 4, Math.floor(totalNeed / 3)));
+    // more cars = smaller cars = less bay pressure = easier. Sweep N, pick the order whose
+    // auto-drive win-rate lands closest to target (prefer solvable, then fewer cars).
+    const cands = new Set([minN, L.chests.length]);
+    for (let n = minN; n <= maxN; n += Math.max(1, Math.round((maxN - minN) / 12))) cands.add(n);
+    let best = null;
+    for (const N of [...cands].filter((n) => n >= minN && n <= maxN).sort((a, b) => a - b)) {
+      const carList = allocateCars(L.board, N, l2counts);
+      const { order, bias } = orderByDifficulty(carList, L.board, track, biasFor(id, diff), id * 101 + 1);
+      const sv = solvable(L.board, L.cols, L.rows, order, track, 5, 4, L.layer2 || null);
+      const win = Math.round(testerReport(L.board, L.cols, L.rows, order, track, { skill, trials: 40, seed: id * 101 + 1, layer2: L.layer2 || null }).winRate * 100);
+      const score = Math.abs(win - target) - (sv ? 3 : 0); // small bonus for solvable
+      if (!best || score < best.score) best = { N, order, bias, sv, win, score };
+    }
+    L.chests = best.order;
+    const afterBad = missing(L);
+    console.log(`L${id} ${diff} (target ${target}%): ${best.N} cars, bias ${best.bias}`);
+    console.log(`  coverage: before ${beforeBad.length ? "MISSING[" + beforeBad.join(" ") + "]" : "ok"} → after ${afterBad.length ? "STILL MISSING[" + afterBad.join(" ") + "]" : "ok ✅"}`);
+    console.log(`  solvable=${best.sv}  winrate ${beforeWin}% → ${best.win}%  (skill ${skill}, ${AUTO_DRIVE ? "auto-drive" : "manual"})`);
+  }
+  if (!DRY && ids.length) { fs.writeFileSync(OUT, JSON.stringify(data, null, 2)); console.log(`\nwrote ${OUT}`); }
+  else console.log(`\n(dry run — nothing written)`);
   process.exit(0);
 }
 
@@ -1211,9 +1461,13 @@ if (process.argv.includes("--report")) {
   const ci = process.argv.indexOf("--config");
   const cfgPath = ci >= 0 && process.argv[ci + 1] && !process.argv[ci + 1].startsWith("--") ? path.join(ROOT, process.argv[ci + 1]) : null;
   const cfg = cfgPath ? loadConfig(cfgPath) : null;
+  // --only n1,n2 limits the report to those levels (big boards are slow to grade).
+  const oi = process.argv.indexOf("--only");
+  const onlySet = oi >= 0 && process.argv[oi + 1] ? new Set(process.argv[oi + 1].split(",").map(Number)) : null;
   const out = [];
   console.log("#    skill  tgt→win  slime  xe màu đôi track");
   for (const k of Object.keys(data).map(Number).sort((a, b) => a - b)) {
+    if (onlySet && !onlySet.has(k)) continue;
     const L = data[k], track = L.track || "square";
     const c = (cfg && cfg.get(k)) || {};
     const skill = c.skill != null ? c.skill : 0.6;
@@ -1221,9 +1475,13 @@ if (process.argv.includes("--report")) {
     const win = Math.round(r.winRate * 100);
     let slime = 0; const cs = new Set(); for (const v of L.board) if (v >= 0) { slime++; cs.add(v); }
     const twins = new Set(L.chests.filter((x) => x.pairId != null).map((x) => x.pairId)).size;
-    out.push({ n: k, skill, target: c.target ?? null, win, slime, cars: L.chests.length, colors: cs.size, twins, track });
+    // perfect-solver check so broken (unwinnable-for-the-greedy) levels stand out
+    const pr = groupsOf(L.chests);
+    const solv = pr.length ? solvablePairs(L.board, L.cols, L.rows, L.chests, track, pr, 5, 4, L.layer2 || null)
+                           : solvable(L.board, L.cols, L.rows, L.chests, track, 5, 4, L.layer2 || null);
+    out.push({ n: k, skill, target: c.target ?? null, win, slime, cars: L.chests.length, colors: cs.size, twins, track, solv });
     const gap = c.target != null ? win - c.target : 0;
-    const flag = c.target != null && Math.abs(gap) >= 12 ? (gap < 0 ? " 🔴" : " 🔵") : "";
+    const flag = (solv ? "" : " ⛔") + (c.target != null && Math.abs(gap) >= 12 ? (gap < 0 ? " 🔴" : " 🔵") : "");
     console.log("L" + String(k).padStart(3) + "  " + String(skill).padStart(4) + "  " +
       String(c.target ?? "  ").padStart(3) + "→" + String(win).padStart(3) + "%  " +
       String(slime).padStart(5) + " " + String(L.chests.length).padStart(3) + " " +
@@ -1250,10 +1508,10 @@ function loadConfig(p) {
   for (const line of fs.readFileSync(p, "utf8").split("\n")) {
     const t = line.trim(); if (!t || t.startsWith("#")) continue;
     const cols = csv ? t.split(",").map((s) => s.trim()) : t.split("|")[0].trim().split(/\s+/);
-    // User layout: lvl,tier,target,max màu,maxxe,minxe,xedoi,track,max slim,slime_ref,win_ref,skill
-    const [lvl, , target, maxmau, maxxe, minxe, xedoi, track, maxslim, , , skill] = cols;
+    // User layout: lvl,tier,target,max màu,maxxe,minxe,xedoi,track,max slim,slime_ref,win_ref,skill,xe_ref,màu_ref,kích thước
+    const [lvl, , target, maxmau, maxxe, minxe, xedoi, track, maxslim, , , skill, , , size] = cols;
     const n = parseInt(lvl, 10); if (!n) continue; // skips the header row
-    map.set(n, { target: num(target), colors: num(maxmau), maxCars: num(maxxe), minCars: num(minxe), twins: num(xedoi), track: (track && track.toLowerCase() !== "auto") ? track : null, maxSlime: num(maxslim), skill: num(skill) });
+    map.set(n, { target: num(target), colors: num(maxmau), maxCars: num(maxxe), minCars: num(minxe), twins: num(xedoi), track: (track && track.toLowerCase() !== "auto") ? track : null, maxSlime: num(maxslim), skill: num(skill), size: num(size) });
   }
   console.log(`config: ${map.size} levels from ${path.relative(ROOT, p)}`);
   return map;
@@ -1297,6 +1555,17 @@ const easyImages = [...easyFiles.map((f) => ({ dir: EASY_DIR, file: f })),
 const hardImages = hardFiles.filter((f) => !fillers.includes(f)).map((f) => ({ dir: HARD_DIR, file: f }));
 let easyPtr = 0, hardPtr = 0;
 
+// PICTURE-recipe image library (features.txt mục 13): pre-sliced single characters,
+// filename prefix = TRUE colour count. Few colours → easy pool, many → hard pools.
+// Pool per level chosen by the CSV colour ceiling: ≤6 → _simple, 7-9 → _hard, ≥10 → _superhard.
+const SLICED_ROOT = path.join(ROOT, "public/art/level art/sliced");
+const SLICED = {};
+for (const d of ["_simple", "_hard", "_superhard"]) {
+  SLICED[d] = fs.existsSync(path.join(SLICED_ROOT, d)) ? fs.readdirSync(path.join(SLICED_ROOT, d)).filter(isImg).sort() : [];
+}
+const slicedPtr = { _simple: 0, _hard: 0, _superhard: 0 };
+const slicedPoolFor = (colors) => (colors == null || colors <= 6) ? "_simple" : colors <= 9 ? "_hard" : "_superhard";
+
 fs.mkdirSync(PREVIEW_DIR, { recursive: true });
 const levels = {};
 const summary = [];
@@ -1314,15 +1583,31 @@ const ONLY = (() => {
   return set;
 })();
 
-for (let n = 1; n <= N_LEVELS; n++) {
+const LEVEL_NUMS = [];
+for (let n = 1; n <= N_LEVELS; n++) LEVEL_NUMS.push(n);
+for (let n = KID_LO; n <= KID_HI; n++) LEVEL_NUMS.push(n); // kid pack rides the same pipeline
+for (const n of LEVEL_NUMS) {
   const diff = packDiff(n);
   const cfg = (CONFIG && CONFIG.get(n)) || {};
+  // PICTURE recipe (features.txt mục 13, user 2026-07-25): any CSV row carrying a
+  // "kích thước" gets the true-colour mosaic + solid-bg build at that board size.
+  const picture = cfg.size != null && cfg.size >= 15;
+  BOARD_SIZE = picture ? cfg.size : DEFAULT_BOARD; // per-level board size
   const target = cfg.target != null ? cfg.target : targetWin(n, diff);
   const vivid = true;                              // màu tươi mọi level, tránh màu tối (user 2026-07-24)
   const hard = diff !== "normal";
   const pick = hard ? hardImages[hardPtr++ % hardImages.length] : easyImages[easyPtr++ % easyImages.length];
-  const { dir, file } = pick;
+  let { dir, file } = pick;
+  // sliced pool pointer advances for EVERY picture level so --only keeps assignments stable
+  if (picture) {
+    const pool = slicedPoolFor(cfg.colors);
+    const files = SLICED[pool];
+    if (files.length) { dir = path.join(SLICED_ROOT, pool); file = files[slicedPtr[pool]++ % files.length]; }
+  }
   if (ONLY && !ONLY.has(n)) continue; // pointer already advanced → other levels unchanged
+  // IMG=path/to.png forces THIS (--only) level to use a specific image instead of the
+  // pointer-assigned one — e.g. to give one level a denser many-colour subject.
+  if (ONLY && process.env.IMG) { const p = path.join(ROOT, process.env.IMG); dir = path.dirname(p); file = path.basename(p); }
 
   const { data, info } = await sharp(path.join(dir, file))
     .ensureAlpha()
@@ -1330,12 +1615,16 @@ for (let n = 1; n <= N_LEVELS; n++) {
     .raw().toBuffer({ resolveWithObject: true });
 
   const baseK = cfg.colors != null ? cfg.colors : baseColorsFor(target);
-  // Build the subject as large as possible; but if the config caps the slime count
-  // (maxSlime), shrink the subject (smaller maxSide) until it fits under the cap.
-  // No outer-ring "fill" (that made early levels look speckled) — user 2026-07-23.
-  // Cap the subject to SUBJECT_SIDE (21) so it + the border keep a 2-cell frame margin.
   let board = null;
-  if (cfg.maxSlime != null) {
+  if (picture) {
+    // Mosaic: subject snapped to (filename-K, capped by CSV màu − 1 for the bg) true
+    // colours, centred, bg full-filled — no decorative border, no maxSlime shrink
+    // (the SIZE column dictates the slime count; max slim is ignored here).
+    const Kfile = parseInt(file, 10) || 6; // "6_train_toys.png" → 6 true colours
+    const Ksub = Math.max(2, Math.min(Kfile, (cfg.colors != null ? cfg.colors : MAX_COLORS) - 1, MAX_COLORS - 1));
+    board = buildPicture(data, info.width, info.height, Ksub);
+  } else if (cfg.maxSlime != null) {
+    // legacy recipe: subject as large as possible under the slime cap
     for (let ms = SUBJECT_SIDE; ms >= 6; ms--) {
       const b = buildFromImage(data, info.width, info.height, { mode: "game", vivid, K: baseK, maxSide: ms });
       if (!b) continue;
@@ -1351,19 +1640,32 @@ for (let n = 1; n <= N_LEVELS; n++) {
   // around the subject until fill hits 70% (a subject already ≥70% gets none). If the
   // subject is small this becomes a filled square/rect — that's fine (user 2026-07-23).
   // L1-2 stay small/clean. Added BEFORE calibration so cars cover it & win-rate counts it.
-  if (n >= 3) board = addOuterLayers(board, BOARD_SIZE, BOARD_SIZE, 25, n * 191 + 5, 0.70, FILL_INSET);
+  // FILL= env overrides the decorative-border coverage (default 0.70). Lower it for a
+  // level whose difficulty must come from the SUBJECT, not a big trivial-to-collect border.
+  // PICTURE levels skip this: their solid bg IS the frame (mục 13).
+  const fillTo = process.env.FILL != null ? Number(process.env.FILL) : 0.70;
+  if (!picture && n >= 3) board = addOuterLayers(board, BOARD_SIZE, BOARD_SIZE, 25, n * 191 + 5, fillTo, FILL_INSET, isKid(n) ? COOL_IDS : null);
 
   // RELIEF level (right after each hard/super — n%5==1): a super-easy breather. Cap the
   // whole board at ~6 colours so a car almost always matches the outer layer → slimes
   // stream in continuously & satisfyingly (target ~95%, big subject) — user 2026-07-23.
-  if (n >= 6 && n % 5 === 1 && distinctColors(board) > 6) board = reduceColors(board, 6, n * 7 + 3);
+  // PICTURE levels skip it (merging mosaic colours would smear the character; their
+  // CSV rows already carry the intended low colour count).
+  if (!picture && n >= 6 && !isKid(n) && n % 5 === 1 && distinctColors(board) > 6) board = reduceColors(board, 6, n * 7 + 3);
 
   // A thin shape can still leave lots of empty margin even at full size — flag for review.
   const fill0 = slimeCount(board) / (BOARD_SIZE * BOARD_SIZE);
   const sparse = fill0 < 0.28 ? Math.round(fill0 * 100) : 0;
 
   const track = cfg.track || trackFor(n, diff);
-  const tuned = tuneToTarget(board, track, target, n, diff, { colors: cfg.colors, maxCars: cfg.maxCars, minCars: cfg.minCars, twins: cfg.twins, triples: triplesFor(n), skill: cfg.skill, layer2Frac: layer2FracFor(n, diff, cfg) }); // → win ≈ target @ skill
+  // Calibration skill: `SKILL=` env overrides the per-level cfg skill. Under AUTO_CIRCLE
+  // the win-rate/skill curve INVERTS above ~0.75 (a pure-greedy queue-launch trap), so
+  // calibrating hard levels at their old 0.9 chases a chaotic artifact — use ~0.65.
+  const calSkill = process.env.SKILL != null ? Number(process.env.SKILL) : cfg.skill;
+  // PICTURE levels pin the colour ceiling to the board's ACTUAL colours so ensureColors
+  // never speckles extra colours onto the character (difficulty comes from burial/cars/
+  // groups instead); reduceColors easing still applies when a level is too hard.
+  const tuned = tuneToTarget(board, track, target, n, diff, { colors: picture ? distinctColors(board) : cfg.colors, maxCars: cfg.maxCars, minCars: cfg.minCars, twins: cfg.twins, triples: triplesFor(n), skill: calSkill, layer2Frac: layer2FracFor(n, diff, cfg) }); // → win ≈ target @ skill
   board = tuned.board;
   const chests = tuned.chests;
 
