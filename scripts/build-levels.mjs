@@ -843,7 +843,11 @@ function testerReport(board, cols, rows, order, track, { skill = 0.6, trials = 4
 // whose top colour differs get a SINGLE bottom colour (clean look). Returns
 // {layer2, count, bottom} or null if no viable patch. Placed centrally so the patch
 // is buried (revealed mid-game). `frac` ≈ fraction of filled cells to cover.
-function makeLayer2(board, cols, rows, frac, seed) {
+// `pos` (or env L2POS): "center" = old centred patch (revealed late-game);
+// "outer" = a RING BAND near the outside of the filled area — bottoms pop from the
+// very FIRST peels, breaking the "obvious colour order" read on any picture
+// (user 2026-07-25: "ảnh nào cũng làm khó được — layer 2 ngay từ vòng gần bên ngoài").
+function makeLayer2(board, cols, rows, frac, seed, pos = process.env.L2POS || "center") {
   const rng = makeRng(seed);
   const filled = []; for (let i = 0; i < board.length; i++) if (board[i] >= 0 && board[i] < 90) filled.push(i);
   if (filled.length < 40) return null;
@@ -855,20 +859,56 @@ function makeLayer2(board, cols, rows, frac, seed) {
   const b1 = cand.length ? cand[Math.floor(rng() * cand.length)] : BRIGHT_IDS[0];
   let b2 = b1;
   if (cand.length > 1) { do { b2 = cand[Math.floor(rng() * cand.length)]; } while (b2 === b1); }
-  // centred square patch sized to hit ~frac of filled cells
-  const side = Math.max(4, Math.round(Math.sqrt(filled.length * frac)));
-  const twoTone = side * side > 40 && b2 !== b1;
-  const r0 = Math.floor(rows / 2 - side / 2), c0 = Math.floor(cols / 2 - side / 2);
   const layer2 = new Array(board.length).fill(-1);
   const counts = new Map();
   let count = 0;
-  for (let r = r0; r < r0 + side; r++) for (let c = c0; c < c0 + side; c++) {
-    if (r < 0 || c < 0 || r >= rows || c >= cols) continue;
-    const i = r * cols + c;
-    const bottom = twoTone && c >= c0 + side / 2 ? b2 : b1; // left half b1, right half b2
+  const stamp = (i, bottom) => {
     if (board[i] >= 0 && board[i] < 90 && board[i] !== bottom) {
       layer2[i] = bottom; count++;
       counts.set(bottom, (counts.get(bottom) || 0) + 1);
+    }
+  };
+  if (pos === "outer") {
+    // ring distance of each FILLED cell from the outside of the filled region (BFS)
+    const isFill = new Set(filled);
+    const dist = new Map();
+    let ring = [];
+    for (const i of filled) {
+      const r = Math.floor(i / cols), c = i % cols;
+      const nb = [r > 0 ? i - cols : -1, r < rows - 1 ? i + cols : -1, c > 0 ? i - 1 : -1, c < cols - 1 ? i + 1 : -1];
+      if (nb.some((j) => j < 0 || !isFill.has(j))) { dist.set(i, 0); ring.push(i); }
+    }
+    let d = 0;
+    while (ring.length) {
+      const next = [];
+      for (const i of ring) {
+        const r = Math.floor(i / cols), c = i % cols;
+        for (const j of [i - cols, i + cols, i - 1, i + 1]) {
+          if (j < 0 || j >= board.length || !isFill.has(j) || dist.has(j)) continue;
+          if (Math.abs((j % cols) - c) + Math.abs(Math.floor(j / cols) - r) !== 1) continue;
+          dist.set(j, d + 1); next.push(j);
+        }
+      }
+      ring = next; d++;
+    }
+    // fill rings 1,2,3,… outward-in (skip ring 0 so the very edge stays honest) until
+    // ~frac of the filled cells carry a hidden bottom; alternate the 2 tones per ring.
+    const target = Math.round(filled.length * frac);
+    for (let rd = 1; count < target && rd <= d; rd++) {
+      const cells = filled.filter((i) => dist.get(i) === rd);
+      const bottom = rd % 2 === 1 ? b1 : b2;
+      for (const i of cells) { if (count >= target) break; stamp(i, bottom); }
+    }
+  } else {
+    // centred square patch sized to hit ~frac of filled cells (original behaviour)
+    const side = Math.max(4, Math.round(Math.sqrt(filled.length * frac)));
+    const twoTone = side * side > 40 && b2 !== b1;
+    const r0 = Math.floor(rows / 2 - side / 2), c0 = Math.floor(cols / 2 - side / 2);
+    for (let r = r0; r < r0 + side; r++) for (let c = c0; c < c0 + side; c++) {
+      if (r < 0 || c < 0 || r >= rows || c >= cols) continue;
+      const i = r * cols + c;
+      const bottom = twoTone && c >= c0 + side / 2 ? b2 : b1; // left half b1, right half b2
+      stamp(i, bottom);
     }
   }
   return count >= 12 ? { layer2, count, counts } : null;
@@ -1700,7 +1740,7 @@ for (const n of LEVEL_NUMS) {
   const fill0 = slimeCount(board) / (BOARD_SIZE * BOARD_SIZE);
   const sparse = fill0 < 0.28 ? Math.round(fill0 * 100) : 0;
 
-  const track = cfg.track || trackFor(n, diff);
+  const track = process.env.TRACK || cfg.track || trackFor(n, diff); // TRACK= env forces a track for --only
   // Calibration skill: `SKILL=` env overrides the per-level cfg skill. Under AUTO_CIRCLE
   // the win-rate/skill curve INVERTS above ~0.75 (a pure-greedy queue-launch trap), so
   // calibrating hard levels at their old 0.9 chases a chaotic artifact — use ~0.65.

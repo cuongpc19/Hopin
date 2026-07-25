@@ -426,7 +426,7 @@ CHỖ CHỈNH: scripts/build-levels.mjs -> tuneToTarget (twinCap, vòng giảm m
   --seedoff 1..5 (yêu cầu solvable + lọt band).
 • ⚠ TRẠNG THÁI NGOÀI CSV (phải nhớ khi rebuild lẻ 1 level):
   - L2FRAC (lớp 2 ẩn) đã gắn qua env: 0.22 -> L18,24,27,37,57,63,64,74,78,80,87;
-    0.18 -> L20; 0.06 -> L25 (31×31, off0, IMG=6_train_toys — tranh XEN KẼ, target 15); 0.12 -> L43,53,59,67,92,98,99; 0.1 -> L23,34;
+    0.18 -> L20; 0.10+L2POS=outer -> L25 (31×31, off1, IMG=6_train_toys, lớp 2 VÀNH NGOÀI); 0.12 -> L43,53,59,67,92,98,99; 0.1 -> L23,34;
     L2FRAC=0 (TẮT rule mặc định pack) -> L105,109,111,114,115,117,120
     (lớp 2 mặc định làm 39×39 không giải nổi).
   - Nhiều level chốt ở --seedoff ≠0 (22,45,48,53,58,62,70,80,87,88,90,97,99,100,
