@@ -536,13 +536,19 @@ Ví dụ đã build L30 (super-hard, viền mỏng):
 17) TRAY MODE + TWO-LAYER SẠCH + PACK L126-185 (2026-07-25)
 ────────────────────────────────────────────────────────────────────────────
 4 CƠ CHẾ MỚI (theo yêu cầu user):
-• XE "?" CHÔN hiện MÀU THẬT MỜ (nhạt về xanh, BURIED_TINT) thay vì úp tối kín —
-  gợi ý màu lờ mờ nhưng vẫn giấu chính xác + số ghế tới khi lên đầu cột.
-• NHÓM XE (đôi/ba): ưu tiên CÙNG HÀNG; nếu không đủ chỗ, đặt KHÁC HÀNG nhưng
-  trong 3 hàng ĐẦU (dây nối ngắn, xuất hiện sớm) — pickGroups thêm pass early
-  cross-row (vẫn qua solvable). ⚠ ĐÃ SỬA BUG distinctify: revert cũ chỉ khôi
-  phục vị trí nhóm, không khôi phục ô bị swap -> nhân bản/mất xe -> sập bảng màu
-  (5 màu top -> xe chỉ 1-2 màu -> unsolvable). Giờ snapshot TOÀN BỘ order.
+• XE "?" CHÔN: CHỐT (2026-07-26) = KHỐI XANH NHẠT ĐẶC đồng nhất (setTintFill
+  BURIED_TINT=0xa9d0f0) che HẲN màu thật + số ghế — mọi xe "?" nhìn giống hệt,
+  KHÔNG đoán được màu. Hiện MÀU THẬT (clearTint + alpha 1, revealBuried) chỉ khi
+  xe LÊN ĐẦU CỘT hoặc user CLICK đưa lên khay/ray. (Trước thử "màu mờ" rồi "siêu
+  nhạt" nhưng user muốn giấu hẳn.)
+• NHÓM XE (đôi/ba): CHỐT = đặt ĐẦU-TRƯỚC (pickGroups quét front→deep, đặt ở HÀNG
+  NÔNG NHẤT còn solvable) -> xe đôi/ba xuất hiện SỚM, nhìn thấy dây ngay; cặp
+  cùng-hàng-sâu bị TÁCH DỌC khi cột vơi không đều nên phải đặt gần đầu. Ưu tiên
+  cùng hàng; fallback early cross-row (3 hàng đầu). ⚠ Fix này nằm trong THỨ TỰ XE
+  (dữ liệu) -> chỉ áp khi REBUILD level (đã fix code, chờ user OK build lại pack).
+  ⚠ ĐÃ SỬA BUG distinctify: revert cũ chỉ khôi phục vị trí nhóm, không khôi phục
+  ô bị swap -> nhân bản/mất xe -> sập bảng màu (5 màu top -> xe 1-2 màu ->
+  unsolvable). Giờ snapshot TOÀN BỘ order.
 • SLIME "?" gom thành MẢNG liền (BFS blob) thay vì rải rác — makeHidden.
 • TWO-LAYER SẠCH (thay L2RICH rải màu lung tung, xấu): makeTwoLayerPicture —
   tô chủ thể X màu -> TOP = giảm còn Y màu (sạch, đẹp), ĐÁY (layer2) = các màu
