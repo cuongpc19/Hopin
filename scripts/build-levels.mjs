@@ -31,7 +31,7 @@ const DRY = process.argv.includes("--dry");
 // binary/untunable), so the win-rate tester models manual play by DEFAULT. Set AUTODRIVE=1
 // to measure the auto-drive variant. See playAverage()'s autoDrive branch.
 const AUTO_DRIVE = process.env.AUTODRIVE === "1";
-const N_LEVELS = 125; // 100 main + 20 "advanced" (L101-120) + 5 line/chôn showcase (L121-125, user 2026-07-25)
+const N_LEVELS = 185; // …+ 60 two-layer/tray pack L126-185 (30 Non-Tray + 30 Tray, user 2026-07-25)
 // KID pack L200-300 (user 2026-07-24): easy levels for the user's child. The L2..L8
 // difficulty cycle repeats (targets/skill from the CSV), subjects at max size, borders
 // only in cool greens/blues (dịu mắt), twins everywhere + a triple every 10th level,
@@ -578,25 +578,29 @@ function pickGroups(order, board, track, pairs, triples, perRow = LANES, layer2 
   // Scan DEEP-first (end of the queue → front): a group at the very front blocks its
   // columns from turn one (its colours are still buried) and wedges the level; a deep
   // group surfaces mid-game when the board has opened up — challenging but winnable.
+  // distinctify swaps cars at ARBITRARY later indices, so a partial (idx-only) revert
+  // would duplicate/lose cars (a real bug that collapsed the palette). Snapshot the WHOLE
+  // order and restore it fully whenever an attempt is rejected.
+  const restore = (snapAll) => { for (let z = 0; z < order.length; z++) order[z] = snapAll[z]; };
   let nT = 0;
   const lastBase = Math.floor((order.length - 3) / perRow) * perRow;
   for (let base = lastBase; base >= 0 && nT < (triples || 0); base -= perRow) {
     const idx = [base, base + 1, base + 2];
     if (idx.some((i) => i + 1 > order.length || used.has(i)) || !sameRow(...idx)) continue;
-    const snap = idx.map((i) => order[i]);
-    if (!distinctify(idx)) { idx.forEach((i, k) => (order[i] = snap[k])); continue; }
+    const snapAll = order.slice();
+    if (!distinctify(idx)) { restore(snapAll); continue; }
     if (solvablePairs(board, BOARD_SIZE, BOARD_SIZE, order, track, [...groups, idx], 5, perRow, layer2)) { groups.push(idx); idx.forEach((i) => used.add(i)); nT++; }
-    else idx.forEach((i, k) => (order[i] = snap[k])); // revert the swaps
+    else restore(snapAll); // revert the swaps fully
   }
   let nP = 0;
   const lastPair = Math.floor((order.length - 2) / 2) * 2;
   for (let i = lastPair; i >= 0 && nP < (pairs || 0); i -= 2) {
     if (i + 1 >= order.length || used.has(i) || used.has(i + 1) || !sameRow(i, i + 1)) continue;
     const idx = [i, i + 1];
-    const snap = idx.map((x) => order[x]);
-    if (!distinctify(idx)) { if (process.env.DEBUG_GROUPS) console.error(`  pair@${i}: distinctify FAIL`); idx.forEach((x, k) => (order[x] = snap[k])); continue; }
+    const snapAll = order.slice();
+    if (!distinctify(idx)) { if (process.env.DEBUG_GROUPS) console.error(`  pair@${i}: distinctify FAIL`); restore(snapAll); continue; }
     if (solvablePairs(board, BOARD_SIZE, BOARD_SIZE, order, track, [...groups, idx], 5, perRow, layer2)) { groups.push(idx); used.add(i); used.add(i + 1); nP++; }
-    else { if (process.env.DEBUG_GROUPS) console.error(`  pair@${i}: solvable FAIL`); idx.forEach((x, k) => (order[x] = snap[k])); } // revert the swaps
+    else { if (process.env.DEBUG_GROUPS) console.error(`  pair@${i}: solvable FAIL`); restore(snapAll); } // revert the swaps fully
   }
   // EARLY cross-row fallback (user 2026-07-25): a linked pair should sit in the SAME row
   // (handled above); if some couldn't, allow a cross-row pair but ONLY in the FIRST rows
@@ -610,10 +614,10 @@ function pickGroups(order, board, track, pairs, triples, perRow = LANES, layer2 
     for (let b = a + 1; b < earlyMax && b < order.length; b++) {
       if (used.has(b) || sameRow(a, b) || (b % perRow) === (a % perRow)) continue; // want different row AND column
       const idx = [a, b];
-      const snap = idx.map((x) => order[x]);
-      if (!distinctify(idx)) { idx.forEach((x, k) => (order[x] = snap[k])); continue; }
+      const snapAll = order.slice();
+      if (!distinctify(idx)) { restore(snapAll); continue; }
       if (solvablePairs(board, BOARD_SIZE, BOARD_SIZE, order, track, [...groups, idx], 5, perRow, layer2)) { groups.push(idx); used.add(a); used.add(b); nP++; break; }
-      else idx.forEach((x, k) => (order[x] = snap[k]));
+      else restore(snapAll);
     }
   }
   if (process.env.DEBUG_GROUPS) console.error(`  pickGroups: want P${pairs}/T${triples} → placed ${groups.length}`);
@@ -1775,9 +1779,9 @@ function loadConfig(p) {
     //   cars buried face-down ("?") · l1 = TOP-layer colour count Y for the clean
     //   two-layer split (blank/0 = no split; hidden bottom carries X−Y colours) ·
     //   tray = 1 → one-way TRAY mode (bays fill 1→5, no pull-out), 0/blank = classic.
-    const [lvl, , target, maxmau, maxxe, minxe, xedoi, track, maxslim, , , skill, , , size, lanes, bury, l1, tray] = cols;
+    const [lvl, , target, maxmau, maxxe, minxe, xedoi, track, maxslim, , , skill, , , size, lanes, bury, l1, tray, img] = cols;
     const n = parseInt(lvl, 10); if (!n) continue; // skips the header row
-    map.set(n, { target: num(target), colors: num(maxmau), maxCars: num(maxxe), minCars: num(minxe), twins: num(xedoi), track: (track && track.toLowerCase() !== "auto") ? track : null, maxSlime: num(maxslim), skill: num(skill), size: num(size), lanes: num(lanes), bury: num(bury), l1: num(l1), tray: (tray != null && String(tray).trim() === "1") ? 1 : 0 });
+    map.set(n, { target: num(target), colors: num(maxmau), maxCars: num(maxxe), minCars: num(minxe), twins: num(xedoi), track: (track && track.toLowerCase() !== "auto") ? track : null, maxSlime: num(maxslim), skill: num(skill), size: num(size), lanes: num(lanes), bury: num(bury), l1: num(l1), tray: (tray != null && String(tray).trim() === "1") ? 1 : 0, img: (img && img.trim()) ? img.trim() : null });
   }
   console.log(`config: ${map.size} levels from ${path.relative(ROOT, p)}`);
   return map;
@@ -1876,6 +1880,15 @@ for (const n of LEVEL_NUMS) {
     const pool = slicedPoolFor(cfg.colors);
     const files = SLICED[pool];
     if (files.length) { dir = path.join(SLICED_ROOT, pool); file = files[slicedPtr[pool]++ % files.length]; }
+  }
+  // Per-level image from the CSV "img" column (a sliced filename like "7_train_toys.png",
+  // found across the sliced pools) — lets a single batch build assign a specific subject
+  // to every level. Applied to ALL levels (not just --only), before the IMG env override.
+  if (picture && cfg.img) {
+    for (const pool of ["_superhard", "_hard", "_simple"]) {
+      const cand = path.join(SLICED_ROOT, pool, cfg.img);
+      if (fs.existsSync(cand)) { dir = path.join(SLICED_ROOT, pool); file = cfg.img; break; }
+    }
   }
   if (ONLY && !ONLY.has(n)) continue; // pointer already advanced → other levels unchanged
   // IMG=path/to.png forces THIS (--only) level to use a specific image instead of the
