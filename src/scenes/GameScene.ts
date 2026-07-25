@@ -1054,11 +1054,13 @@ export class GameScene extends Phaser.Scene {
   // 2026-07-25: đen + "?" to/đậm cho dễ nhìn). Its real colour (level.hidden / board)
   // shows only once a 4-neighbour opens (revealHiddenAround).
   private makeHiddenKey(x: number, y: number, s: number) {
-    const img = this.add.image(0, 0, "slime-9").setDisplaySize(s * 1.15, s * 1.15).setTint(0x30303a);
+    // Hidden "?" slime = a FRESH WHITE tile (user 2026-07-26: đổi từ đen sang trắng trong
+    // tươi) with a bold blue "?" for contrast.
+    const img = this.add.image(0, 0, "slime-9").setDisplaySize(s * 1.15, s * 1.15).setTint(0xf3f8ff);
     const q = this.add
       .text(0, 0, "?", {
         fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: `${Math.round(s * 0.8)}px`,
-        color: "#ffffff", stroke: "#000000", strokeThickness: Math.max(3, Math.round(s * 0.13)),
+        color: "#2f8fd8", stroke: "#ffffff", strokeThickness: Math.max(3, Math.round(s * 0.13)),
       })
       .setOrigin(0.5);
     const c = this.add.container(x, y, [img, q]);

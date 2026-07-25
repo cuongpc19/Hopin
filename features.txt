@@ -585,6 +585,43 @@ CHỖ CHỈNH: makeTwoLayerPicture / makeHidden / pickGroups(early+restore) / pl
   autoRelaunchBays/checkTrayStuck/BURIED_TINT); level.ts (lanes/tray). set-l1.mjs sửa l1.
 
 ────────────────────────────────────────────────────────────────────────────
+18) ROCK-WALL LOGIC LEVELS (chặn cạnh = U/arch/line) (2026-07-26, branch rock-walls)
+────────────────────────────────────────────────────────────────────────────
+Ý user: các level pack tuy khó nhưng (a) DÀI LÊ THÊ (board to 31/35 + 2 lớp),
+(b) không có level SIÊU khó thật, (c) qua được nhờ NHANH TAY hơn LOGIC. Giải:
+dùng "slime đá" (đá cứng) CHẶN 1-3 CẠNH của board vuông -> frontier hẹp như chữ
+U / U-ngược / line -> ít màu lộ cùng lúc -> phải TÍNH thứ tự bóc (LOGIC), board
+nhỏ lại nên KHÔNG lê thê.
+
+CƠ CHẾ (tách nhánh git "rock-walls" vì main đang có TRAY_BATCH dở của session khác):
+• placeWalls(board, cols, rows, edges, thick): ghi ĐÁ CỨNG (code OBST=90) lên
+  hàng/cột ngoài cùng của các cạnh trong `edges` (chuỗi T/B/L/R). Đặt TRƯỚC
+  two-layer split + TRƯỚC tune. CSV cột 21 "walls" (vd T, TL, TLR) / env WALLS,
+  WALLTHICK. Track vẫn "square" (xe chạy 4 cạnh) — ĐÁ chặn tia nên frontier hẹp.
+• SIM HIỂU VẬT CẢN: thêm const OBST=90 + isColor(v)=0..89. Sửa để rock KHÔNG bị
+  đếm/không thu/CHẶN tia: slimeCount, distinctColors, allocateCars, exposedTiles
+  (add vào S chỉ ô màu; rock vẫn chặn qua reach[]), peelLayers/solvable/playAverage
+  remaining, reduceColors/ensureColors/colorOuterness (bỏ qua rock), boardToPng
+  (rock = xám). GAME đã sẵn xử lý đá cứng (makeObstacle "rock-hard", rayHit dừng ở
+  key, isRemovable loại đá khỏi điều kiện thắng) — KHÔNG cần sửa game cho walls.
+• SLIME "?" ĐỔI SANG TRẮNG (user): makeHiddenKey body tint 0xf3f8ff (trắng tươi) +
+  "?" xanh #2f8fd8 viền trắng (trước là đen).
+
+2 BỘ 15 LEVEL (winrate 5-25% @0.9, non-tray):
+• L301-315 CÓ TƯỜNG: 40% chặn TOP-only (301-306), 5 level 2-cạnh (307-311),
+  4 level 3-cạnh=line (312-315). 40%+ là 25×25, còn lại 31/35. 15/15 solvable.
+  Winrate đo: 10/38/38/33/18/45/18/13/23/20/33/13/3/10/3 (star lì -> 302/303/306
+  hơi cao; 3-cạnh xuống thấp tốt). gen-wall-rows.mjs sinh CSV; l1/lanes/bury/walls
+  ghi trong CSV (L303/304 đã nudge: 303=l1 5/3line/bury.7, 304=l1 7/5line).
+• L316-330 KHÔNG TƯỜNG, 25×25, CÙNG dãy target — độ khó từ chôn+two-layer+ít line
+  thay vì tường (bộ đối chứng user yêu cầu). Khó xuống 5-10% hơn (không có tường
+  thu hẹp frontier) -> dùng 3 line + l1 thấp (đáy nhiều màu) + chôn dày.
+CHỖ CHỈNH: placeWalls + OBST/isColor + gen-wall-rows.mjs + gen-nowall-rows.mjs
+  (build-levels.mjs); makeHiddenKey (GameScene). N_LEVELS=330, LEVEL_COUNT=330.
+⚠ NHÁNH RIÊNG: làm ở git worktree branch "rock-walls" để không đè TRAY_BATCH của
+  session kia (main). Merge sau khi cả 2 xong.
+
+────────────────────────────────────────────────────────────────────────────
 GHI CHÚ CHUNG
 ────────────────────────────────────────────────────────────────────────────
 • Stack: Phaser 3 + TypeScript + Vite. Chạy web; sau đóng gói APK bằng Capacitor.
