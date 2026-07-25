@@ -426,7 +426,7 @@ CHỖ CHỈNH: scripts/build-levels.mjs -> tuneToTarget (twinCap, vòng giảm m
   --seedoff 1..5 (yêu cầu solvable + lọt band).
 • ⚠ TRẠNG THÁI NGOÀI CSV (phải nhớ khi rebuild lẻ 1 level):
   - L2FRAC (lớp 2 ẩn) đã gắn qua env: 0.22 -> L18,24,27,37,57,63,64,74,78,80,87;
-    0.18 -> L20; 0.06 -> L25 (31×31, off0, giữ 8 màu); 0.12 -> L43,53,59,67,92,98,99; 0.1 -> L23,34;
+    0.18 -> L20; 0.06 -> L25 (31×31, off1, target 15, giữ 8 màu); 0.12 -> L43,53,59,67,92,98,99; 0.1 -> L23,34;
     L2FRAC=0 (TẮT rule mặc định pack) -> L105,109,111,114,115,117,120
     (lớp 2 mặc định làm 39×39 không giải nổi).
   - Nhiều level chốt ở --seedoff ≠0 (22,45,48,53,58,62,70,80,87,88,90,97,99,100,
@@ -463,6 +463,19 @@ CÁCH SỬA: scripts/fix-queue-order.mjs — hậu-xử-lý designed.json (KHÔN
     sức chứa xe không đổi. Chạy lại được: node scripts/fix-queue-order.mjs 1 120
 LƯU Ý: xếp outside-in làm độ khó "chôn màu" biến mất -> level DỄ hơn thiết kế gốc
   (đúng hướng user muốn: đỡ rối/kẹt). Muốn giữ nhiều xe đôi hơn -> nới KEEP_SPREAD.
+
+15) ENV OVERRIDE build-levels.mjs: TARGET & MAXLAYERS (2026-07-25)
+────────────────────────────────────────────────────────────────────────────
+Thêm 2 env override (theo mẫu SKILL/FILL/BOARDSIZE có sẵn, mặc định KHÔNG đổi):
+• TARGET=<n>    -> ép winrate target cho lần --only (thay vì CSV / đường auto).
+• MAXLAYERS=<n> -> giới hạn SỐ LỚP VIỀN slime addOuterLayers grow quanh subject
+  (mặc định 25 ≈ fill tới FILL). Đặt 2 = subject giữ cỡ + tối đa 2 lớp viền,
+  phần còn lại để trống (dùng khi chủ thể bé, không muốn phình viền lấp cả board).
+Ví dụ đã build L30 (super-hard, viền mỏng):
+  BOARDSIZE=39 TARGET=30 SKILL=0.9 MAXLAYERS=2 node scripts/build-levels.mjs --only 30
+  -> L30 = 39x39, track u, 41% fill (rocket + 2 lớp viền), 12 màu, 34 xe
+     (2 xe đôi + 1 xe ba). Winrate target 30% -> đo 19% (khó hơn chút vì viền mỏng
+     + subject nhiều màu; user chấp nhận giữ 19%). tester đã mô phỏng "bay juggle".
 
 ────────────────────────────────────────────────────────────────────────────
 GHI CHÚ CHUNG
