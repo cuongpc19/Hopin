@@ -31,7 +31,7 @@ const DRY = process.argv.includes("--dry");
 // binary/untunable), so the win-rate tester models manual play by DEFAULT. Set AUTODRIVE=1
 // to measure the auto-drive variant. See playAverage()'s autoDrive branch.
 const AUTO_DRIVE = process.env.AUTODRIVE === "1";
-const N_LEVELS = 120; // 100 main + 20 "advanced" hard/super (L101-120, user 2026-07-24)
+const N_LEVELS = 125; // 100 main + 20 "advanced" (L101-120) + 5 line/chôn showcase (L121-125, user 2026-07-25)
 // KID pack L200-300 (user 2026-07-24): easy levels for the user's child. The L2..L8
 // difficulty cycle repeats (targets/skill from the CSV), subjects at max size, borders
 // only in cool greens/blues (dịu mắt), twins everywhere + a triple every 10th level,
@@ -63,6 +63,14 @@ const EMPTY = -1;
 // CSV's "kích thước" column (picture-recipe levels), restoring DEFAULT_BOARD otherwise.
 let BOARD_SIZE = Number(process.env.BOARDSIZE) || 25;
 const DEFAULT_BOARD = BOARD_SIZE, IMG_INNER = BOARD_SIZE;
+// Queue LINES ("3 line / 5 line xếp hàng", user 2026-07-25, from the reference game):
+// how many vertical columns the chest inventory splits into — only column FRONTS are
+// playable, so fewer lines = fewer choices per turn = harder. MUTABLE like BOARD_SIZE:
+// the main loop sets it per level from the CSV "line" column (default 4, the game's
+// classic layout); --report/--test1 pick each level's own `lanes` from designed.json.
+// LANES= env overrides for a --only rebuild. All sim helpers default perRow to this.
+const DEFAULT_LANES = 4;
+let LANES = Number(process.env.LANES) || DEFAULT_LANES;
 // "màu tươi": avoid the dark ids that read too dark — black 12, maroon/plum 18, dark
 // grey 10, brown 11, dark blue 13, dark green 16, grey 9 (user 2026-07-24). All new
 // colours (ensureColors, borders, vivid mapping) draw from BRIGHT only.
@@ -415,7 +423,7 @@ function colorOuterness(board, layer) {
 }
 // Greedy 5-bay player. Conservative: straight rays only, one collecting pass per
 // launch on open tracks (line/u/arch), full peel on loop tracks (square/rect).
-function solvable(board, cols, rows, order, track, bays = 5, perRow = 4, layer2 = null) {
+function solvable(board, cols, rows, order, track, bays = 5, perRow = LANES, layer2 = null) {
   const edges = trackEdges(track);
   const singlePass = track === "line" || track === "u" || track === "arch";
   const occ = board.slice();
@@ -468,7 +476,7 @@ function solvable(board, cols, rows, order, track, bays = 5, perRow = 4, layer2 
 // Perfect-player solver that respects the pair constraint (for the safety check).
 // `groups` = array of index-arrays (each ≥2 members) that launch/park/leave together
 // (2=twin, 3=triple, …). A greedy perfect-solver used to validate a level is winnable.
-function solvablePairs(board, cols, rows, order, track, groups, bays = 5, perRow = 4, layer2 = null) {
+function solvablePairs(board, cols, rows, order, track, groups, bays = 5, perRow = LANES, layer2 = null) {
   const edges = trackEdges(track);
   const singlePass = track === "line" || track === "u" || track === "arch";
   const occ = board.slice();
@@ -546,7 +554,7 @@ function solvablePairs(board, cols, rows, order, track, groups, bays = 5, perRow
 // in adjacent columns — what the game's linked-car rendering expects). Places `triples`
 // (3 adjacent cols) first, then `pairs` (2 adjacent cols) in the remaining slots. Each
 // group needs all-different colours and must keep the level solvable.
-function pickGroups(order, board, track, pairs, triples, perRow = 4, layer2 = null) {
+function pickGroups(order, board, track, pairs, triples, perRow = LANES, layer2 = null) {
   const groups = [];
   const used = new Set();
   const sameRow = (...idx) => idx.every((i) => Math.floor(i / perRow) === Math.floor(idx[0] / perRow));
@@ -577,7 +585,7 @@ function pickGroups(order, board, track, pairs, triples, perRow = 4, layer2 = nu
     if (idx.some((i) => i + 1 > order.length || used.has(i)) || !sameRow(...idx)) continue;
     const snap = idx.map((i) => order[i]);
     if (!distinctify(idx)) { idx.forEach((i, k) => (order[i] = snap[k])); continue; }
-    if (solvablePairs(board, BOARD_SIZE, BOARD_SIZE, order, track, [...groups, idx], 5, 4, layer2)) { groups.push(idx); idx.forEach((i) => used.add(i)); nT++; }
+    if (solvablePairs(board, BOARD_SIZE, BOARD_SIZE, order, track, [...groups, idx], 5, perRow, layer2)) { groups.push(idx); idx.forEach((i) => used.add(i)); nT++; }
     else idx.forEach((i, k) => (order[i] = snap[k])); // revert the swaps
   }
   let nP = 0;
@@ -587,7 +595,7 @@ function pickGroups(order, board, track, pairs, triples, perRow = 4, layer2 = nu
     const idx = [i, i + 1];
     const snap = idx.map((x) => order[x]);
     if (!distinctify(idx)) { if (process.env.DEBUG_GROUPS) console.error(`  pair@${i}: distinctify FAIL`); idx.forEach((x, k) => (order[x] = snap[k])); continue; }
-    if (solvablePairs(board, BOARD_SIZE, BOARD_SIZE, order, track, [...groups, idx], 5, 4, layer2)) { groups.push(idx); used.add(i); used.add(i + 1); nP++; }
+    if (solvablePairs(board, BOARD_SIZE, BOARD_SIZE, order, track, [...groups, idx], 5, perRow, layer2)) { groups.push(idx); used.add(i); used.add(i + 1); nP++; }
     else { if (process.env.DEBUG_GROUPS) console.error(`  pair@${i}: solvable FAIL`); idx.forEach((x, k) => (order[x] = snap[k])); } // revert the swaps
   }
   if (process.env.DEBUG_GROUPS) console.error(`  pickGroups: want P${pairs}/T${triples} → placed ${groups.length}`);
@@ -827,7 +835,7 @@ function playAverage(board, cols, rows, order, track, opts) {
   }
   return { win: remaining === 0, peak };
 }
-function testerReport(board, cols, rows, order, track, { skill = 0.6, trials = 40, seed = 1, bays = 5, perRow = 4, layer2 = null, autoDrive = AUTO_DRIVE } = {}) {
+function testerReport(board, cols, rows, order, track, { skill = 0.6, trials = 40, seed = 1, bays = 5, perRow = LANES, layer2 = null, autoDrive = AUTO_DRIVE } = {}) {
   let wins = 0, peakSum = 0;
   for (let t = 0; t < trials; t++) {
     const rng = makeRng(seed + t * 7919 + 1);
@@ -979,12 +987,32 @@ function groupsOf(order) {
   const out = []; for (const idxs of m.values()) if (idxs.length >= 2) out.push(idxs);
   return out;
 }
+// BURY ("chôn xe", reference game 2026-07-25): stamp `buried: true` on ~frac of the
+// cars that DON'T start on the front row (index ≥ LANES) — the game shows them as a
+// dark "?" until they reach their column front. Linked groups are buried all-or-none
+// (they share a row, like the reference's side-by-side "?" twins). Mutates `order`.
+function buryCars(order, frac, seed) {
+  const rng = makeRng(seed);
+  const done = new Set(); // pairIds already decided
+  let buried = 0;
+  order.forEach((c, i) => {
+    if (i < LANES) return; // initial front row always starts face-up
+    if (c.pairId != null) {
+      if (done.has(c.pairId)) return;
+      done.add(c.pairId);
+      const g = order.map((x, j) => ({ x, j })).filter(({ x }) => x.pairId === c.pairId);
+      if (g.some(({ j }) => j < LANES)) return; // group touches the front row → stays open
+      if (rng() < frac) { g.forEach(({ x }) => { x.buried = true; }); buried += g.length; }
+    } else if (rng() < frac) { c.buried = true; buried++; }
+  });
+  return buried;
+}
 // Place `pairs` xe đôi + `triples` xe ba on an order (consecutive same-row cols) and
 // stamp pairId. Returns a fresh order (copied) so the caller's carList is never mutated.
 function withGroups(order, board, track, pairs, triples, layer2 = null) {
   const copy = order.map((c) => ({ ...c }));
   if (!pairs && !triples) return { order: copy, groups: [] };
-  const groups = pickGroups(copy, board, track, pairs || 0, triples || 0, 4, layer2);
+  const groups = pickGroups(copy, board, track, pairs || 0, triples || 0, LANES, layer2);
   let pid = 0; for (const g of groups) { pid++; for (const i of g) copy[i].pairId = pid; }
   return { order: copy, groups };
 }
@@ -996,7 +1024,7 @@ function calibrateOrder(carList, board, cols, rows, track, target, { skill = 0.6
   const wantGroups = (twins || 0) + (triples || 0);
   for (const b of biases) {
     const { order, groups } = withGroups(orderAtBias(carList, board, track, b, seed + 6), board, track, twins, triples, layer2);
-    const ok = groups.length ? solvablePairs(board, cols, rows, order, track, groups, 5, 4, layer2) : solvable(board, cols, rows, order, track, 5, 4, layer2);
+    const ok = groups.length ? solvablePairs(board, cols, rows, order, track, groups, 5, LANES, layer2) : solvable(board, cols, rows, order, track, 5, LANES, layer2);
     if (!ok) continue;
     const win = Math.round(testerReport(board, cols, rows, order, track, { skill, trials, seed, layer2 }).winRate * 100);
     // Difficulty should come FROM the linked groups (user): a candidate that places
@@ -1434,6 +1462,7 @@ if (process.argv.includes("--test")) {
   console.log("#   tier        track  win%  avgPeakBays");
   for (const k of Object.keys(data).map(Number).sort((a, b) => a - b)) {
     const L = data[k], track = L.track || "square";
+    LANES = L.lanes || DEFAULT_LANES; // grade at the level's own queue-line count
     const r = testerReport(L.board, L.cols, L.rows, L.chests, track, { skill: SKILL, trials: 40, seed: k * 101 + 1 });
     const pct = Math.round(r.winRate * 100);
     const bar = "█".repeat(Math.round(pct / 5)).padEnd(20);
@@ -1454,6 +1483,7 @@ if (process.argv.includes("--test1")) {
   const cfgm = cfgPath ? loadConfig(cfgPath) : null;
   const c = (cfgm && cfgm.get(k)) || {};
   const skill = process.env.SKILL != null ? Number(process.env.SKILL) : (c.skill != null ? c.skill : 0.6);
+  LANES = L.lanes || DEFAULT_LANES; // grade at the level's own queue-line count
   const r = testerReport(L.board, L.cols, L.rows, L.chests, L.track || "square", { skill, trials: 40, seed: k * 101 + 1, layer2: L.layer2 || null });
   console.log("WIN=" + Math.round(r.winRate * 100));
   process.exit(0);
@@ -1466,6 +1496,7 @@ if (process.argv.includes("--diag")) {
   const data = JSON.parse(fs.readFileSync(OUT, "utf8"));
   const L = data[k];
   const track = L.track || "square";
+  LANES = L.lanes || DEFAULT_LANES; // diagnose at the level's own queue-line count
   const colors = {}; for (const v of L.board) if (v >= 0 && v < 90) colors[v] = (colors[v] || 0) + 1;
   const carCap = {}; for (const c of L.chests) carCap[c.color] = (carCap[c.color] || 0) + c.count;
   const pairs = L.chests.filter((c) => c.pairId != null).length;
@@ -1474,10 +1505,10 @@ if (process.argv.includes("--diag")) {
   console.log(`carCap/colour:`, JSON.stringify(carCap));
   // capacity sanity: every colour's cars must hold >= its slime count
   for (const c of Object.keys(colors)) if ((carCap[c] || 0) < colors[c]) console.log(`  ⚠ colour ${c}: cap ${carCap[c] || 0} < slimes ${colors[c]}`);
-  const sv = solvable(L.board, L.cols, L.rows, L.chests, track, 5, 4, L.layer2 || null);
+  const sv = solvable(L.board, L.cols, L.rows, L.chests, track, 5, LANES, L.layer2 || null);
   console.log(`solvable() perfect-player = ${sv}`);
   const rng = makeRng(k * 101 + 1);
-  const r = playAverage(L.board, L.cols, L.rows, L.chests, track, { skill: 1, bays: 5, perRow: 4, rng, layer2: L.layer2 || null, autoDrive: true });
+  const r = playAverage(L.board, L.cols, L.rows, L.chests, track, { skill: 1, bays: 5, perRow: LANES, rng, layer2: L.layer2 || null, autoDrive: true });
   console.log(`playAverage(skill=1, autoDrive) → win=${r.win} peakBays=${r.peak}`);
   process.exit(0);
 }
@@ -1516,7 +1547,7 @@ if (process.argv.includes("--fixcars")) {
     for (const N of [...cands].filter((n) => n >= minN && n <= maxN).sort((a, b) => a - b)) {
       const carList = allocateCars(L.board, N, l2counts);
       const { order, bias } = orderByDifficulty(carList, L.board, track, biasFor(id, diff), id * 101 + 1);
-      const sv = solvable(L.board, L.cols, L.rows, order, track, 5, 4, L.layer2 || null);
+      const sv = solvable(L.board, L.cols, L.rows, order, track, 5, LANES, L.layer2 || null);
       const win = Math.round(testerReport(L.board, L.cols, L.rows, order, track, { skill, trials: 40, seed: id * 101 + 1, layer2: L.layer2 || null }).winRate * 100);
       const score = Math.abs(win - target) - (sv ? 3 : 0); // small bonus for solvable
       if (!best || score < best.score) best = { N, order, bias, sv, win, score };
@@ -1549,14 +1580,15 @@ if (process.argv.includes("--report")) {
     const L = data[k], track = L.track || "square";
     const c = (cfg && cfg.get(k)) || {};
     const skill = c.skill != null ? c.skill : 0.6;
+    LANES = L.lanes || DEFAULT_LANES; // grade at the level's own queue-line count
     const r = testerReport(L.board, L.cols, L.rows, L.chests, track, { skill, trials: 40, seed: k * 101 + 1, layer2: L.layer2 || null });
     const win = Math.round(r.winRate * 100);
     let slime = 0; const cs = new Set(); for (const v of L.board) if (v >= 0) { slime++; cs.add(v); }
     const twins = new Set(L.chests.filter((x) => x.pairId != null).map((x) => x.pairId)).size;
     // perfect-solver check so broken (unwinnable-for-the-greedy) levels stand out
     const pr = groupsOf(L.chests);
-    const solv = pr.length ? solvablePairs(L.board, L.cols, L.rows, L.chests, track, pr, 5, 4, L.layer2 || null)
-                           : solvable(L.board, L.cols, L.rows, L.chests, track, 5, 4, L.layer2 || null);
+    const solv = pr.length ? solvablePairs(L.board, L.cols, L.rows, L.chests, track, pr, 5, LANES, L.layer2 || null)
+                           : solvable(L.board, L.cols, L.rows, L.chests, track, 5, LANES, L.layer2 || null);
     out.push({ n: k, skill, target: c.target ?? null, win, slime, cars: L.chests.length, colors: cs.size, twins, track, solv });
     const gap = c.target != null ? win - c.target : 0;
     const flag = (solv ? "" : " ⛔") + (c.target != null && Math.abs(gap) >= 12 ? (gap < 0 ? " 🔴" : " 🔵") : "");
@@ -1586,10 +1618,12 @@ function loadConfig(p) {
   for (const line of fs.readFileSync(p, "utf8").split("\n")) {
     const t = line.trim(); if (!t || t.startsWith("#")) continue;
     const cols = csv ? t.split(",").map((s) => s.trim()) : t.split("|")[0].trim().split(/\s+/);
-    // User layout: lvl,tier,target,max màu,maxxe,minxe,xedoi,track,max slim,slime_ref,win_ref,skill,xe_ref,màu_ref,kích thước
-    const [lvl, , target, maxmau, maxxe, minxe, xedoi, track, maxslim, , , skill, , , size] = cols;
+    // User layout: lvl,tier,target,max màu,maxxe,minxe,xedoi,track,max slim,slime_ref,win_ref,skill,xe_ref,màu_ref,kích thước,line,chôn
+    //   line = queue columns (3/4/5; default 4) · chôn = fraction (0..1) of back-row
+    //   cars buried face-down ("?") until they reach their column front.
+    const [lvl, , target, maxmau, maxxe, minxe, xedoi, track, maxslim, , , skill, , , size, lanes, bury] = cols;
     const n = parseInt(lvl, 10); if (!n) continue; // skips the header row
-    map.set(n, { target: num(target), colors: num(maxmau), maxCars: num(maxxe), minCars: num(minxe), twins: num(xedoi), track: (track && track.toLowerCase() !== "auto") ? track : null, maxSlime: num(maxslim), skill: num(skill), size: num(size) });
+    map.set(n, { target: num(target), colors: num(maxmau), maxCars: num(maxxe), minCars: num(minxe), twins: num(xedoi), track: (track && track.toLowerCase() !== "auto") ? track : null, maxSlime: num(maxslim), skill: num(skill), size: num(size), lanes: num(lanes), bury: num(bury) });
   }
   console.log(`config: ${map.size} levels from ${path.relative(ROOT, p)}`);
   return map;
@@ -1671,6 +1705,9 @@ for (const n of LEVEL_NUMS) {
   // "kích thước" gets the true-colour mosaic + solid-bg build at that board size.
   const picture = cfg.size != null && cfg.size >= 15;
   BOARD_SIZE = picture ? cfg.size : DEFAULT_BOARD; // per-level board size
+  // Queue lines per level: CSV "line" column (LANES= env wins on a --only rebuild).
+  LANES = process.env.LANES != null ? Number(process.env.LANES)
+        : (cfg.lanes >= 2 && cfg.lanes <= 6) ? cfg.lanes : DEFAULT_LANES;
   // TARGET= env overrides the win-rate target for a --only rebuild (else CSV / auto curve).
   const target = process.env.TARGET != null ? Number(process.env.TARGET) : (cfg.target != null ? cfg.target : targetWin(n, diff));
   const vivid = true;                              // màu tươi mọi level, tránh màu tối (user 2026-07-24)
@@ -1752,7 +1789,16 @@ for (const n of LEVEL_NUMS) {
   board = tuned.board;
   const chests = tuned.chests;
 
+  // "Chôn xe": bury ~frac of the back-row cars face-down ("?" until they surface).
+  // PERCEPTION-ONLY for the tester — its greedy choices only ever read column fronts
+  // (always revealed) — so the measured win-rate is unchanged; burial adds HUMAN
+  // difficulty on top, exactly like the hidden "?" slimes. BURY= env overrides.
+  const buryFrac0 = process.env.BURY != null ? Number(process.env.BURY) : (cfg.bury != null ? cfg.bury : 0);
+  const buryFrac = buryFrac0 > 1 ? buryFrac0 / 100 : buryFrac0; // accept 60 or 0.6
+  const buriedN = buryFrac > 0 ? buryCars(chests, buryFrac, n * 313 + 7) : 0;
+
   levels[n] = { track, cols: BOARD_SIZE, rows: BOARD_SIZE, board, chests };
+  if (LANES !== DEFAULT_LANES) levels[n].lanes = LANES; // queue-line count (game defaults to 4)
   if (tuned.layer2) levels[n].layer2 = tuned.layer2;
   // hidden "?" slimes: perception-only (board keeps the real colour) → stamped on the
   // FINAL board, after tuning; interior cells only so nothing hidden is edge-exposed.
@@ -1763,11 +1809,11 @@ for (const n of LEVEL_NUMS) {
   }
 
   const pr = groupsOf(chests);
-  const solved = pr.length ? solvablePairs(board, BOARD_SIZE, BOARD_SIZE, chests, track, pr, 5, 4, tuned.layer2) : solvable(board, BOARD_SIZE, BOARD_SIZE, chests, track, 5, 4, tuned.layer2);
+  const solved = pr.length ? solvablePairs(board, BOARD_SIZE, BOARD_SIZE, chests, track, pr, 5, LANES, tuned.layer2) : solvable(board, BOARD_SIZE, BOARD_SIZE, chests, track, 5, LANES, tuned.layer2);
   if (!solved) console.warn(`⚠ L${n}: perfect-solver could not clear it`);
   await boardToPng(board, path.join(PREVIEW_DIR, `L${String(n).padStart(2, "0")}.png`));
   const twinsN = new Set(chests.filter((c) => c.pairId != null).map((c) => c.pairId)).size;
-  summary.push({ n, diff, target, win: tuned.win, skill: cfg.skill != null ? cfg.skill : 0.6, colors: distinctColors(board), slimes: slimeCount(board), cars: chests.length, twins: twinsN, track, file, solved, sparse });
+  summary.push({ n, diff, target, win: tuned.win, skill: cfg.skill != null ? cfg.skill : 0.6, colors: distinctColors(board), slimes: slimeCount(board), cars: chests.length, twins: twinsN, lanes: LANES, buried: buriedN, track, file, solved, sparse });
   if (n % 10 === 0) console.log(`  …built L${n} (${summary.filter((s) => s.solved).length}/${summary.length} solvable so far)`);
 }
 if (!DRY) fs.writeFileSync(path.join(PREVIEW_DIR, "summary.json"), JSON.stringify(summary));

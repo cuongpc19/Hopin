@@ -9,6 +9,10 @@ export interface Chest {
   count: number;
   pairId?: number; // twin cars: two chests sharing a pairId always move together
   kind?: "color" | "hammer" | "wood";
+  // BURIED ("xe chôn"): the car shows a dark "?" cover — colour & seat count hidden —
+  // until it reaches the FRONT of its queue column, where it flips face-up. Pure
+  // perception (the data keeps the real colour); the reveal happens in GameScene.
+  buried?: boolean;
 }
 
 // Obstacle cell codes in `board` (kept well above the colour range 0..18 so old
@@ -59,6 +63,10 @@ export interface Level {
   // HIDDEN "?" slimes: hidden[i] = the real colour of a covered cell (or -1). It shows
   // a "?" and can't be collected until a 4-neighbour opens, then its colour is revealed.
   hidden?: number[];
+  // Queue LINES ("3 line / 5 line xếp hàng"): how many vertical columns the chest
+  // inventory splits into (only the front of each column is clickable). Default 4.
+  // Fewer lines = fewer choices per turn = harder.
+  lanes?: number;
 }
 
 // Difficulty tiers: every 5th level is HARD, every 15th is SUPER-HARD.
@@ -177,6 +185,7 @@ export function makeLevel(levelNum = 1): Level {
       track: designed.track ?? defaultTrack,
       layer2: designed.layer2 ? [...designed.layer2] : undefined,
       hidden: designed.hidden ? [...designed.hidden] : undefined,
+      lanes: designed.lanes,
     };
   }
 

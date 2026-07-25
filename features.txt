@@ -432,6 +432,39 @@ CHỖ CHỈNH: scripts/build-levels.mjs -> tuneToTarget (twinCap, vòng giảm m
   - Nhiều level chốt ở --seedoff ≠0 (22,45,48,53,58,62,70,80,87,88,90,97,99,100,
     102,105,109,111,115,117,120...). Rebuild lẻ KHÔNG kèm đúng env/seedoff sẽ
     làm lệch lại -> sau khi rebuild lẻ LUÔN đo lại --test1 và chỉnh.
+
+────────────────────────────────────────────────────────────────────────────
+16) LINE XẾP HÀNG (3/5 CỘT) + XE CHÔN "?" (2026-07-25, học từ game tham chiếu)
+────────────────────────────────────────────────────────────────────────────
+Ý TƯỞNG (user): game tham chiếu (Pixel Flow thật) làm board KHÔNG quá lớn mà
+vẫn khó nhờ: (a) chôn rất nhiều xe — hàng sau úp "?" không biết màu; (b) số
+line xếp hàng thay đổi (3 line / 5 line — ít line = ít lựa chọn = khó);
+(c) xe đôi đặt 2 xe CẠNH NHAU CÙNG HÀNG cho đẹp (mình đã làm sẵn từ trước —
+pickGroups ép same-row adjacent-columns); (d) viền nền quanh chủ thể MỎNG.
+
+CƠ CHẾ MỚI TRONG GAME:
+• Level.lanes (designed.json, mặc định 4): số cột hàng xếp. GameScene đọc
+  this.level.lanes (clamp 2-6). Bot/solver mô phỏng ĐÚNG số cột đó (biến LANES
+  trong build-levels.mjs, tự set per level ở build/--report/--test1/--diag).
+• Chest.buried ("xe chôn"): xe úp tối + "?" vàng, GIẤU màu + số ghế; lật ngửa
+  (revealBuried, pop nhỏ) khi lên ĐẦU cột. Hàng đầu tiên không bao giờ chôn.
+  Xe đôi/ba chôn CẢ NHÓM hoặc không (giống "?" đôi cạnh nhau ở game tham chiếu).
+  Bot coi như nhìn xuyên (nó vốn chỉ đọc màu xe ĐẦU cột — luôn đã lật) nên số
+  đo winrate KHÔNG đổi: chôn là độ khó CỘNG THÊM cho người, như slime "?".
+• CSV thêm cột 16 "line" (3/4/5) + cột 17 "chôn xe (0-1)" (tỷ lệ xe hàng sau
+  bị chôn; nhận 0.6 hoặc 60 đều được). Env override khi build lẻ: LANES=, BURY=.
+
+5 LEVEL TRÌNH DIỄN L121-125 — KẾT QUẢ CHỐT (đo 40 lượt @0.9, đều solvable,
+ảnh gần vuông → viền 1-2 ô):
+  L121 star    25×25 5-line chôn  7/22 xe → 15%  (--seedoff 5, IMG=7_star_heroes)
+  L122 book    27×27 3-line chôn 10/25 xe → 15%  (--seedoff 3, IMG=7_book_toys)
+  L123 doll    29×29 5-line chôn 11/22 xe → 10%  (--seedoff 1, IMG=7_doll_toys)
+  L124 dino    31×31 3-line chôn 14/24 xe → 10%  (--seedoff 0, IMG=7_dino_animals1)
+  L125 pencils 31×31 3-line chôn 22/32 xe → 15%  (--seedoff 3, IMG=7_pencils_toys)
+Các level này cũng tự có slime "?" (54-102 ô) + lớp 2 (70-152 ô) từ rule pack.
+⚠ NGOÀI CSV: seedoff + IMG ở trên phải kèm khi rebuild lẻ (như mục 15).
+Số đo là ở góc nhìn bot NHÌN XUYÊN chôn — người chơi thật sẽ thấy KHÓ HƠN số đo
+(chôn + "?" là độ khó cộng thêm không đo được). Chờ user playtest để chỉnh.
 • Bàn 39×39 + lớp 2 ẩn = bot hoàn hảo cũng nghẹt bãi (unsolvable) — ĐÃ bỏ lớp 2
   ở pack; độ khó pack đến từ 39×39 + 8 màu + chôn xe + xe đôi/ba ở skill 0.98.
 

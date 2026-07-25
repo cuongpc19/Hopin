@@ -63,6 +63,7 @@ interface ChestView {
   armAt?: number; // auto-relaunch telegraph started at (this.time.now); car bobs to signal it's about to hop out
   armTweens?: Phaser.Tweens.Tween[]; // the telegraph bob/pulse tweens (stopped on launch/disarm)
   armFx?: Phaser.GameObjects.GameObject[]; // extra telegraph objects (up-arrow, ring) destroyed on disarm
+  qMark?: Phaser.GameObjects.Text; // the "?" cover of a BURIED car (destroyed on reveal)
 }
 
 // A chest currently travelling on the Line.
@@ -419,7 +420,9 @@ export class GameScene extends Phaser.Scene {
     // gold (right).
     this.buildTopBar(levelNum);
 
-    const perRow = 4;
+    // Queue lines per level ("3 line / 5 line", user 2026-07-25): fewer columns =
+    // fewer front cars to pick from = harder. Designed levels set `lanes`; default 4.
+    const perRow = Phaser.Math.Clamp(this.level.lanes ?? 4, 2, 6);
     const chest = CAR_SIZE;
 
     const hudH = 58; // top HUD strip
@@ -1403,6 +1406,7 @@ export class GameScene extends Phaser.Scene {
         const hit = view.container.getData("hit") as Phaser.GameObjects.Rectangle;
         if (front) hit.setInteractive({ useHandCursor: true });
         else hit.disableInteractive();
+        if (front) this.revealBuried(view); // buried car flips face-up on reaching the front
         view.container.setAlpha(r <= 1 ? 1 : 0.4); // rows 1 & 2 full; row 3+ dimmed
         if (this.invMask) view.container.setMask(this.invMask);
 
@@ -2753,7 +2757,46 @@ export class GameScene extends Phaser.Scene {
     }
 
     container.setData("hit", hit);
-    return { chest, container, countText, carImg: img, inFlight: 0 };
+    const view: ChestView = { chest, container, countText, carImg: img, inFlight: 0 };
+
+    // BURIED car ("xe chôn"): dark cover + a bold "?" — colour & seat count are a
+    // mystery until the car reaches the front of its column (see revealBuried).
+    // Same visual language as the hidden "?" slimes so players read it instantly.
+    if (chest.buried) {
+      img.setTint(0x30303a);
+      countText.setVisible(false);
+      const q = this.add
+        .text(0, 0, "?", {
+          fontFamily: "Arial, sans-serif",
+          fontStyle: "bold",
+          fontSize: `${Math.round(w * 0.62)}px`,
+          color: "#ffd94d",
+          stroke: "#000000",
+          strokeThickness: Math.max(3, Math.round(w * 0.1)),
+        })
+        .setOrigin(0.5);
+      container.add(q);
+      view.qMark = q;
+    }
+    return view;
+  }
+
+  // Flip a buried car face-up (called when it reaches the front of its column, or
+  // as a safety right before it enters the track). Small pop so the reveal reads.
+  private revealBuried(view: ChestView) {
+    if (!view.chest.buried) return;
+    view.chest.buried = false;
+    view.carImg.clearTint();
+    view.countText.setVisible(true);
+    view.qMark?.destroy();
+    view.qMark = undefined;
+    this.tweens.add({
+      targets: view.container,
+      scaleX: { from: 1.18, to: 1 },
+      scaleY: { from: 1.18, to: 1 },
+      duration: 170,
+      ease: "Back.out",
+    });
   }
 
   // ---- Launching ------------------------------------------------------
@@ -2933,6 +2976,7 @@ export class GameScene extends Phaser.Scene {
   // teleport. It only starts DRIVING once the glide finishes (entering → false).
   private spawnCar(view: ChestView, pos: number, dur?: number) {
     view.launchAt = undefined;
+    this.revealBuried(view); // safety: a booster can pull a still-buried back car onto the track
     this.tweens.killTweensOf(view.container); // stop any lingering launch hop
     view.container.clearMask(); // leaving the inventory viewport (Grab can pull a masked back car)
     const tx = this.lerpX(pos);
