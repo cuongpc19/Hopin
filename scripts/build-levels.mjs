@@ -575,16 +575,18 @@ function pickGroups(order, board, track, pairs, triples, perRow = LANES, layer2 
     }
     return new Set(idx.map((i) => order[i].color)).size === idx.length;
   };
-  // Scan DEEP-first (end of the queue → front): a group at the very front blocks its
-  // columns from turn one (its colours are still buried) and wedges the level; a deep
-  // group surfaces mid-game when the board has opened up — challenging but winnable.
-  // distinctify swaps cars at ARBITRARY later indices, so a partial (idx-only) revert
-  // would duplicate/lose cars (a real bug that collapsed the palette). Snapshot the WHOLE
-  // order and restore it fully whenever an attempt is rejected.
+  // Scan FRONT-first (user 2026-07-25: "xe đôi/ba xuất hiện SỚM, lúc vừa vào game") — place
+  // each group in the SHALLOWEST row that still keeps the level solvable, so it sits near
+  // the front of the queue and its members stay together (a deep same-row pair drifts apart
+  // as its columns drain unevenly → looks split). The solvablePairs gate below still rejects
+  // a front group that would wedge (its colours buried), so it just falls to the next row.
+  // distinctify swaps cars at ARBITRARY later indices, so a partial (idx-only) revert would
+  // duplicate/lose cars (a real bug that collapsed the palette). Snapshot the WHOLE order
+  // and restore it fully whenever an attempt is rejected.
   const restore = (snapAll) => { for (let z = 0; z < order.length; z++) order[z] = snapAll[z]; };
   let nT = 0;
   const lastBase = Math.floor((order.length - 3) / perRow) * perRow;
-  for (let base = lastBase; base >= 0 && nT < (triples || 0); base -= perRow) {
+  for (let base = 0; base <= lastBase && nT < (triples || 0); base += perRow) {
     const idx = [base, base + 1, base + 2];
     if (idx.some((i) => i + 1 > order.length || used.has(i)) || !sameRow(...idx)) continue;
     const snapAll = order.slice();
@@ -594,7 +596,7 @@ function pickGroups(order, board, track, pairs, triples, perRow = LANES, layer2 
   }
   let nP = 0;
   const lastPair = Math.floor((order.length - 2) / 2) * 2;
-  for (let i = lastPair; i >= 0 && nP < (pairs || 0); i -= 2) {
+  for (let i = 0; i <= lastPair && nP < (pairs || 0); i += 2) {
     if (i + 1 >= order.length || used.has(i) || used.has(i + 1) || !sameRow(i, i + 1)) continue;
     const idx = [i, i + 1];
     const snapAll = order.slice();

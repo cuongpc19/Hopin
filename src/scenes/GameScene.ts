@@ -2775,6 +2775,7 @@ export class GameScene extends Phaser.Scene {
     // stay a mystery until it reaches the front of its column (see revealBuried).
     if (chest.buried) {
       img.setTint(BURIED_TINT); // multiply toward pale blue → faded real colour
+      img.setAlpha(0.4); // …and ghost it right down so the colour is only a faint hint
       countText.setVisible(false);
       const q = this.add
         .text(0, 0, "?", {
