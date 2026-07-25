@@ -140,8 +140,8 @@ const DEPTH_ROAD = -50;
 // visibly ON TOP of the car as it boards.
 const DEPTH_CAR = 2; // every car container (lineup); track cars raise to DEPTH_RUNNER+5
 // twin/group rope: ABOVE the cars so it's visible even between ADJACENT cars in the
-// lineup (where a below-car rope hid behind them). It arcs over the cars' TOPS, so it
-// still doesn't cover the centred seat numbers. (Was 1 = below cars → invisible in the queue.)
+// lineup (where a below-car rope hid behind them). It anchors on each car's facing EDGE
+// and runs STRAIGHT through the gap, so it stays clear of the centred seat numbers.
 const DEPTH_TWINLINK = 11;
 const DEPTH_RUNNER = 5;
 
@@ -3893,47 +3893,33 @@ export class GameScene extends Phaser.Scene {
       const a = group[seg];
       const b = group[seg + 1];
       if (a.left || b.left || !a.container.scene || !b.container.scene) continue;
-      const ax = a.container.x;
-      const bx = b.container.x;
-      // Anchor the rope to the TOP of each car (not the centre) so, drawn above the cars,
-      // it arcs over their heads and never covers the centred seat number. Use each car's
-      // own scaled height so it sits right whether in the small lineup or full-size on track.
-      const topOf = (v: ChestView) => v.container.y - (v.carImg.displayHeight * (v.container.scaleY || 1)) * 0.42;
-      const ay = topOf(a);
-      const by = topOf(b);
+      const ax = a.container.x, ay = a.container.y;
+      const bx = b.container.x, by = b.container.y;
       const dist = Phaser.Math.Distance.Between(ax, ay, bx, by);
       // Draw the rope even when the twins are pulled far apart — different queue rows,
       // or spread out while lining up. Only skip a truly screen-spanning stretch (e.g.
       // a mid-launch tween with one car still in the queue) to avoid a stray line.
-      if (dist > GAME_W * 0.95) continue;
+      if (dist < 1 || dist > GAME_W * 0.95) continue;
 
-      // A rope that arcs gently UPWARD over the two linked cars, like joined hands raised.
-      const mx = (ax + bx) / 2;
-      const my = (ay + by) / 2;
-      const lift = Math.min(dist * 0.18, this.chestSize * 0.45);
-      const cx = mx;
-      const cy = my - lift; // control point lifted UP so the rope bows over the tops
-      const N = 14;
-      const pts: Phaser.Math.Vector2[] = [];
-      for (let i = 0; i <= N; i++) {
-        const t = i / N;
-        const it = 1 - t;
-        const x = it * it * ax + 2 * it * t * cx + t * t * bx;
-        const y = it * it * ay + 2 * it * t * cy + t * t * by;
-        pts.push(new Phaser.Math.Vector2(x, y));
-      }
+      // Anchor the rope on each car's EDGE facing its partner (not its centre), so the
+      // rope lives in the GAP between the cars: a clean STRAIGHT link that never bows into
+      // an arc and never overlaps a body / its centred seat number. Clamp each anchor to
+      // its own side of the midpoint so even a snug pair still shows a short rope.
+      const ux = (bx - ax) / dist, uy = (by - ay) / dist;
+      const radOf = (v: ChestView) => (v.carImg.displayWidth * (v.container.scaleX || 1)) * 0.42;
+      const half = dist / 2;
+      const ra = Math.min(radOf(a), half - 1), rb = Math.min(radOf(b), half - 1);
+      const ax2 = ax + ux * ra, ay2 = ay + uy * ra;
+      const bx2 = bx - ux * rb, by2 = by - uy * rb;
 
-      g.lineStyle(12, 0xff7a4d, 0.25); // soft warm glow
-      g.strokePoints(pts, false, false);
-      g.lineStyle(7, 0xff9d5a, 1); // main ribbon (warm coral-orange)
-      g.strokePoints(pts, false, false);
-      g.lineStyle(2.4, 0xffe9cf, 0.9); // bright highlight
-      g.strokePoints(pts, false, false);
+      g.lineStyle(11, 0xff7a4d, 0.28); g.lineBetween(ax2, ay2, bx2, by2); // soft warm glow
+      g.lineStyle(6.5, 0xff9d5a, 1);   g.lineBetween(ax2, ay2, bx2, by2); // main ribbon (warm coral-orange)
+      g.lineStyle(2.2, 0xffe9cf, 0.9); g.lineBetween(ax2, ay2, bx2, by2); // bright highlight
 
-      // rounded "hands" where the rope meets each car
+      // rounded "hands" where the rope grips each car
       g.fillStyle(0xfff3d0, 1);
-      g.fillCircle(pts[2].x, pts[2].y, 5);
-      g.fillCircle(pts[N - 2].x, pts[N - 2].y, 5);
+      g.fillCircle(ax2, ay2, 5);
+      g.fillCircle(bx2, by2, 5);
      }
     }
   }
