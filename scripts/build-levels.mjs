@@ -665,7 +665,10 @@ function playAverage(board, cols, rows, order, track, opts) {
   const isFront = (c) => columns.some((col) => col[0] === c);
   const removeCar = (c) => { for (const col of columns) if (col[0] === c) { col.shift(); return; } let p = parked.indexOf(c); if (p >= 0) { parked.splice(p, 1); return; } p = circ.indexOf(c); if (p >= 0) circ.splice(p, 1); };
   const juggleOne = () => {
-    if (circ.length >= CIRC_CAP || rng() > skill) return false; // no track room / mistimed
+    if (circ.length >= CIRC_CAP) return false; // no track room
+    // "đẩy nhanh 2-3 xe" (user): a rapid double-tap — the juggle only fails when BOTH
+    // taps are mistimed, so effective success ≈ 1-(1-skill)².
+    if (rng() > skill && rng() > skill) return false;
     const idx = parked.findIndex((c) => !c.grouped);
     if (idx >= 0) { circ.push(parked.splice(idx, 1)[0]); return true; }
     for (const g of groups) { // only groups parked → the whole group relaunches together
@@ -807,9 +810,10 @@ function playAverage(board, cols, rows, order, track, opts) {
       sent = true; break;
     }
     if (!sent) {
-      // bay juggle as the final out: bays are wedged with blocked cars → tap one back
-      // onto the ray so parkOne can reveal a deeper column next turn.
-      if (parked.length >= bays && juggleOne()) continue;
+      // bay juggle as the final out: bays are wedged with blocked cars → rapidly tap up
+      // to TWO back onto the ray (user pushes 2-3 in quick succession) so parkOne can
+      // reveal deeper columns over the next turns.
+      if (parked.length >= bays) { let jn = 0; while (jn < 2 && juggleOne()) jn++; if (jn > 0) continue; }
       if (process.env.TRACE === "1") {
         const E = exposedTiles(occ, cols, rows, edges); const S = new Set(); for (const i of E) S.add(occ[i]);
         const bayCol = parked.map((c) => c.color + ":" + c.cap + (c.grouped ? "G" : "")).join(" ");
@@ -1627,7 +1631,8 @@ for (const n of LEVEL_NUMS) {
   // "kích thước" gets the true-colour mosaic + solid-bg build at that board size.
   const picture = cfg.size != null && cfg.size >= 15;
   BOARD_SIZE = picture ? cfg.size : DEFAULT_BOARD; // per-level board size
-  const target = cfg.target != null ? cfg.target : targetWin(n, diff);
+  // TARGET= env overrides the win-rate target for a --only rebuild (else CSV / auto curve).
+  const target = process.env.TARGET != null ? Number(process.env.TARGET) : (cfg.target != null ? cfg.target : targetWin(n, diff));
   const vivid = true;                              // màu tươi mọi level, tránh màu tối (user 2026-07-24)
   const hard = diff !== "normal";
   const pick = hard ? hardImages[hardPtr++ % hardImages.length] : easyImages[easyPtr++ % easyImages.length];
@@ -1678,7 +1683,11 @@ for (const n of LEVEL_NUMS) {
   // level whose difficulty must come from the SUBJECT, not a big trivial-to-collect border.
   // PICTURE levels skip this: their solid bg IS the frame (mục 13).
   const fillTo = process.env.FILL != null ? Number(process.env.FILL) : 0.70;
-  if (!picture && n >= 3) board = addOuterLayers(board, BOARD_SIZE, BOARD_SIZE, 25, n * 191 + 5, fillTo, FILL_INSET, isKid(n) ? COOL_IDS : null);
+  // MAXLAYERS= caps how many decorative border RINGS grow around the subject (default 25 ≈
+  // unlimited → fills to `fillTo`). Set e.g. 2 to keep only a thin frame on a small subject
+  // instead of ballooning the border to fill a big board (user 2026-07-25).
+  const maxLayers = process.env.MAXLAYERS != null ? Number(process.env.MAXLAYERS) : 25;
+  if (!picture && n >= 3) board = addOuterLayers(board, BOARD_SIZE, BOARD_SIZE, maxLayers, n * 191 + 5, fillTo, FILL_INSET, isKid(n) ? COOL_IDS : null);
 
   // RELIEF level (right after each hard/super — n%5==1): a super-easy breather. Cap the
   // whole board at ~6 colours so a car almost always matches the outer layer → slimes
