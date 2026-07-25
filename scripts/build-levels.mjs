@@ -1131,7 +1131,9 @@ function hiddenFracFor(n, diff, cfg) {
   if (cfg && cfg.hiddenFrac != null) return cfg.hiddenFrac;
   if (isKid(n)) return (n - KID_LO) % 5 === 3 ? 0.08 : 0; // thi thoảng "?" — nhẹ nhàng
   if (n >= 101) return diff === "superhard" ? 0.14 : 0.12; // advanced pack: always
-  if (n < 35 || diff === "normal") return 0;
+  // hard/super from L20 (was L35): "?" hurts HUMANS but not the tester — the lever for
+  // levels that measure on-target yet play too easy (user 2026-07-25: L20/25 vẫn dễ).
+  if (n < 20 || diff === "normal") return 0;
   return diff === "superhard" ? 0.14 : 0.10;
 }
 // Land the tester's win-rate near `target`, MEASURED AT THIS LEVEL'S SKILL (ov.skill).

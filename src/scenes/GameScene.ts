@@ -137,8 +137,11 @@ const DEPTH_ROAD = -50;
 // shows when it stretches across the grid) but BELOW the cars' seat numbers (so it
 // never covers them). Cars in turn stay below the runners (5) so a slime still hops
 // visibly ON TOP of the car as it boards.
-const DEPTH_TWINLINK = 1; // twin/group rope: above board tiles, below the cars
-const DEPTH_CAR = 2; // every car container: above the rope, below runners
+const DEPTH_CAR = 2; // every car container (lineup); track cars raise to DEPTH_RUNNER+5
+// twin/group rope: ABOVE the cars so it's visible even between ADJACENT cars in the
+// lineup (where a below-car rope hid behind them). It arcs over the cars' TOPS, so it
+// still doesn't cover the centred seat numbers. (Was 1 = below cars → invisible in the queue.)
+const DEPTH_TWINLINK = 11;
 const DEPTH_RUNNER = 5;
 
 // Boosters unlock one-by-one as the player climbs. The first time you reach a
@@ -2910,7 +2913,7 @@ export class GameScene extends Phaser.Scene {
         const pos = posFor(k);
         maxD = Math.max(maxD, Phaser.Math.Distance.Between(m.container.x, m.container.y, this.lerpX(pos), this.lerpY(pos)));
       });
-      const dur = Phaser.Math.Clamp(maxD * 1.05, 180, 340);
+      const dur = Phaser.Math.Clamp(maxD * 0.8, 140, 260); // snappier group roll-on (user 2026-07-25: lên ray hơi chậm)
       members.forEach((m, k) => this.spawnCar(m, posFor(k), dur));
     } else {
       this.spawnCar(members[0], this.startIndex);
@@ -2943,7 +2946,7 @@ export class GameScene extends Phaser.Scene {
       y: ty,
       scale: 1,
       alpha: 1, // back-row lineup cars are dimmed — fade back to full on the way in
-      duration: dur ?? Phaser.Math.Clamp(dist * 1.05, 150, 300),
+      duration: dur ?? Phaser.Math.Clamp(dist * 0.8, 120, 220), // ~35% faster (user 2026-07-25: lên ray hơi chậm)
       ease: "Cubic.out", // springs out fast from the bay, then eases in — feels instant
       onComplete: () => {
         a.entering = false; // hand off to the driving system
