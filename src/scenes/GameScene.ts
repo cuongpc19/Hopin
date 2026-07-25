@@ -64,6 +64,7 @@ interface ChestView {
   armTweens?: Phaser.Tweens.Tween[]; // the telegraph bob/pulse tweens (stopped on launch/disarm)
   armFx?: Phaser.GameObjects.GameObject[]; // extra telegraph objects (up-arrow, ring) destroyed on disarm
   qMark?: Phaser.GameObjects.Text; // the "?" cover of a BURIED car (destroyed on reveal)
+  traySlot?: number; // TRAY mode: the bay this car is RESERVED in while it darts out to collect (returns here; freed only when it leaves empty)
 }
 
 // A chest currently travelling on the Line.
@@ -130,6 +131,10 @@ const RUN_MAX = 700;
 // Direction the car sprite art faces, in radians (0 = right/East). Tune if the
 // car points the wrong way as it drives: right=0, up=-PI/2, left=PI, down=PI/2.
 const CAR_ART_FACING = Math.PI / 2; // car art faces UP (face at top); +90° so the face leads travel
+
+// Buried "?" car wash: multiplied over the car sprite so its real colour still shows
+// but faded toward a soft pale blue (a hue hint, not a full reveal).
+const BURIED_TINT = 0xb9cfe6;
 
 // Draw-order layers: background < road < grid tiles < twin-rope < cars < runners.
 const DEPTH_BG = -100;
@@ -215,6 +220,10 @@ export class GameScene extends Phaser.Scene {
   private invMask?: Phaser.Display.Masks.GeometryMask;
   private invMaskG?: Phaser.GameObjects.Graphics;
   private slots: (ChestView | null)[] = [];
+  // TRAY mode (level.tray): one-way bays — clicking a queue car stages it into the next
+  // empty bay (never straight to the ray), and bay cars AUTO-launch when their colour is
+  // reachable (no manual relaunch / juggle). Set per level in create().
+  private trayMode = false;
   private audioCtx?: AudioContext; // lazily created for synthesized SFX (pop)
   private slotXs: number[] = [];
   private slotY = 0;
@@ -407,6 +416,7 @@ export class GameScene extends Phaser.Scene {
     this.twinLinkG = this.add.graphics().setDepth(DEPTH_TWINLINK);
 
     this.level = makeLevel(levelNum);
+    this.trayMode = this.level.tray === true; // one-way bay mode for this level
     // Win when all REMOVABLE cells are gone (slimes + wood + soft rock). Hard rocks
     // stay forever and are not counted. A 2-layer cell counts TWICE (top + hidden bottom).
     this.keysRemaining =
@@ -2759,20 +2769,21 @@ export class GameScene extends Phaser.Scene {
     container.setData("hit", hit);
     const view: ChestView = { chest, container, countText, carImg: img, inFlight: 0 };
 
-    // BURIED car ("xe chôn"): dark cover + a bold "?" — colour & seat count are a
-    // mystery until the car reaches the front of its column (see revealBuried).
-    // Same visual language as the hidden "?" slimes so players read it instantly.
+    // BURIED car ("xe chôn"): its REAL colour still shows but WASHED-OUT toward a soft
+    // pale blue (user 2026-07-25: "vẫn hiển thị màu mờ… mặc định màu xanh nhẹ đi"), with
+    // a bold "?" over it — so you get a faint hue hint but the exact colour + seat count
+    // stay a mystery until it reaches the front of its column (see revealBuried).
     if (chest.buried) {
-      img.setTint(0x30303a);
+      img.setTint(BURIED_TINT); // multiply toward pale blue → faded real colour
       countText.setVisible(false);
       const q = this.add
         .text(0, 0, "?", {
           fontFamily: "Arial, sans-serif",
           fontStyle: "bold",
           fontSize: `${Math.round(w * 0.62)}px`,
-          color: "#ffd94d",
-          stroke: "#000000",
-          strokeThickness: Math.max(3, Math.round(w * 0.1)),
+          color: "#ffffff",
+          stroke: "#2a3550",
+          strokeThickness: Math.max(3, Math.round(w * 0.11)),
         })
         .setOrigin(0.5);
       container.add(q);
@@ -2825,6 +2836,28 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
+    // TRAY mode: a queue tap STAGES the car(s) into the waiting bays (fill 1→5), never
+    // straight to the ray — the bay then auto-launches them when their colour is reachable
+    // (see autoRelaunchBays). Needs a free bay per member; a group needs that many.
+    if (this.trayMode) {
+      const freeBays = this.slots.reduce((n, s) => n + (s ? 0 : 1), 0);
+      if (freeBays < group.length) { this.trackFullNotice(); return; }
+      this.playPop();
+      const start = this.slots.reduce((n, s) => n + (s ? 1 : 0), 0); // left-packed → next slots
+      group.forEach((v, k) => {
+        const p = this.findInInventory(v)!;
+        p.col.splice(p.r, 1);
+        const hit = v.container.getData("hit") as Phaser.GameObjects.Rectangle;
+        hit.disableInteractive();
+        v.container.clearMask();
+        this.revealBuried(v); // it's committed to a bay → flip any "?" face-up
+        this.parkIntoSlot(v, start + k);
+      });
+      this.layoutInventory(true);
+      this.updateSlotWarning();
+      return;
+    }
+
     // Road must have room for the whole group (a triple needs 3 free slots, etc.).
     if (this.active.length + this.pending.length + group.length > MAX_ON_TRACK) {
       this.trackFullNotice();
@@ -2850,8 +2883,9 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private relaunchFromSlot(slotIndex: number) {
+  private relaunchFromSlot(slotIndex: number, auto = false) {
     if (this.won || this.handMode || this.magnetMode) return; // a booster claims this tap
+    if (this.trayMode && !auto) return; // one-way bays: no manual relaunch (auto-fire only)
     const view = this.slots[slotIndex];
     if (!view) return;
     this.disarmBay(view); // clear any "about to hop" bob before it actually launches
@@ -2865,7 +2899,11 @@ export class GameScene extends Phaser.Scene {
     this.playPop(); // cheerful "pop" as the car springs out of its bay
     for (const v of group) {
       const si = this.slots.indexOf(v);
-      if (si >= 0) this.slots[si] = null;
+      // TRAY mode: the car darts out to collect but its bay stays RESERVED (slots[si]
+      // keeps pointing at it) so it returns to the SAME slot — matching the bot's
+      // "collect from the bay, leave only when empty" model. Classic mode frees the slot.
+      if (this.trayMode) { if (si >= 0) v.traySlot = si; }
+      else if (si >= 0) this.slots[si] = null;
       (v.container.getData("hit") as Phaser.GameObjects.Rectangle).disableInteractive();
       // No in-place hop / hold: it goes straight to the ray. trySpawn glides it out
       // next frame — the glide itself IS the motion, so it feels immediate & smooth.
@@ -3017,9 +3055,10 @@ export class GameScene extends Phaser.Scene {
     const N = this.track.length;
     if (N === 0) return;
 
-    if (AUTO_CIRCLE) this.computeReachableColors(); // which colours can be shot right now
+    if (AUTO_CIRCLE || this.trayMode) this.computeReachableColors(); // which colours can be shot right now
     this.trySpawn();
     this.autoRelaunchBays(); // parked cars self-relaunch when their colour is reachable again
+    if (this.trayMode) this.checkTrayStuck(); // one-way bays: all 5 blocked & idle → lose
 
     // Live "cars on the ray" count on the start signal.
     if (this.signalCount) this.signalCount.setText(`${this.active.length}/${MAX_ON_TRACK}`);
@@ -3301,7 +3340,7 @@ export class GameScene extends Phaser.Scene {
   // The car doesn't jump out instantly: it first BOBS in place for a beat (armBay) so
   // the player can SEE it's about to relaunch, then it launches (see the telegraph const).
   private autoRelaunchBays() {
-    if (!AUTO_CIRCLE) return;
+    if (!AUTO_CIRCLE && !this.trayMode) return;
     if (this.tutStep > 0 || this.handMode || this.magnetMode) {
       this.disarmAllBays(); // tutorial/booster takes over — don't leave a car bobbing
       return;
@@ -3318,6 +3357,9 @@ export class GameScene extends Phaser.Scene {
     for (let i = 0; i < this.slots.length; i++) {
       const v = this.slots[i];
       if (!v) continue;
+      // TRAY: a reserved bay still points at its car while that car is darting out on the
+      // ray — don't try to re-launch a car that's already flying.
+      if (this.trayMode && (this.active.some((a) => a.view === v) || this.pending.includes(v))) continue;
       if ((v.chest.kind ?? "color") !== "color") continue;
       // A linked group relaunches together. If a live member isn't also parked, leave
       // the group alone (don't split it) — let manual control handle that odd state.
@@ -3333,9 +3375,24 @@ export class GameScene extends Phaser.Scene {
       }
       if (this.time.now - v.armAt < AUTO_RELAUNCH_TELEGRAPH_MS) return; // still bobbing
       this.disarmBay(v);
-      this.relaunchFromSlot(i); // handles the whole group itself
+      this.relaunchFromSlot(i, true); // auto — handles the whole group itself
       return;
     }
+  }
+
+  // TRAY-mode lose: every bay is occupied, nothing is driving/entering the ray, no bay
+  // car's colour is reachable (so none will auto-launch) and none is armed → the board
+  // can never progress. That's the one-way-tray deadlock (you staged the wrong cars).
+  private checkTrayStuck() {
+    if (this.won || this.lost || this.tutPaused) return;
+    if (this.active.length > 0 || this.pending.length > 0) return; // cars still in motion
+    if (this.slots.some((s) => s === null)) return; // a free bay → the player can still act
+    for (const v of this.slots) {
+      if (!v) continue;
+      if (v.armAt !== undefined) return; // one is about to hop out
+      if (this.carCanCollect(v)) return; // one can still collect → it will auto-launch
+    }
+    this.lose();
   }
 
   // Start the pre-launch "tell": each parked group member springs up-and-down (a real
@@ -3998,6 +4055,26 @@ export class GameScene extends Phaser.Scene {
   }
 
   private parkChest(a: ActiveChest) {
+    // TRAY mode: a car that darted out returns to its RESERVED bay (never needs to find a
+    // new slot, never loses here — the reservation guaranteed the space). Group members
+    // return to their own reserved bays together.
+    if (this.trayMode) {
+      this.removeActive(a);
+      a.view.waiting = false;
+      const members = this.isGrouped(a.view) ? this.liveGroup(a.view) : [a.view];
+      for (const m of members) {
+        if (m === a.view) continue;
+        const act = this.active.find((x) => x.view === m);
+        if (act) { this.removeActive(act); m.waiting = false; }
+      }
+      for (const m of members) {
+        let si = m.traySlot;
+        if (si == null || this.slots[si] !== m) si = this.slots.findIndex((s) => s === null || s === m);
+        if (si >= 0) { this.slots[si] = m; m.traySlot = si; this.parkIntoSlot(m, si); }
+      }
+      this.updateSlotWarning();
+      return;
+    }
     this.removeActive(a);
     a.view.waiting = false; // no longer waiting on runners
     this.disarmAllBays(); // bays are about to reshuffle (compactSlots) — clear any telegraph fx

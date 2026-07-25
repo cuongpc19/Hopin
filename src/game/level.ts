@@ -67,6 +67,10 @@ export interface Level {
   // inventory splits into (only the front of each column is clickable). Default 4.
   // Fewer lines = fewer choices per turn = harder.
   lanes?: number;
+  // TRAY mode: one-way waiting bays. Clicking a queue car stages it into the next empty
+  // bay (never straight to the ray); bay cars auto-launch when their colour is reachable,
+  // with NO manual relaunch / juggle. Undefined/false = the classic game.
+  tray?: boolean;
 }
 
 // Difficulty tiers: every 5th level is HARD, every 15th is SUPER-HARD.
@@ -186,6 +190,7 @@ export function makeLevel(levelNum = 1): Level {
       layer2: designed.layer2 ? [...designed.layer2] : undefined,
       hidden: designed.hidden ? [...designed.hidden] : undefined,
       lanes: designed.lanes,
+      tray: designed.tray,
     };
   }
 

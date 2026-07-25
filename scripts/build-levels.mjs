@@ -598,6 +598,24 @@ function pickGroups(order, board, track, pairs, triples, perRow = LANES, layer2 
     if (solvablePairs(board, BOARD_SIZE, BOARD_SIZE, order, track, [...groups, idx], 5, perRow, layer2)) { groups.push(idx); used.add(i); used.add(i + 1); nP++; }
     else { if (process.env.DEBUG_GROUPS) console.error(`  pair@${i}: solvable FAIL`); idx.forEach((x, k) => (order[x] = snap[k])); } // revert the swaps
   }
+  // EARLY cross-row fallback (user 2026-07-25): a linked pair should sit in the SAME row
+  // (handled above); if some couldn't, allow a cross-row pair but ONLY in the FIRST rows
+  // (both members within the first EARLY_ROWS) so they appear right at the start with a
+  // short, readable rope — never one at the front and its mate buried deep. Still gated
+  // by solvablePairs so an early group that would wedge the level is rejected.
+  const EARLY_ROWS = 3;
+  const earlyMax = EARLY_ROWS * perRow;
+  for (let a = 0; a < earlyMax && nP < (pairs || 0); a++) {
+    if (used.has(a) || a >= order.length) continue;
+    for (let b = a + 1; b < earlyMax && b < order.length; b++) {
+      if (used.has(b) || sameRow(a, b) || (b % perRow) === (a % perRow)) continue; // want different row AND column
+      const idx = [a, b];
+      const snap = idx.map((x) => order[x]);
+      if (!distinctify(idx)) { idx.forEach((x, k) => (order[x] = snap[k])); continue; }
+      if (solvablePairs(board, BOARD_SIZE, BOARD_SIZE, order, track, [...groups, idx], 5, perRow, layer2)) { groups.push(idx); used.add(a); used.add(b); nP++; break; }
+      else idx.forEach((x, k) => (order[x] = snap[k]));
+    }
+  }
   if (process.env.DEBUG_GROUPS) console.error(`  pickGroups: want P${pairs}/T${triples} → placed ${groups.length}`);
   return groups;
 }
@@ -732,6 +750,59 @@ function playAverage(board, cols, rows, order, track, opts) {
     }
     return progressed;
   };
+  // ---- TRAY mode (user 2026-07-25): one-way bays, NO juggle / NO manual relaunch. Cars
+  // stage from the queue into the 5 bays (fill 1→5); a bay car auto-fires the moment its
+  // colour is reachable, then leaves and frees its slot. The ONLY player decision is WHICH
+  // queue front to stage — skill-gated. Lose = every bay full of blocked cars with nothing
+  // reachable. Far more deterministic than the juggle game → an accurate win-rate gauge.
+  if (opts.tray) {
+    let g2 = 0;
+    while (remaining > 0 && g2++ < order.length * 6 + 400) {
+      if (parked.length > peak) peak = parked.length;
+      const E = exposedTiles(occ, cols, rows, edges);
+      const S = new Set(); for (const i of E) S.add(occ[i]);
+      let acted = false;
+      for (const c of parked) { // a reachable bay solo auto-fires
+        if (c.grouped || c.cap <= 0 || !S.has(c.color)) continue;
+        doCollect(c); if (c.cap === 0) removeCar(c); acted = true; break;
+      }
+      if (acted) continue;
+      for (const g of groups) { // a reachable fully-staged group fires together
+        if (g.every((c) => c.cap === 0) || !g.every((c) => parked.includes(c))) continue;
+        if (!g.some((c) => c.cap > 0 && S.has(c.color))) continue;
+        for (const c of g) doCollect(c);
+        if (g.every((c) => c.cap === 0)) for (const c of g) removeCar(c);
+        acted = true; break;
+      }
+      if (acted) continue;
+      if (parked.length < bays) {
+        // stage a READY group (all members at fronts) when the bays have room for all
+        let staged = false;
+        for (const g of groups) {
+          if (g.every((c) => c.cap === 0) || !g.every((c) => isFront(c))) continue;
+          if (parked.length + g.length > bays) continue;
+          for (const c of g) { removeCar(c); parked.push(c); }
+          staged = true; break;
+        }
+        if (staged) continue;
+        // else stage a solo front: prefer a REACHABLE one (fires next turn); if none,
+        // dig the DEEPEST column to reveal more. skill-miss → a random front instead.
+        const fronts = [];
+        for (let j = 0; j < perRow; j++) { const f = columns[j][0]; if (f && !f.grouped) fronts.push({ j, f }); }
+        if (fronts.length) {
+          const reach = fronts.filter((x) => x.f.cap > 0 && S.has(x.f.color));
+          let pick;
+          if (reach.length) pick = (rng() > skill) ? fronts[Math.floor(rng() * fronts.length)] : reach.reduce((a, b) => (gainOf(b.f.color, E) > gainOf(a.f.color, E) ? b : a));
+          else pick = (rng() > skill) ? fronts[Math.floor(rng() * fronts.length)] : fronts.reduce((a, b) => (columns[b.j].length > columns[a.j].length ? b : a));
+          parked.push(columns[pick.j].shift());
+          acted = true;
+        }
+      }
+      if (!acted) break; // bays full & nothing reachable, or no diggable front → stuck (lose)
+    }
+    return { win: remaining === 0, peak };
+  }
+
   let guard = 0;
   while (remaining > 0 && guard++ < order.length * 8 + 300) { // extra headroom: juggling adds turns
     if (parked.length > peak) peak = parked.length;
@@ -835,11 +906,11 @@ function playAverage(board, cols, rows, order, track, opts) {
   }
   return { win: remaining === 0, peak };
 }
-function testerReport(board, cols, rows, order, track, { skill = 0.6, trials = 40, seed = 1, bays = 5, perRow = LANES, layer2 = null, autoDrive = AUTO_DRIVE } = {}) {
+function testerReport(board, cols, rows, order, track, { skill = 0.6, trials = 40, seed = 1, bays = 5, perRow = LANES, layer2 = null, autoDrive = AUTO_DRIVE, tray = false } = {}) {
   let wins = 0, peakSum = 0;
   for (let t = 0; t < trials; t++) {
     const rng = makeRng(seed + t * 7919 + 1);
-    const r = playAverage(board, cols, rows, order, track, { skill, bays, perRow, rng, layer2, autoDrive });
+    const r = playAverage(board, cols, rows, order, track, { skill, bays, perRow, rng, layer2, autoDrive, tray });
     if (r.win) wins++;
     peakSum += r.peak;
   }
@@ -867,10 +938,41 @@ function makeLayer2(board, cols, rows, frac, seed, pos = process.env.L2POS || "c
   const b1 = cand.length ? cand[Math.floor(rng() * cand.length)] : BRIGHT_IDS[0];
   let b2 = b1;
   if (cand.length > 1) { do { b2 = cand[Math.floor(rng() * cand.length)]; } while (b2 === b1); }
+  // RICH bottom (user 2026-07-25): scatter MANY colours under the top instead of 1-2
+  // tones, so difficulty comes from the HIDDEN palette — the visible top can stay
+  // few-colour (clean look) yet peeling a big blob reveals a spread of colours, killing
+  // the free parallel clears that made big-blob art easy. L2RICH=N → up to N bottom
+  // colours (NEW brights first so total colours-in-play grows), each cell dodging its
+  // top colour + already-stamped up/left neighbours. Bot models layer2 → measurable.
+  const RICH = process.env.L2RICH != null ? Math.max(2, Math.floor(Number(process.env.L2RICH))) : 0;
+  let richPal = null;
+  if (RICH) {
+    // Cap total colours-IN-PLAY at MAX_COLORS: only add as many NEW bright colours as
+    // room allows (12 − top distinct), then REUSE existing top colours for the rest of
+    // the rich palette (reuse doesn't grow the total). Too many colours-in-play + few
+    // lanes wedges even the perfect solver, so this keeps rich layers solvable.
+    const news = BRIGHT_IDS.filter((id) => !present.has(id));
+    const olds = BRIGHT_IDS.filter((id) => present.has(id));
+    const room = Math.max(0, MAX_COLORS - present.size);
+    const pal = [...news.slice(0, room), ...olds];
+    richPal = pal.slice(0, Math.min(RICH, pal.length));
+    if (richPal.length < 2) richPal = null;
+  }
   const layer2 = new Array(board.length).fill(-1);
   const counts = new Map();
   let count = 0;
-  const stamp = (i, bottom) => {
+  const pickRich = (i) => {
+    const c = i % cols, up = i - cols, lf = i - 1;
+    const bad = new Set([board[i]]);
+    if (up >= 0 && layer2[up] >= 0) bad.add(layer2[up]);
+    if (c > 0 && layer2[lf] >= 0) bad.add(layer2[lf]);
+    const opts = richPal.filter((x) => !bad.has(x));
+    const pool = opts.length ? opts : richPal.filter((x) => x !== board[i]);
+    const src = pool.length ? pool : richPal;
+    return src[Math.floor(rng() * src.length)];
+  };
+  const stamp = (i, bottom0) => {
+    const bottom = richPal ? pickRich(i) : bottom0;
     if (board[i] >= 0 && board[i] < 90 && board[i] !== bottom) {
       layer2[i] = bottom; count++;
       counts.set(bottom, (counts.get(bottom) || 0) + 1);
@@ -922,6 +1024,28 @@ function makeLayer2(board, cols, rows, frac, seed, pos = process.env.L2POS || "c
   return count >= 12 ? { layer2, count, counts } : null;
 }
 
+// ---- CLEAN two-layer picture (item 4, user 2026-07-25) ----------------------
+// The random many-colour bottom (L2RICH) looks blotchy. Cleaner: split a full X-colour
+// subject render into a Y-colour TOP + an (X−Y)-colour BOTTOM, both spatially coherent.
+//   TOP    = the subject REDUCED to Y colours (a clean, flatter version — nice to look at)
+//   BOTTOM = the detail colours reduction merged away, kept at each cell it changed
+// Top & bottom palettes are DISJOINT (a merged colour vanishes from the top), so total
+// colours-in-play = X while the visible surface shows only Y. Difficulty lives in the
+// hidden detail, DECOUPLED from the top's colour count (user: "layer 1 chỉ Y màu, tô
+// chủ thể theo X−Y màu còn lại làm layer dưới"). Returns {board:top, layer2, count, counts}.
+function makeTwoLayerPicture(full, topY, seed) {
+  const top = reduceColors(full.slice(), topY, seed);
+  const layer2 = new Array(full.length).fill(-1);
+  const counts = new Map();
+  let count = 0;
+  for (let i = 0; i < full.length; i++) {
+    const v = full[i];
+    if (v < 0 || v >= 90) continue;
+    if (top[i] !== v) { layer2[i] = v; count++; counts.set(v, (counts.get(v) || 0) + 1); }
+  }
+  return { board: top, layer2, count, counts };
+}
+
 // ---- hidden "?" slime generation --------------------------------------------
 // Pick interior cells (ALL 4 neighbours are slime) to start hidden: hidden[i] = the
 // cell's real colour (board keeps the colour too — solver unaffected; hiding is a
@@ -931,13 +1055,36 @@ function makeHidden(board, cols, rows, frac, seed) {
   const hidden = new Array(board.length).fill(-1);
   const isSlime = (i) => board[i] >= 0 && board[i] < 90;
   const eligible = [];
+  const elig = new Set();
   for (let r = 1; r < rows - 1; r++) for (let c = 1; c < cols - 1; c++) {
     const i = r * cols + c;
     if (!isSlime(i)) continue;
-    if (isSlime(i - cols) && isSlime(i + cols) && isSlime(i - 1) && isSlime(i + 1)) eligible.push(i);
+    if (isSlime(i - cols) && isSlime(i + cols) && isSlime(i - 1) && isSlime(i + 1)) { eligible.push(i); elig.add(i); }
   }
+  if (eligible.length < 8) return null;
+  // CLUSTERED "?" (user 2026-07-25: "cho 1 mảng gần nhau, để xa nhau trông vô nghĩa").
+  // Grow a FEW connected blobs (BFS from random seeds) instead of scattering single
+  // cells — a compact patch reads as a deliberate covered area, not noise.
+  const target = Math.max(8, Math.round(eligible.length * frac));
+  const nb = (i) => { const r = Math.floor(i / cols), c = i % cols; return [r > 0 ? i - cols : -1, r < rows - 1 ? i + cols : -1, c > 0 ? i - 1 : -1, c < cols - 1 ? i + 1 : -1]; };
   let count = 0;
-  for (const i of eligible) if (rng() < frac) { hidden[i] = board[i]; count++; }
+  const blobs = Math.max(1, Math.round(target / 60)); // one blob per ~60 hidden cells
+  let guard = 0;
+  while (count < target && guard++ < blobs + 40) {
+    // start a new blob at a random still-eligible, not-yet-hidden cell
+    const seeds = eligible.filter((i) => hidden[i] < 0);
+    if (!seeds.length) break;
+    const start = seeds[Math.floor(rng() * seeds.length)];
+    const frontier = [start];
+    while (frontier.length && count < target) {
+      // pop a random frontier cell → organic (non-square) blob shape
+      const k = Math.floor(rng() * frontier.length);
+      const i = frontier.splice(k, 1)[0];
+      if (hidden[i] >= 0 || !elig.has(i)) continue;
+      hidden[i] = board[i]; count++;
+      for (const j of nb(i)) if (j >= 0 && elig.has(j) && hidden[j] < 0) frontier.push(j);
+    }
+  }
   return count >= 8 ? { hidden, count } : null;
 }
 
@@ -1019,14 +1166,14 @@ function withGroups(order, board, track, pairs, triples, layer2 = null) {
 // Sweep burial strength → order whose average-tester win% is closest to `target`.
 // With `twins`>0 the xe đôi are placed on each candidate and the win% is measured
 // WITH the twin constraint, so difficulty is tuned accounting for them.
-function calibrateOrder(carList, board, cols, rows, track, target, { skill = 0.6, trials = 60, seed = 1, twins = 0, triples = 0, layer2 = null, biases = [0, 0.08, 0.16, 0.24, 0.32, 0.4, 0.48, 0.56, 0.64, 0.72] } = {}) {
+function calibrateOrder(carList, board, cols, rows, track, target, { skill = 0.6, trials = 60, seed = 1, twins = 0, triples = 0, layer2 = null, tray = false, biases = [0, 0.08, 0.16, 0.24, 0.32, 0.4, 0.48, 0.56, 0.64, 0.72] } = {}) {
   let best = null;
   const wantGroups = (twins || 0) + (triples || 0);
   for (const b of biases) {
     const { order, groups } = withGroups(orderAtBias(carList, board, track, b, seed + 6), board, track, twins, triples, layer2);
     const ok = groups.length ? solvablePairs(board, cols, rows, order, track, groups, 5, LANES, layer2) : solvable(board, cols, rows, order, track, 5, LANES, layer2);
     if (!ok) continue;
-    const win = Math.round(testerReport(board, cols, rows, order, track, { skill, trials, seed, layer2 }).winRate * 100);
+    const win = Math.round(testerReport(board, cols, rows, order, track, { skill, trials, seed, layer2, tray }).winRate * 100);
     // Difficulty should come FROM the linked groups (user): a candidate that places
     // more of the requested twins/triples beats a slightly-closer-to-target one.
     const score = Math.max(0, wantGroups - groups.length) * 1000 + Math.abs(win - target);
@@ -1034,7 +1181,7 @@ function calibrateOrder(carList, board, cols, rows, track, target, { skill = 0.6
   }
   if (!best) {
     const { order } = withGroups(orderAtBias(carList, board, track, 0, seed + 6), board, track, twins, triples, layer2);
-    const win = Math.round(testerReport(board, cols, rows, order, track, { skill, trials, seed, layer2 }).winRate * 100);
+    const win = Math.round(testerReport(board, cols, rows, order, track, { skill, trials, seed, layer2, tray }).winRate * 100);
     best = { b: 0, win, order, score: Math.abs(win - target) };
   }
   return best;
@@ -1250,11 +1397,14 @@ function tuneToTarget(board0, track, target, n, diff, ov = {}) {
   let twinsN = ov.twins != null ? ov.twins : twinsFor(n, diff);
   const triplesN = ov.triples != null ? ov.triples : 0; // xe ba (3-car groups)
   const skill = ov.skill != null ? ov.skill : 0.6;
-  // 2-LAYER slimes: ov.layer2Frac (0..1) covers ~that fraction of the subject with a
-  // hidden bottom colour. The tester/solver model the reveal; cars get extra capacity.
-  const L2 = ov.layer2Frac ? makeLayer2(board0, BOARD_SIZE, BOARD_SIZE, ov.layer2Frac, seed + 11) : null;
+  // 2-LAYER slimes: either a PRE-BUILT clean picture bottom (ov.layer2Pre, item 4 — top
+  // is pinned, no colour-reduction), or ov.layer2Frac (0..1) covers ~that fraction with a
+  // makeLayer2 patch. The tester/solver model the reveal; cars get extra capacity.
+  const pinned = ov.layer2Pre != null; // clean two-layer → don't reshape the top board
+  const L2 = pinned ? { layer2: ov.layer2Pre.layer2, count: ov.layer2Pre.count, counts: ov.layer2Pre.counts }
+                    : (ov.layer2Frac ? makeLayer2(board0, BOARD_SIZE, BOARD_SIZE, ov.layer2Frac, seed + 11) : null);
   const l2extra = L2 ? L2.counts : null;
-  const opt = { skill, trials: 16, seed, twins: twinsN, triples: triplesN, layer2: L2 ? L2.layer2 : null, biases: [0, 0.18, 0.36, 0.54, 0.72] };
+  const opt = { skill, trials: 16, seed, twins: twinsN, triples: triplesN, layer2: L2 ? L2.layer2 : null, tray: !!ov.tray, biases: [0, 0.18, 0.36, 0.54, 0.72] };
   const slime = slimeCount(board0) + (L2 ? L2.count : 0); // bottoms add to the load
   // Slimes-per-car (car `count`) is the real feel knob: user wants count in 1..40 but
   // PREFERS 15..35 (ideal ≈ 25). So car count lives in [ceil(slime/40) .. floor(slime/12)]
@@ -1287,11 +1437,13 @@ function tuneToTarget(board0, track, target, n, diff, ov = {}) {
     return all.reduce((a, b) => (b.score < a.score ? b : a)); // closest to target (score already prefers groups)
   };
 
-  // Start at the colour ceiling; if still too hard, drop one colour at a time.
-  let board = ensureColors(board0.slice(), ceilColors, seed + 3);
+  // Start at the colour ceiling; if still too hard, drop one colour at a time. With a
+  // pinned clean two-layer (item 4) the TOP must keep its exact Y colours (the hidden
+  // bottom carries the difficulty), so skip ensureColors + the colour-reduce sweep.
+  let board = pinned ? board0.slice() : ensureColors(board0.slice(), ceilColors, seed + 3);
   let best = sweepCars(board), bestBoard = board;
   let k = distinctColors(board), guard = 0;
-  while (best.win < target - 8 && k > 2 && guard++ < 8) {
+  while (!pinned && best.win < target - 8 && k > 2 && guard++ < 8) {
     k--;
     const b = reduceColors(board0.slice(), k, seed + 3);
     const f = sweepCars(b);
@@ -1484,7 +1636,7 @@ if (process.argv.includes("--test1")) {
   const c = (cfgm && cfgm.get(k)) || {};
   const skill = process.env.SKILL != null ? Number(process.env.SKILL) : (c.skill != null ? c.skill : 0.6);
   LANES = L.lanes || DEFAULT_LANES; // grade at the level's own queue-line count
-  const r = testerReport(L.board, L.cols, L.rows, L.chests, L.track || "square", { skill, trials: 40, seed: k * 101 + 1, layer2: L.layer2 || null });
+  const r = testerReport(L.board, L.cols, L.rows, L.chests, L.track || "square", { skill, trials: 40, seed: k * 101 + 1, layer2: L.layer2 || null, tray: !!L.tray });
   console.log("WIN=" + Math.round(r.winRate * 100));
   process.exit(0);
 }
@@ -1581,7 +1733,7 @@ if (process.argv.includes("--report")) {
     const c = (cfg && cfg.get(k)) || {};
     const skill = c.skill != null ? c.skill : 0.6;
     LANES = L.lanes || DEFAULT_LANES; // grade at the level's own queue-line count
-    const r = testerReport(L.board, L.cols, L.rows, L.chests, track, { skill, trials: 40, seed: k * 101 + 1, layer2: L.layer2 || null });
+    const r = testerReport(L.board, L.cols, L.rows, L.chests, track, { skill, trials: 40, seed: k * 101 + 1, layer2: L.layer2 || null, tray: !!L.tray });
     const win = Math.round(r.winRate * 100);
     let slime = 0; const cs = new Set(); for (const v of L.board) if (v >= 0) { slime++; cs.add(v); }
     const twins = new Set(L.chests.filter((x) => x.pairId != null).map((x) => x.pairId)).size;
@@ -1618,12 +1770,14 @@ function loadConfig(p) {
   for (const line of fs.readFileSync(p, "utf8").split("\n")) {
     const t = line.trim(); if (!t || t.startsWith("#")) continue;
     const cols = csv ? t.split(",").map((s) => s.trim()) : t.split("|")[0].trim().split(/\s+/);
-    // User layout: lvl,tier,target,max màu,maxxe,minxe,xedoi,track,max slim,slime_ref,win_ref,skill,xe_ref,màu_ref,kích thước,line,chôn
+    // User layout: lvl,tier,target,max màu,maxxe,minxe,xedoi,track,max slim,slime_ref,win_ref,skill,xe_ref,màu_ref,kích thước,line,chôn,l1,tray
     //   line = queue columns (3/4/5; default 4) · chôn = fraction (0..1) of back-row
-    //   cars buried face-down ("?") until they reach their column front.
-    const [lvl, , target, maxmau, maxxe, minxe, xedoi, track, maxslim, , , skill, , , size, lanes, bury] = cols;
+    //   cars buried face-down ("?") · l1 = TOP-layer colour count Y for the clean
+    //   two-layer split (blank/0 = no split; hidden bottom carries X−Y colours) ·
+    //   tray = 1 → one-way TRAY mode (bays fill 1→5, no pull-out), 0/blank = classic.
+    const [lvl, , target, maxmau, maxxe, minxe, xedoi, track, maxslim, , , skill, , , size, lanes, bury, l1, tray] = cols;
     const n = parseInt(lvl, 10); if (!n) continue; // skips the header row
-    map.set(n, { target: num(target), colors: num(maxmau), maxCars: num(maxxe), minCars: num(minxe), twins: num(xedoi), track: (track && track.toLowerCase() !== "auto") ? track : null, maxSlime: num(maxslim), skill: num(skill), size: num(size), lanes: num(lanes), bury: num(bury) });
+    map.set(n, { target: num(target), colors: num(maxmau), maxCars: num(maxxe), minCars: num(minxe), twins: num(xedoi), track: (track && track.toLowerCase() !== "auto") ? track : null, maxSlime: num(maxslim), skill: num(skill), size: num(size), lanes: num(lanes), bury: num(bury), l1: num(l1), tray: (tray != null && String(tray).trim() === "1") ? 1 : 0 });
   }
   console.log(`config: ${map.size} levels from ${path.relative(ROOT, p)}`);
   return map;
@@ -1708,6 +1862,9 @@ for (const n of LEVEL_NUMS) {
   // Queue lines per level: CSV "line" column (LANES= env wins on a --only rebuild).
   LANES = process.env.LANES != null ? Number(process.env.LANES)
         : (cfg.lanes >= 2 && cfg.lanes <= 6) ? cfg.lanes : DEFAULT_LANES;
+  // TRAY mode (one-way bays) for this level: CSV "tray" col or TRAY= env. Affects both
+  // the calibration model (tray win-rate) and the shipped level flag.
+  const trayOn = process.env.TRAY != null ? process.env.TRAY === "1" : cfg.tray === 1;
   // TARGET= env overrides the win-rate target for a --only rebuild (else CSV / auto curve).
   const target = process.env.TARGET != null ? Number(process.env.TARGET) : (cfg.target != null ? cfg.target : targetWin(n, diff));
   const vivid = true;                              // màu tươi mọi level, tránh màu tối (user 2026-07-24)
@@ -1752,6 +1909,17 @@ for (const n of LEVEL_NUMS) {
   }
   if (!board) { console.warn(`L${n}: no subject found in ${file} — skipped`); continue; }
 
+  // CLEAN two-layer (item 4, user 2026-07-25): if a top-layer colour count Y is given
+  // (CSV "l1" or env L1COLORS) and it's below the picture's X colours, split into a
+  // Y-colour clean TOP + an (X−Y)-colour hidden BOTTOM (the subject's detail). Difficulty
+  // then lives in the hidden layer, so the visible surface can stay few-colour & pretty.
+  let layer2Pre = null;
+  const l1y = process.env.L1COLORS != null ? Number(process.env.L1COLORS) : cfg.l1;
+  if (picture && l1y != null && l1y >= 2 && l1y < distinctColors(board)) {
+    const split = makeTwoLayerPicture(board, l1y, n * 101 + 7);
+    if (split && split.count >= 12) { board = split.board; layer2Pre = split; }
+  }
+
   // From L3 on, COVER ≥70% of the board with slime: grow a decorative 2-colour border
   // around the subject until fill hits 70% (a subject already ≥70% gets none). If the
   // subject is small this becomes a filled square/rect — that's fine (user 2026-07-23).
@@ -1785,7 +1953,7 @@ for (const n of LEVEL_NUMS) {
   // PICTURE levels pin the colour ceiling to the board's ACTUAL colours so ensureColors
   // never speckles extra colours onto the character (difficulty comes from burial/cars/
   // groups instead); reduceColors easing still applies when a level is too hard.
-  const tuned = tuneToTarget(board, track, target, n, diff, { colors: picture ? distinctColors(board) : cfg.colors, maxCars: cfg.maxCars, minCars: cfg.minCars, twins: cfg.twins, triples: triplesFor(n), skill: calSkill, layer2Frac: layer2FracFor(n, diff, cfg) }); // → win ≈ target @ skill
+  const tuned = tuneToTarget(board, track, target, n, diff, { colors: picture ? distinctColors(board) : cfg.colors, maxCars: cfg.maxCars, minCars: cfg.minCars, twins: cfg.twins, triples: triplesFor(n), skill: calSkill, layer2Frac: layer2Pre ? 0 : layer2FracFor(n, diff, cfg), layer2Pre, tray: trayOn }); // → win ≈ target @ skill
   board = tuned.board;
   const chests = tuned.chests;
 
@@ -1799,6 +1967,7 @@ for (const n of LEVEL_NUMS) {
 
   levels[n] = { track, cols: BOARD_SIZE, rows: BOARD_SIZE, board, chests };
   if (LANES !== DEFAULT_LANES) levels[n].lanes = LANES; // queue-line count (game defaults to 4)
+  if (trayOn) levels[n].tray = true; // one-way TRAY mode (bays fill 1→5, no pull-out)
   if (tuned.layer2) levels[n].layer2 = tuned.layer2;
   // hidden "?" slimes: perception-only (board keeps the real colour) → stamped on the
   // FINAL board, after tuning; interior cells only so nothing hidden is edge-exposed.
