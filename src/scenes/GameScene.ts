@@ -797,7 +797,9 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // this.buildGroundMat(cols, rows); // dropped the brown/sand mat under the slimes for now
+    // Sand mat re-enabled (user 2026-07-25): grass-green hid the green/teal slimes;
+    // warm sand makes every palette colour pop (same call as the reference game).
+    this.buildGroundMat(cols, rows);
 
     const keySize = this.cell;
     // Index-addressed (not push) so a 2×2 BIG obstacle can claim its 4 cells.
@@ -900,6 +902,12 @@ export class GameScene extends Phaser.Scene {
     g.fillStyle(0xb59468, 1); g.fillRoundedRect(x - 5, y + 3, w + 10, h + 10, rad + 5); // earth rim + drop shadow
     g.fillStyle(0xdcc79c, 1); g.fillRoundedRect(x, y, w, h, rad);                        // packed sand
     g.fillStyle(0xe8dab6, 0.45); g.fillRoundedRect(x + 5, y + 5, w - 10, Math.round(h * 0.4), rad - 3); // soft top light
+    // Subtle 2-tone checkerboard aligned to the board cells (~5% darker on alternate
+    // cells) — makes empty-vs-filled cells readable as the picture gets eaten away.
+    g.fillStyle(0xd3bc8e, 0.55);
+    for (let r = 0; r < rows; r++)
+      for (let c = (r % 2); c < cols; c += 2)
+        g.fillRect(this.gridX + c * this.cell, this.gridY + r * this.cell, this.cell, this.cell);
     g.lineStyle(3, 0xc7ac7e, 0.9); g.strokeRoundedRect(x + 3, y + 3, w - 6, h - 6, rad - 2); // gentle inner edge
   }
 
@@ -3842,21 +3850,25 @@ export class GameScene extends Phaser.Scene {
       const b = group[seg + 1];
       if (a.left || b.left || !a.container.scene || !b.container.scene) continue;
       const ax = a.container.x;
-      const ay = a.container.y;
       const bx = b.container.x;
-      const by = b.container.y;
+      // Anchor the rope to the TOP of each car (not the centre) so, drawn above the cars,
+      // it arcs over their heads and never covers the centred seat number. Use each car's
+      // own scaled height so it sits right whether in the small lineup or full-size on track.
+      const topOf = (v: ChestView) => v.container.y - (v.carImg.displayHeight * (v.container.scaleY || 1)) * 0.42;
+      const ay = topOf(a);
+      const by = topOf(b);
       const dist = Phaser.Math.Distance.Between(ax, ay, bx, by);
       // Draw the rope even when the twins are pulled far apart — different queue rows,
       // or spread out while lining up. Only skip a truly screen-spanning stretch (e.g.
       // a mid-launch tween with one car still in the queue) to avoid a stray line.
       if (dist > GAME_W * 0.95) continue;
 
-      // A rope that droops gently downward, like two hands linked between the cars.
+      // A rope that arcs gently UPWARD over the two linked cars, like joined hands raised.
       const mx = (ax + bx) / 2;
       const my = (ay + by) / 2;
-      const sag = Math.min(dist * 0.22, this.chestSize * 0.5);
+      const lift = Math.min(dist * 0.18, this.chestSize * 0.45);
       const cx = mx;
-      const cy = my + sag; // control point pulled down by "gravity"
+      const cy = my - lift; // control point lifted UP so the rope bows over the tops
       const N = 14;
       const pts: Phaser.Math.Vector2[] = [];
       for (let i = 0; i <= N; i++) {
