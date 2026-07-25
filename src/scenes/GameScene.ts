@@ -132,9 +132,10 @@ const RUN_MAX = 700;
 // car points the wrong way as it drives: right=0, up=-PI/2, left=PI, down=PI/2.
 const CAR_ART_FACING = Math.PI / 2; // car art faces UP (face at top); +90° so the face leads travel
 
-// Buried "?" car wash: multiplied over the car sprite so its real colour still shows
-// but faded toward a soft pale blue (a hue hint, not a full reveal).
-const BURIED_TINT = 0xb9cfe6;
+// Buried "?" car cover: a SOLID light-blue silhouette (setTintFill) that HIDES the real
+// colour entirely — every buried car looks the same until it's revealed (user 2026-07-25:
+// "cho k nhìn thấy màu gì luôn, default xanh nhạt cho tất cả").
+const BURIED_TINT = 0xa9d0f0;
 
 // Draw-order layers: background < road < grid tiles < twin-rope < cars < runners.
 const DEPTH_BG = -100;
@@ -2774,9 +2775,8 @@ export class GameScene extends Phaser.Scene {
     // a bold "?" over it — so you get a faint hue hint but the exact colour + seat count
     // stay a mystery until it reaches the front of its column (see revealBuried).
     if (chest.buried) {
-      img.setTint(BURIED_TINT); // multiply toward pale blue → faded real colour
-      img.setAlpha(0.2); // …ghost it WAY down (user: siêu nhạt, khó đoán màu) — full colour
-                         // only returns on reveal (reaches column front, or tapped to a bay)
+      img.setTintFill(BURIED_TINT); // solid light-blue silhouette — real colour fully hidden
+                                    // (returns only on reveal: reaches column front, or tapped)
       countText.setVisible(false);
       const q = this.add
         .text(0, 0, "?", {
