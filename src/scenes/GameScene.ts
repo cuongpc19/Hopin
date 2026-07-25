@@ -799,7 +799,7 @@ export class GameScene extends Phaser.Scene {
 
     // Sand mat re-enabled (user 2026-07-25): grass-green hid the green/teal slimes;
     // warm sand makes every palette colour pop (same call as the reference game).
-    this.buildGroundMat(cols, rows);
+    this.buildGroundMat(cols, rows, roadW);
 
     const keySize = this.cell;
     // Index-addressed (not push) so a 2×2 BIG obstacle can claim its 4 cells.
@@ -890,24 +890,25 @@ export class GameScene extends Phaser.Scene {
     this.tweens.add({ targets: post, y: py - 5, duration: 700, yoyo: true, repeat: -1, ease: "Sine.inOut" });
   }
 
-  // A smooth sandy/earth patch under the grid so the slimes stand on a defined clearing
-  // (instead of blending into the grass) — a soft rim + top highlight, no gritty texture.
-  private buildGroundMat(cols: number, rows: number) {
-    const gw = cols * this.cell, gh = rows * this.cell;
-    const pad = Math.round(this.cell * 0.85);
-    const x = this.gridX - pad, y = this.gridY - pad, w = gw + 2 * pad, h = gh + 2 * pad;
-    const rad = Math.round(this.cell * 1.3);
-    const g = this.add.graphics().setDepth(-40); // above the forest bg, below the tiles
-    g.fillStyle(0xb59468, 1); g.fillRoundedRect(x - 5, y + 3, w + 10, h + 10, rad + 5); // earth rim + drop shadow
-    g.fillStyle(0xdcc79c, 1); g.fillRoundedRect(x, y, w, h, rad);                        // packed sand
-    g.fillStyle(0xe8dab6, 0.45); g.fillRoundedRect(x + 5, y + 5, w - 10, Math.round(h * 0.4), rad - 3); // soft top light
+  // A smooth sandy clearing filling the ENTIRE interior of the ring road (user
+  // 2026-07-25: no grass gap between road and mat). The fill tucks under the road
+  // band — it sits BELOW the road (road at DEPTH_ROAD −50, mat at −60) so the road
+  // always draws over it and the seam can never show.
+  private buildGroundMat(cols: number, rows: number, roadW: number) {
+    const tuck = Math.round(roadW * 0.5); // reach the road's centreline — fully under the band
+    const x = this.beltLeft + roadW / 2 - tuck, y = this.beltTop + roadW / 2 - tuck;
+    const w = (this.beltRight - this.beltLeft) - roadW + 2 * tuck;
+    const h = (this.beltBottom - this.beltTop) - roadW + 2 * tuck;
+    const rad = Math.max(10, this.roadRadius - roadW / 2 + tuck);
+    const g = this.add.graphics().setDepth(-60); // above the forest bg, below the ROAD & tiles
+    g.fillStyle(0xdcc79c, 1); g.fillRoundedRect(x, y, w, h, rad);              // packed sand
+    g.fillStyle(0xe8dab6, 0.45); g.fillRoundedRect(x + 6, y + 6, w - 12, Math.round(h * 0.35), rad - 4); // soft top light
     // Subtle 2-tone checkerboard aligned to the board cells (~5% darker on alternate
     // cells) — makes empty-vs-filled cells readable as the picture gets eaten away.
     g.fillStyle(0xd3bc8e, 0.55);
     for (let r = 0; r < rows; r++)
       for (let c = (r % 2); c < cols; c += 2)
         g.fillRect(this.gridX + c * this.cell, this.gridY + r * this.cell, this.cell, this.cell);
-    g.lineStyle(3, 0xc7ac7e, 0.9); g.strokeRoundedRect(x + 3, y + 3, w - 6, h - 6, rad - 2); // gentle inner edge
   }
 
   // Assemble the rounded-rectangle road from sprite pieces: 4 tiled straight
