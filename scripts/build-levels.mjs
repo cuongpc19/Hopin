@@ -653,10 +653,29 @@ function playAverage(board, cols, rows, order, track, opts) {
   const columns = Array.from({ length: perRow }, () => []);
   cars.forEach((c, i) => columns[i % perRow].push(c));
   const parked = [];
+  // BAY JUGGLE (user technique, 2026-07-25): with the bays full, a skilled player taps a
+  // BLOCKED parked car back onto the ray right as another car is about to park — the
+  // juggled car circles "uselessly" (still collecting if its colour opens mid-lap) and
+  // re-parks when a bay frees. `circ` holds these circling cars; capped so the ray keeps
+  // room for productive launches. Each use is timing-gated by skill.
+  const circ = [];
+  const CIRC_CAP = 3;
   let peak = 0;
   const gainOf = (color, E) => { let n = 0; for (const i of E) if (occ[i] === color) n++; return n; };
   const isFront = (c) => columns.some((col) => col[0] === c);
-  const removeCar = (c) => { for (const col of columns) if (col[0] === c) { col.shift(); return; } const p = parked.indexOf(c); if (p >= 0) parked.splice(p, 1); };
+  const removeCar = (c) => { for (const col of columns) if (col[0] === c) { col.shift(); return; } let p = parked.indexOf(c); if (p >= 0) { parked.splice(p, 1); return; } p = circ.indexOf(c); if (p >= 0) circ.splice(p, 1); };
+  const juggleOne = () => {
+    if (circ.length >= CIRC_CAP || rng() > skill) return false; // no track room / mistimed
+    const idx = parked.findIndex((c) => !c.grouped);
+    if (idx >= 0) { circ.push(parked.splice(idx, 1)[0]); return true; }
+    for (const g of groups) { // only groups parked → the whole group relaunches together
+      if (g.every((c) => c.cap === 0) || !g.every((c) => parked.includes(c))) continue;
+      if (circ.length + g.length > CIRC_CAP) continue;
+      for (const c of g) { parked.splice(parked.indexOf(c), 1); circ.push(c); }
+      return true;
+    }
+    return false;
+  };
   const doCollect = (car) => {
     if (singlePass) { const E = exposedTiles(occ, cols, rows, edges); for (const i of E) { if (car.cap <= 0) break; if (occ[i] === car.color) { clearCell(i); car.cap--; } } }
     else { while (car.cap > 0) { const E = exposedTiles(occ, cols, rows, edges); let t = -1; for (const i of E) if (occ[i] === car.color) { t = i; break; } if (t < 0) break; clearCell(t); car.cap--; } }
@@ -703,12 +722,20 @@ function playAverage(board, cols, rows, order, track, opts) {
     return progressed;
   };
   let guard = 0;
-  while (remaining > 0 && guard++ < order.length * 6 + 200) {
+  while (remaining > 0 && guard++ < order.length * 8 + 300) { // extra headroom: juggling adds turns
     if (parked.length > peak) peak = parked.length;
     if (autoDrive) { autoRelaunch(); if (remaining === 0) break; } // bays self-clear productive cars
     if (parked.length > peak) peak = parked.length;
     const E = exposedTiles(occ, cols, rows, edges);
     const S = new Set(); for (const i of E) S.add(occ[i]);
+    // juggled circling cars: collect if their colour opened up mid-lap; re-park at lap
+    // end when a bay is free; leave the game if emptied on the road.
+    for (let i = circ.length - 1; i >= 0; i--) {
+      const c = circ[i];
+      if (c.cap > 0 && S.has(c.color)) doCollect(c);
+      if (c.cap === 0) { circ.splice(i, 1); continue; }
+      if (parked.length < bays) { parked.push(c); circ.splice(i, 1); }
+    }
     const prod = [];
     // productive solo cars (parked + column fronts)
     for (const p of parked) if (!p.grouped && S.has(p.color)) prod.push({ kind: "s", car: p, gain: gainOf(p.color, E) });
@@ -750,6 +777,7 @@ function playAverage(board, cols, rows, order, track, opts) {
         if (autoDrive) autoRelaunch(); // peeling surfaced buried colours → parked cars self-clear, freeing bays
         if (car.cap > 0) {        // still blocked → it must wait in a bay
           if (parked.length < bays) parked.push(car);
+          else if (juggleOne()) parked.push(car); // bay juggle: freed a slot just in time
           else if (!wasParked) return { win: false, peak }; // out of space
           else parked.push(car);  // it came from a bay → its slot is still counted
         }
@@ -758,6 +786,7 @@ function playAverage(board, cols, rows, order, track, opts) {
         for (const c of ch.g) doCollect(c);
         if (autoDrive) autoRelaunch(); // peeling frees bays before the group needs to park
         if (!ch.g.every((c) => c.cap === 0)) { // not all empty → the group waits together
+          while (parked.length + ch.g.length > bays && juggleOne()) { /* bay juggle frees slots */ }
           if (parked.length + ch.g.length > bays) return { win: false, peak }; // out of space
           for (const c of ch.g) parked.push(c);
         }
@@ -778,6 +807,9 @@ function playAverage(board, cols, rows, order, track, opts) {
       sent = true; break;
     }
     if (!sent) {
+      // bay juggle as the final out: bays are wedged with blocked cars → tap one back
+      // onto the ray so parkOne can reveal a deeper column next turn.
+      if (parked.length >= bays && juggleOne()) continue;
       if (process.env.TRACE === "1") {
         const E = exposedTiles(occ, cols, rows, edges); const S = new Set(); for (const i of E) S.add(occ[i]);
         const bayCol = parked.map((c) => c.color + ":" + c.cap + (c.grouped ? "G" : "")).join(" ");

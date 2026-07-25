@@ -426,13 +426,43 @@ CHỖ CHỈNH: scripts/build-levels.mjs -> tuneToTarget (twinCap, vòng giảm m
   --seedoff 1..5 (yêu cầu solvable + lọt band).
 • ⚠ TRẠNG THÁI NGOÀI CSV (phải nhớ khi rebuild lẻ 1 level):
   - L2FRAC (lớp 2 ẩn) đã gắn qua env: 0.22 -> L18,24,27,37,57,63,64,74,78,80,87;
-    0.12 -> L43,53,59,67,92,98,99; 0.1 -> L23,34; L2FRAC=0 (TẮT rule mặc định
-    pack) -> L105,109,111,114,115,117,120 (lớp 2 mặc định làm 39×39 không giải nổi).
+    0.18 -> L20; 0.14 -> L25; 0.12 -> L43,53,59,67,92,98,99; 0.1 -> L23,34;
+    L2FRAC=0 (TẮT rule mặc định pack) -> L105,109,111,114,115,117,120
+    (lớp 2 mặc định làm 39×39 không giải nổi).
   - Nhiều level chốt ở --seedoff ≠0 (22,45,48,53,58,62,70,80,87,88,90,97,99,100,
     102,105,109,111,115,117,120...). Rebuild lẻ KHÔNG kèm đúng env/seedoff sẽ
     làm lệch lại -> sau khi rebuild lẻ LUÔN đo lại --test1 và chỉnh.
 • Bàn 39×39 + lớp 2 ẩn = bot hoàn hảo cũng nghẹt bãi (unsolvable) — ĐÃ bỏ lớp 2
   ở pack; độ khó pack đến từ 39×39 + 8 màu + chôn xe + xe đôi/ba ở skill 0.98.
+
+► BOT BIẾT "XOAY BÃI" (2026-07-25, sau khi tắt auto-drive): playAverage được dạy
+  chiêu của user — bãi đầy thì đẩy 1 xe đỗ (màu bị chặn) lên ray chạy vòng không
+  công (mảng circ, tối đa 3 xe) để nhường chỗ; xe chạy vòng vẫn ăn nếu màu mở ra,
+  về bãi khi trống chỗ; gated theo skill tại 3 điểm nghẹt (solo cần chỗ / nhóm cần
+  chỗ / kẹt cứng). Kết quả đo TĂNG mạnh và khớp cảm giác người chơi thật:
+  L20/25/30 cũ đo 98-100%% (đúng như user thấy "vẫn dễ").
+  ⚠ TOÀN BỘ win_ref đo trước bot-xoay-bãi đã LỖI THỜI — mới căn lại: L25
+  (target 30 -> đo 25, off2, L2FRAC=0.14). 119 level còn lại chờ lệnh re-calibrate.
+
+14) XẾP LẠI THỨ TỰ XE (OUTSIDE-IN) + XE ĐÔI (L1-120) (2026-07-25)
+────────────────────────────────────────────────────────────────────────────
+Sửa 2 lỗi thiết kế của các level tranh dày (user báo ở L10):
+• XE PHÓNG LÊN K ĂN ĐƯỢC GÌ: trước 26/120 level có xe màu-bị-chôn nằm ở HÀNG ĐẦU
+  hàng chờ -> phóng lên chạy vòng bắn hụt. Nguyên nhân: thứ tự xe không outside-in.
+• XE ĐÔI TÁCH XA: 2 xe cùng cặp ở cột khác nhau, đặt sâu (hàng 7-8) -> khi chơi
+  cột vơi không đều, xe 1 lên hàng đầu còn xe 2 kẹt hàng 3.
+CÁCH SỬA: scripts/fix-queue-order.mjs — hậu-xử-lý designed.json (KHÔNG đụng script
+  build mà session khác đang sửa). Với mỗi level:
+  - Peel board -> xếp hạng màu outside-in theo (LỚP NHỎ NHẤT nổi lên, rồi lớp TB).
+    Xếp xe theo thứ tự đó -> hàng đầu luôn là màu lộ ngay (layer 0). KQ: 0/120 level
+    còn xe-ăn-hụt ở hàng đầu.
+  - Xe đôi: chỉ GIỮ cặp có 2 màu nổi lên gần nhau (rank cách <=1), đặt KỀ NHAU CÙNG
+    HÀNG; cặp lệch quá thì BỎ LIÊN KẾT (thành xe đơn). KQ L1-120: giữ 99 / tách 98,
+    khoảng cách hàng giữa 2 xe cặp = 0 (luôn cùng hàng).
+  - Chỉ đổi mảng chests (thứ tự + pairId); count/board/track giữ nguyên -> slime ==
+    sức chứa xe không đổi. Chạy lại được: node scripts/fix-queue-order.mjs 1 120
+LƯU Ý: xếp outside-in làm độ khó "chôn màu" biến mất -> level DỄ hơn thiết kế gốc
+  (đúng hướng user muốn: đỡ rối/kẹt). Muốn giữ nhiều xe đôi hơn -> nới KEEP_SPREAD.
 
 ────────────────────────────────────────────────────────────────────────────
 GHI CHÚ CHUNG
