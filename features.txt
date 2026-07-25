@@ -457,10 +457,29 @@ CƠ CHẾ MỚI TRONG GAME:
 5 LEVEL TRÌNH DIỄN L121-125 — KẾT QUẢ CHỐT (đo 40 lượt @0.9, đều solvable,
 ảnh gần vuông → viền 1-2 ô):
   L121 star    25×25 5-line chôn  7/22 xe → 15%  (--seedoff 5, IMG=7_star_heroes)
-  L122 book    27×27 3-line chôn 10/25 xe → 15%  (--seedoff 3, IMG=7_book_toys)
-  L123 doll    29×29 5-line chôn 11/22 xe → 10%  (--seedoff 1, IMG=7_doll_toys)
+  L122 book    27×27 2-line chôn 15/24 xe → 15%  (--seedoff 4, IMG=7_book_toys)
+  L123 doll    29×29 3-line chôn 17/27 xe → 13%  (--seedoff 0, IMG=7_doll_toys)
   L124 dino    31×31 3-line chôn 14/24 xe → 10%  (--seedoff 0, IMG=7_dino_animals1)
   L125 pencils 31×31 3-line chôn 22/32 xe → 15%  (--seedoff 3, IMG=7_pencils_toys)
+
+⭐ QUY LUẬT ĐỘ KHÓ (rút ra sau playtest L121-125, quan trọng nhất):
+  Yếu tố #1 = ẢNH phải XEN KẼ RĂNG LƯỢC, KHÔNG mảng to. Ảnh mảng to (sách,
+  búp bê) mở màu "ào 1 lượt" -> xe hốt đầy khoang ngay -> khay không nghẹt ->
+  DỄ dù chôn/line thế nào (user chơi thấy 122/123 dễ, 121/124 khó, 125 trung
+  bình). Ảnh răng lược (sao/khủng long/tàu/bút chì) mở nhỏ giọt -> xe nằm ì
+  chờ -> khay căng THẬT.
+  Yếu tố #2 = ít line + chôn dày (combo game tham chiếu). #3 = đủ màu ≥7-8
+  (ít màu như L125=5 màu -> luôn có màu mở -> bốc mù vẫn trúng -> chỉ trung bình).
+  #4 = lớp 2 VÀNH NGOÀI cứu được ảnh mảng to (bóc xong lại lòi màu khác).
+  User chỉ đạo: "ảnh mảng to thì GIẢM LINE + TĂNG CHÔN" -> đã hạ L122 3->2 line
+  chôn .8, L123 5->3 line chôn .8.
+  ⚠ ĐÁNH ĐỔI (L123): giảm line làm bot đo KHÓ hơn -> tuner TỰ HẠ MÀU (8->3) để
+  kéo winrate về target 12 -> 3 màu lại làm DỄ cho người (yếu tố #3). Trên ảnh
+  mảng to, "ít line + target thấp" xung khắc với "giữ nhiều màu". Nếu playtest
+  thấy L123 vẫn dễ: nâng target (bớt ép hạ màu) hoặc đổi sang ảnh răng lược.
+  ➡ THỰC RA CÁI GỐC: hiện "lộ màu trên board KHÔNG có ý nghĩa" (user) vì phóng
+  xe sớm vô hại (nằm khay chờ, không mất gì). Muốn kỹ năng đọc board quyết định
+  thật -> cần TRAY MODE (khay 1 chiều, không rút ra) — đang chờ user quyết.
 Các level này cũng tự có slime "?" (54-102 ô) + lớp 2 (70-152 ô) từ rule pack.
 ⚠ NGOÀI CSV: seedoff + IMG ở trên phải kèm khi rebuild lẻ (như mục 15).
 Số đo là ở góc nhìn bot NHÌN XUYÊN chôn — người chơi thật sẽ thấy KHÓ HƠN số đo
