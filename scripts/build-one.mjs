@@ -1,3 +1,7 @@
+// ►► VISUAL RULES (FEATURES.txt §20): board is DARK navy. Default bg fill = dark-neutral
+//    id 12 so the bright subject pops (no dull light-grey mass). BG_ID=<id> / BG_ID=bright
+//    override. For a LIGHT-board level set designed.json `lightBoard: true` on it.
+//
 // One-off: turn ONE character cell from a 5x2 grid image into a single level
 // (a slime mosaic) and patch it into designed.json. Reuses the exact image->board
 // logic (buildFromImage) from build-levels.mjs. For quick previews / testing.
@@ -229,27 +233,30 @@ if (cellIndex < 0) {
 const board = buildFromImage(cellBuf, cbw, cbh, { K, maxSide: IMG_INNER });
 if (!board) { console.error("no subject found in cell"); process.exit(1); }
 
-// Fill the background with ONE solid bright colour that CONTRASTS the subject, so
-// the level reads as a complete framed picture (like the reference games), leaving
-// a 1-cell empty frame so slime never touches the road.
+// Fill the background so the level reads as a complete framed picture. DEFAULT bg =
+// dark-neutral id 12 (#262630): the bright subject pops on the DARK board and there is
+// NO dull light-grey mass (FEATURES §20 RULE 4). Leaves a 1-cell empty frame so slime
+// never touches the road. Override: BG_ID=<id> forces one; BG_ID=bright = old
+// auto-contrast (a saturated colour most distinct from the subject — for lightBoard).
 if (FILL_BG) {
   const subCells = board.filter((v) => v >= 0);
-  const avg = [0, 0, 0];
-  for (const v of subCells) { const c = baseRgb[v]; avg[0] += c[0]; avg[1] += c[1]; avg[2] += c[2]; }
-  avg[0] /= subCells.length; avg[1] /= subCells.length; avg[2] /= subCells.length;
-  // Pick a bg colour that is MOST DISTINCT from EVERY colour the character uses
-  // (max-min distance) so nothing on the character blends into the frame. Candidates
-  // are saturated bright colours (drop white 8 + tan 14). Env BG_ID forces one.
-  const used = [...new Set(subCells)];
-  const usedRgb = used.map((id) => baseRgb[id]);
-  const BG_CANDS = BRIGHT_IDS.filter((id) => id !== 8 && id !== 14);
-  let bgId = BG_CANDS[0], bd = -1;
-  for (const id of BG_CANDS) {
-    let mn = Infinity;
-    for (const c of usedRgb) { const d = dist2(baseRgb[id], c); if (d < mn) mn = d; }
-    if (mn > bd) { bd = mn; bgId = id; }
+  let bgId = 12; // dark neutral (default — matches the navy board theme)
+  const BG_ID = process.env.BG_ID;
+  if (BG_ID != null && BG_ID !== "bright") {
+    bgId = parseInt(BG_ID, 10);
+  } else if (BG_ID === "bright") {
+    // legacy: colour MOST DISTINCT from EVERY colour the character uses (drop white/tan)
+    const used = [...new Set(subCells)];
+    const usedRgb = used.map((id) => baseRgb[id]);
+    const BG_CANDS = BRIGHT_IDS.filter((id) => id !== 8 && id !== 14);
+    bgId = BG_CANDS[0];
+    let bd = -1;
+    for (const id of BG_CANDS) {
+      let mn = Infinity;
+      for (const c of usedRgb) { const d = dist2(baseRgb[id], c); if (d < mn) mn = d; }
+      if (mn > bd) { bd = mn; bgId = id; }
+    }
   }
-  if (process.env.BG_ID != null) bgId = parseInt(process.env.BG_ID, 10);
   // bg = fill the WHOLE inner square (SAFE_MARGIN border kept empty) so the picture
   // fills the frame like the reference games — a portrait character gets bg on both
   // sides instead of leaving big gaps. Character cells keep their colour.

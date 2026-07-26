@@ -1,4 +1,8 @@
 // ============================================================================
+// ►► VISUAL RULES: the game board is DARK navy now. Picture-level backgrounds must
+//    NOT be a dull light-grey fill. This builder defaults the bg to dark-neutral
+//    id 12 so subjects pop. Read FEATURES.txt §20 before changing bg/theme logic.
+// ============================================================================
 // Batch level builder — ports tools/level-editor.html's image→board pipeline
 // (buildFromImage + generateNCars) to Node/sharp so we can auto-generate the
 // first few dozen levels from a folder of flat clip-art images.
@@ -319,15 +323,25 @@ function buildPicture(src, IW, IH, K) {
   const full = new Array(BOARD_SIZE * BOARD_SIZE).fill(EMPTY);
   const ox = Math.floor((BOARD_SIZE - cw) / 2), oy = Math.floor((BOARD_SIZE - rh) / 2);
   for (let y = 0; y < rh; y++) for (let x = 0; x < cw; x++) full[(oy + y) * BOARD_SIZE + (ox + x)] = sub[y * cw + x];
-  // FULL-FILL bg: one bright colour most distinct from EVERY subject colour
-  const used = [...new Set(full.filter((v) => v >= 0))];
-  const usedRgb = used.map((id) => baseRgb[id]);
-  const cands = PIC_IDS.filter((id) => id !== 8 && id !== 14 && !used.includes(id));
-  let bgId = cands[0] ?? 3, bd = -1;
-  for (const id of cands) {
-    let mn = Infinity;
-    for (const c of usedRgb) { const d = dist2(baseRgb[id], c); if (d < mn) mn = d; }
-    if (mn > bd) { bd = mn; bgId = id; }
+  // FULL-FILL bg. DEFAULT = dark-neutral id 12 (#262630) so the bright subject pops on
+  // the DARK board and there is no dull light-grey mass (FEATURES §20 RULE 4). Override:
+  //   PIC_BG=<id>    force a palette id      PIC_BG=bright  old auto-contrast (light board)
+  const PIC_BG = process.env.PIC_BG;
+  let bgId = 12; // dark neutral (default — matches the navy board theme)
+  if (PIC_BG != null && PIC_BG !== "bright") {
+    bgId = parseInt(PIC_BG, 10);
+  } else if (PIC_BG === "bright") {
+    // legacy: one bright colour most distinct from EVERY subject colour (for lightBoard)
+    const used = [...new Set(full.filter((v) => v >= 0))];
+    const usedRgb = used.map((id) => baseRgb[id]);
+    const cands = PIC_IDS.filter((id) => id !== 8 && id !== 14 && !used.includes(id));
+    bgId = cands[0] ?? 3;
+    let bd = -1;
+    for (const id of cands) {
+      let mn = Infinity;
+      for (const c of usedRgb) { const d = dist2(baseRgb[id], c); if (d < mn) mn = d; }
+      if (mn > bd) { bd = mn; bgId = id; }
+    }
   }
   const lo = PIC_MARGIN, hi2 = BOARD_SIZE - 1 - PIC_MARGIN;
   for (let r = lo; r <= hi2; r++) for (let c = lo; c <= hi2; c++) {
@@ -691,13 +705,17 @@ function playAverage(board, cols, rows, order, track, opts) {
   // re-parks when a bay frees. `circ` holds these circling cars; capped so the ray keeps
   // room for productive launches. Each use is timing-gated by skill.
   const circ = [];
-  const CIRC_CAP = 3;
+  const CIRC_CAP = 4;      // hard ceiling on cars circling the ray at once
+  const CIRC_EASY = 3;     // routine cap; keeping a 4th car out needs a rare fast-hands burst
+  const CIRC_BURST = 0.4;  // chance even a good player sustains that 4th car ("thi thoảng lắm")
   let peak = 0;
   const gainOf = (color, E) => { let n = 0; for (const i of E) if (occ[i] === color) n++; return n; };
   const isFront = (c) => columns.some((col) => col[0] === c);
   const removeCar = (c) => { for (const col of columns) if (col[0] === c) { col.shift(); return; } let p = parked.indexOf(c); if (p >= 0) { parked.splice(p, 1); return; } p = circ.indexOf(c); if (p >= 0) circ.splice(p, 1); };
   const juggleOne = () => {
     if (circ.length >= CIRC_CAP) return false; // no track room
+    // Pushing out a 4th circling car is a rare "tay nhanh" burst, not routine.
+    if (circ.length >= CIRC_EASY && rng() > CIRC_BURST) return false;
     // "đẩy nhanh 2-3 xe" (user): a rapid double-tap — the juggle only fails when BOTH
     // taps are mistimed, so effective success ≈ 1-(1-skill)².
     if (rng() > skill && rng() > skill) return false;
@@ -925,7 +943,7 @@ function playAverage(board, cols, rows, order, track, opts) {
   }
   return { win: remaining === 0, peak };
 }
-function testerReport(board, cols, rows, order, track, { skill = 0.6, trials = 40, seed = 1, bays = 5, perRow = LANES, layer2 = null, autoDrive = AUTO_DRIVE, tray = false } = {}) {
+function testerReport(board, cols, rows, order, track, { skill = 0.6, trials = 100, seed = 1, bays = 5, perRow = LANES, layer2 = null, autoDrive = AUTO_DRIVE, tray = false } = {}) {
   let wins = 0, peakSum = 0;
   for (let t = 0; t < trials; t++) {
     const rng = makeRng(seed + t * 7919 + 1);
@@ -1417,6 +1435,11 @@ function layer2FracFor(n, diff, cfg) {
   if (process.env.L2FRAC != null) return Number(process.env.L2FRAC); // env override (e.g. add a 2-layer "màng" to a normally-flat level for extra difficulty)
   if (cfg && cfg.layer2Frac != null) return cfg.layer2Frac;
   if (isKid(n)) return (n - KID_LO) % 4 === 2 ? 0.10 : 0; // thi thoảng, mỏng — vẫn dễ
+  if (n <= 45) { // design rule: 2-layer unlocked from L15; thickness scales with how HARD the target is (real slimes = friction), so low-target easy-tier levels still get bite
+    if (n < 15) return 0;
+    const tg = cfg && cfg.target != null ? cfg.target : (diff === "superhard" ? 20 : diff === "hard" ? 40 : 80);
+    return tg <= 25 ? 0.26 : tg <= 40 ? 0.20 : tg <= 55 ? 0.14 : tg <= 70 ? 0.10 : tg <= 85 ? 0.07 : 0;
+  }
   if (n >= 101) return diff === "superhard" ? 0.2 : 0.15; // advanced pack: always (thinner → smoother win landscape)
   if (n < 35 || diff === "normal") return 0;
   return diff === "superhard" ? 0.25 : 0.18;
@@ -1425,6 +1448,11 @@ function layer2FracFor(n, diff, cfg) {
 function hiddenFracFor(n, diff, cfg) {
   if (cfg && cfg.hiddenFrac != null) return cfg.hiddenFrac;
   if (isKid(n)) return (n - KID_LO) % 5 === 3 ? 0.08 : 0; // thi thoảng "?" — nhẹ nhàng
+  if (n <= 45) { // design rule: "?" unlocked from L21; more on harder targets (human-only friction)
+    if (n < 21) return 0;
+    const tg = cfg && cfg.target != null ? cfg.target : 80;
+    return tg <= 40 ? 0.13 : tg <= 65 ? 0.09 : 0;
+  }
   if (n >= 101) return diff === "superhard" ? 0.14 : 0.12; // advanced pack: always
   // hard/super from L20 (was L35): "?" hurts HUMANS but not the tester — the lever for
   // levels that measure on-target yet play too easy (user 2026-07-25: L20/25 vẫn dễ).
@@ -1659,7 +1687,7 @@ if (process.argv.includes("--test")) {
   for (const k of Object.keys(data).map(Number).sort((a, b) => a - b)) {
     const L = data[k], track = L.track || "square";
     LANES = L.lanes || DEFAULT_LANES; // grade at the level's own queue-line count
-    const r = testerReport(L.board, L.cols, L.rows, L.chests, track, { skill: SKILL, trials: 40, seed: k * 101 + 1 });
+    const r = testerReport(L.board, L.cols, L.rows, L.chests, track, { skill: SKILL, trials: 100, seed: k * 101 + 1 });
     const pct = Math.round(r.winRate * 100);
     const bar = "█".repeat(Math.round(pct / 5)).padEnd(20);
     console.log(String(k).padStart(2) + "  " + difficulty(k).padEnd(11) + " " + track.padEnd(6) + " " +
@@ -1680,7 +1708,7 @@ if (process.argv.includes("--test1")) {
   const c = (cfgm && cfgm.get(k)) || {};
   const skill = process.env.SKILL != null ? Number(process.env.SKILL) : (c.skill != null ? c.skill : 0.6);
   LANES = L.lanes || DEFAULT_LANES; // grade at the level's own queue-line count
-  const r = testerReport(L.board, L.cols, L.rows, L.chests, L.track || "square", { skill, trials: 40, seed: k * 101 + 1, layer2: L.layer2 || null, tray: !!L.tray });
+  const r = testerReport(L.board, L.cols, L.rows, L.chests, L.track || "square", { skill, trials: 100, seed: k * 101 + 1, layer2: L.layer2 || null, tray: !!L.tray });
   console.log("WIN=" + Math.round(r.winRate * 100));
   process.exit(0);
 }
@@ -1730,7 +1758,7 @@ if (process.argv.includes("--fixcars")) {
     const diff = difficulty(id);
     const target = (cfg && cfg.get(id) && cfg.get(id).target != null) ? cfg.get(id).target : targetWin(id, diff);
     const beforeBad = missing(L);
-    const beforeWin = Math.round(testerReport(L.board, L.cols, L.rows, L.chests, track, { skill, trials: 40, seed: id * 101 + 1, layer2: L.layer2 || null }).winRate * 100);
+    const beforeWin = Math.round(testerReport(L.board, L.cols, L.rows, L.chests, track, { skill, trials: 100, seed: id * 101 + 1, layer2: L.layer2 || null }).winRate * 100);
     let l2counts = null;
     if (L.layer2) { l2counts = new Map(); for (const v of L.layer2) if (v >= 0) l2counts.set(v, (l2counts.get(v) || 0) + 1); }
     const nd = needOf(L); const totalNeed = [...nd.values()].reduce((a, b) => a + b, 0);
@@ -1744,7 +1772,7 @@ if (process.argv.includes("--fixcars")) {
       const carList = allocateCars(L.board, N, l2counts);
       const { order, bias } = orderByDifficulty(carList, L.board, track, biasFor(id, diff), id * 101 + 1);
       const sv = solvable(L.board, L.cols, L.rows, order, track, 5, LANES, L.layer2 || null);
-      const win = Math.round(testerReport(L.board, L.cols, L.rows, order, track, { skill, trials: 40, seed: id * 101 + 1, layer2: L.layer2 || null }).winRate * 100);
+      const win = Math.round(testerReport(L.board, L.cols, L.rows, order, track, { skill, trials: 100, seed: id * 101 + 1, layer2: L.layer2 || null }).winRate * 100);
       const score = Math.abs(win - target) - (sv ? 3 : 0); // small bonus for solvable
       if (!best || score < best.score) best = { N, order, bias, sv, win, score };
     }
@@ -1777,7 +1805,7 @@ if (process.argv.includes("--report")) {
     const c = (cfg && cfg.get(k)) || {};
     const skill = c.skill != null ? c.skill : 0.6;
     LANES = L.lanes || DEFAULT_LANES; // grade at the level's own queue-line count
-    const r = testerReport(L.board, L.cols, L.rows, L.chests, track, { skill, trials: 40, seed: k * 101 + 1, layer2: L.layer2 || null, tray: !!L.tray });
+    const r = testerReport(L.board, L.cols, L.rows, L.chests, track, { skill, trials: Number(process.env.TRIALS) || 100, seed: k * 101 + 1, layer2: L.layer2 || null, tray: !!L.tray });
     const win = Math.round(r.winRate * 100);
     let slime = 0; const cs = new Set(); for (const v of L.board) if (v >= 0) { slime++; cs.add(v); }
     const twins = new Set(L.chests.filter((x) => x.pairId != null).map((x) => x.pairId)).size;
@@ -1806,22 +1834,50 @@ if (process.argv.includes("--report")) {
 //   minxe    = sàn số xe (để level không quá ít xe, trông buồn cười)
 //   max slim = trần số slime (co nhỏ chủ thể cho vừa)
 //   skill    = skill người chơi giả định cho level đó → target đo ở skill này
+function tierToDiff(t) { const s = (t || "").toLowerCase().trim(); return s.startsWith("super") ? "superhard" : s.startsWith("hard") ? "hard" : s ? "normal" : null; }
+// Design rows carry "Có đá cứng?" (yes/no) instead of an explicit wall-edge string.
+// Turn that into an edge pattern scaled by difficulty: easy = top only (gentlest),
+// hard = two edges, super = three edges (only one open → line frontier, hardest).
+function wallEdgesForDesign(diff) { return diff === "superhard" ? "TLR" : diff === "hard" ? "TL" : "T"; }
+// Buried cars ("?") for the L1-45 design: perception-only (tester win-rate unchanged) —
+// adds HUMAN difficulty. Normally unlocked from L15, but the genuinely-hard EARLY levels
+// (target ≤ 50, e.g. L5/L10) may bury from L5 so they aren't trivially readable, while the
+// gentle early showcase levels (target > 50) stay clean until L15 (user 2026-07-26).
+function buryForDesign(n, target) {
+  if (target == null || n > 45) return 0;
+  const floor = target <= 50 ? 5 : 15;
+  if (n < floor) return 0;
+  return target <= 40 ? 0.6 : target <= 70 ? 0.4 : 0;
+}
 function loadConfig(p) {
   if (!fs.existsSync(p)) { console.warn("⚠ config not found:", p); return null; }
-  const num = (x) => (!x || x.toLowerCase() === "auto" || isNaN(+x)) ? null : +x;
+  const num = (x) => (x == null || String(x).toLowerCase() === "auto" || String(x).trim() === "" || isNaN(+x)) ? null : +x;
   const csv = p.toLowerCase().endsWith(".csv");
   const map = new Map();
   for (const line of fs.readFileSync(p, "utf8").split("\n")) {
     const t = line.trim(); if (!t || t.startsWith("#")) continue;
     const cols = csv ? t.split(",").map((s) => s.trim()) : t.split("|")[0].trim().split(/\s+/);
-    // User layout: lvl,tier,target,max màu,maxxe,minxe,xedoi,track,max slim,slime_ref,win_ref,skill,xe_ref,màu_ref,kích thước,line,chôn,l1,tray
-    //   line = queue columns (3/4/5; default 4) · chôn = fraction (0..1) of back-row
-    //   cars buried face-down ("?") · l1 = TOP-layer colour count Y for the clean
-    //   two-layer split (blank/0 = no split; hidden bottom carries X−Y colours) ·
-    //   tray = 1 → one-way TRAY mode (bays fill 1→5, no pull-out), 0/blank = classic.
-    const [lvl, , target, maxmau, maxxe, minxe, xedoi, track, maxslim, , , skill, , , size, lanes, bury, l1, tray, img, walls] = cols;
-    const n = parseInt(lvl, 10); if (!n) continue; // skips the header row
-    map.set(n, { target: num(target), colors: num(maxmau), maxCars: num(maxxe), minCars: num(minxe), twins: num(xedoi), track: (track && track.toLowerCase() !== "auto") ? track : null, maxSlime: num(maxslim), skill: num(skill), size: num(size), lanes: num(lanes), bury: num(bury), l1: num(l1), tray: (tray != null && String(tray).trim() === "1") ? 1 : 0, img: (img && img.trim()) ? img.trim() : null, walls: (walls && /[TBLRtblr]/.test(walls)) ? walls.trim().toUpperCase() : null });
+    const n = parseInt(cols[0], 10); if (!n) continue; // skips the header row
+    const tier = cols[1];
+    // DESIGN format (human): ends at kích thước="25x25" + "Có đá cứng?"; detect by the AxB size cell.
+    const design = /\d\s*[x×]\s*\d/i.test(cols[14] || "");
+    let target, maxmau, maxxe, minxe, xedoi, track, maxslim, skill, size, lanes, bury, l1, tray, img, walls;
+    if (design) {
+      // lvl,tier,target,max màu,maxxe,minxe,xedoi,track,max slim,slime_ref,win_ref,skill,xe_ref,màu_ref,kích thước,Có đá cứng?
+      [, , target, maxmau, maxxe, minxe, xedoi, track, maxslim, , , skill] = cols;
+      size = parseInt(String(cols[14]).split(/[x×]/i)[0], 10) || null;
+      const rock = (cols[15] || "").trim().toLowerCase();
+      walls = /^(có|co|yes|y|1|x|true)/i.test(rock) ? wallEdgesForDesign(tierToDiff(tier)) : null;
+      lanes = bury = l1 = null; tray = 0; img = null;
+    } else {
+      // BUILD format: ...,kích thước(num),line,chôn,l1,tray,img,walls
+      [, , target, maxmau, maxxe, minxe, xedoi, track, maxslim, , , skill, , , size, lanes, bury, l1, tray, img, walls] = cols;
+      size = num(size);
+      walls = (walls && /[TBLRtblr]/.test(walls)) ? walls.trim().toUpperCase() : null;
+      tray = (tray != null && String(tray).trim() === "1") ? 1 : 0;
+      img = (img && img.trim()) ? img.trim() : null;
+    }
+    map.set(n, { tier, diff: tierToDiff(tier), target: num(target), colors: num(maxmau), maxCars: num(maxxe), minCars: num(minxe), twins: num(xedoi), track: (track && track.toLowerCase() !== "auto") ? track : null, maxSlime: num(maxslim), skill: num(skill), size: (typeof size === "number" ? size : num(size)), lanes: num(lanes), bury: num(bury), l1: num(l1), tray: tray ? 1 : 0, img, walls });
   }
   console.log(`config: ${map.size} levels from ${path.relative(ROOT, p)}`);
   return map;
@@ -1897,12 +1953,13 @@ const LEVEL_NUMS = [];
 for (let n = 1; n <= N_LEVELS; n++) LEVEL_NUMS.push(n);
 for (let n = KID_LO; n <= KID_HI; n++) LEVEL_NUMS.push(n); // kid pack rides the same pipeline
 for (const n of LEVEL_NUMS) {
-  const diff = packDiff(n);
   const cfg = (CONFIG && CONFIG.get(n)) || {};
+  const diff = cfg.diff || packDiff(n); // design CSV "tier" wins when present
   // PICTURE recipe (features.txt mục 13, user 2026-07-25): any CSV row carrying a
   // "kích thước" gets the true-colour mosaic + solid-bg build at that board size.
   const picture = cfg.size != null && cfg.size >= 15;
-  BOARD_SIZE = picture ? cfg.size : DEFAULT_BOARD; // per-level board size
+  // per-level board size; BOARDSIZE= env forces it on a --only rebuild (e.g. try 26×26)
+  BOARD_SIZE = picture ? (process.env.BOARDSIZE ? Number(process.env.BOARDSIZE) : cfg.size) : DEFAULT_BOARD;
   // Queue lines per level: CSV "line" column (LANES= env wins on a --only rebuild).
   LANES = process.env.LANES != null ? Number(process.env.LANES)
         : (cfg.lanes >= 2 && cfg.lanes <= 6) ? cfg.lanes : DEFAULT_LANES;
@@ -1947,7 +2004,10 @@ for (const n of LEVEL_NUMS) {
     // colours, centred, bg full-filled — no decorative border, no maxSlime shrink
     // (the SIZE column dictates the slime count; max slim is ignored here).
     const Kfile = parseInt(file, 10) || 6; // "6_train_toys.png" → 6 true colours
-    const Ksub = Math.max(2, Math.min(Kfile, (cfg.colors != null ? cfg.colors : MAX_COLORS) - 1, MAX_COLORS - 1));
+    // COLORS= env lifts the mosaic colour cap on a --only rebuild so a richer image keeps
+    // ALL its (contiguous → solvable) colours even when the design "max màu" is low.
+    const colCap = process.env.COLORS != null ? Number(process.env.COLORS) : (cfg.colors != null ? cfg.colors : MAX_COLORS);
+    const Ksub = Math.max(2, Math.min(Kfile, colCap - 1, MAX_COLORS - 1));
     board = buildPicture(data, info.width, info.height, Ksub);
   } else if (cfg.maxSlime != null) {
     // legacy recipe: subject as large as possible under the slime cap
@@ -2013,6 +2073,8 @@ for (const n of LEVEL_NUMS) {
   // PICTURE levels pin the colour ceiling to the board's ACTUAL colours so ensureColors
   // never speckles extra colours onto the character (difficulty comes from burial/cars/
   // groups instead); reduceColors easing still applies when a level is too hard.
+  // Tuner colour ceiling = the subject's OWN colours for a picture level (never speckle
+  // extra colours on — that scatters uncollectable single cells and breaks solvability).
   const tuned = tuneToTarget(board, track, target, n, diff, { colors: picture ? distinctColors(board) : cfg.colors, maxCars: cfg.maxCars, minCars: cfg.minCars, twins: cfg.twins, triples: triplesFor(n), skill: calSkill, layer2Frac: layer2Pre ? 0 : layer2FracFor(n, diff, cfg), layer2Pre, tray: trayOn }); // → win ≈ target @ skill
   board = tuned.board;
   const chests = tuned.chests;
@@ -2021,7 +2083,7 @@ for (const n of LEVEL_NUMS) {
   // PERCEPTION-ONLY for the tester — its greedy choices only ever read column fronts
   // (always revealed) — so the measured win-rate is unchanged; burial adds HUMAN
   // difficulty on top, exactly like the hidden "?" slimes. BURY= env overrides.
-  const buryFrac0 = process.env.BURY != null ? Number(process.env.BURY) : (cfg.bury != null ? cfg.bury : 0);
+  const buryFrac0 = process.env.BURY != null ? Number(process.env.BURY) : (cfg.bury != null ? cfg.bury : buryForDesign(n, cfg.target));
   const buryFrac = buryFrac0 > 1 ? buryFrac0 / 100 : buryFrac0; // accept 60 or 0.6
   const buriedN = buryFrac > 0 ? buryCars(chests, buryFrac, n * 313 + 7) : 0;
 

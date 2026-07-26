@@ -151,6 +151,11 @@ const CAR_ART_FACING = Math.PI / 2; // car art faces UP (face at top); +90° so 
 // colour entirely — every buried car looks the same until it's revealed (user 2026-07-25:
 // "cho k nhìn thấy màu gì luôn, default xanh nhạt cho tất cả").
 const BURIED_TINT = 0xa9d0f0;
+// Skin for permanent hard-rock walls. Mechanic is unchanged — the wall is still an
+// unbreakable, sight-blocking HARD_ROCK; this only picks its texture. The smooth tan
+// "rock-soft" reads cleaner than the grey rock against the grey slime field.
+//   "rock-soft" (tan, smooth) · "rock-hard" (grey) · "rock-soft-cracked" (grey, cracked)
+const WALL_TEXTURE = "rock-hard";
 
 // Draw-order layers: background < road < grid tiles < twin-rope < cars < runners.
 const DEPTH_BG = -100;
@@ -209,6 +214,10 @@ export class GameScene extends Phaser.Scene {
   private level!: Level;
   private levelNum = 1;
   private cell = 0;
+  // The cell size a STANDARD 25×25 board would get in this layout. On big "picture"
+  // boards this.cell shrinks to fit, but runners (critters sprinting to the car) are
+  // scaled to stdCell so they stay the SAME size as on a 25×25 level.
+  private stdCell = 0;
   private chestSize = 48;
   private gridX = 0; // top-left of the grid area
   private gridY = 0;
@@ -235,6 +244,7 @@ export class GameScene extends Phaser.Scene {
   private invPeek = 0; // px of the next (partly-hidden) row the mask reveals
   private invMask?: Phaser.Display.Masks.GeometryMask;
   private invMaskG?: Phaser.GameObjects.Graphics;
+  private invMaskBottom = 0; // y below which a queue car is clipped/hidden by the inventory viewport
   private slots: (ChestView | null)[] = [];
   // TRAY mode (level.tray): one-way bays — clicking a queue car stages it into the next
   // empty bay (never straight to the ray), and bay cars AUTO-launch when their colour is
@@ -366,6 +376,11 @@ export class GameScene extends Phaser.Scene {
     this.boosterCounts = this.loadBoosterCounts();
     // Draw a placeholder slime for any colour that has no slime art yet (palette 11-18).
     for (const i of this.missingSlime) this.makeSlimeTexture(i);
+    // FACELESS board tiles (user 2026-07-26): the PNG slimes have a baked-in face that
+    // makes the "picture" noisy. Board cells now render as flat bevelled colour tiles
+    // (no face) → clean mosaic; faces stay only on the cars/chests in the tray.
+    for (let i = 0; i < COLORS.length; i++) this.makeTileTexture(`tile-${i}`, COLORS[i]);
+    this.makeTileTexture("tile-hidden", 0xeef3f8); // white blank for the "?" cover
     // Placeholder art for obstacle / special-car textures. NOTE: Vite's dev server
     // returns 200 (index.html) for a missing PNG, so `loaderror` is unreliable —
     // instead detect a missing/broken texture directly and draw a placeholder.
@@ -512,7 +527,71 @@ export class GameScene extends Phaser.Scene {
     this.checkBoosterUnlocks(levelNum);
 
     if (levelNum === 1) this.startTutorial(); // gentle intro guidance
+    else if (this.maybeShowHardRockIntro()) { /* first hard-rock level → explain the rock */ }
     else this.maybeShowTwinIntro(); // first level with a twin pair → explain twin cars
+  }
+
+  // ---- Hard-rock intro (first level that has hard rock) ---------------
+  // Fires once, on the first hard-rock level the player reaches (L23 by design, but any
+  // rock level if they jumped ahead). Deduped by a localStorage flag, like the twin intro.
+  private maybeShowHardRockIntro(): boolean {
+    const hasRock = this.level.board.some((v) => isObstacle(v) && obstacleKind(v) === "hard");
+    if (!hasRock) return false;
+    let shown = false;
+    try { shown = localStorage.getItem("pf_rock_intro") === "1"; } catch { /* storage unavailable */ }
+    if (shown) return false;
+    try { localStorage.setItem("pf_rock_intro", "1"); } catch { /* storage unavailable */ }
+    this.showHardRockIntroModal();
+    return true;
+  }
+
+  private showHardRockIntroModal() {
+    this.tutPaused = true; // freeze behind the modal
+    const D = 400;
+    const pw = 330;
+    const ph = 300;
+    const x0 = GAME_W / 2 - pw / 2;
+    const y0 = GAME_H / 2 - ph / 2;
+    const dim = this.add
+      .rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0x000000, 0.6)
+      .setDepth(D)
+      .setInteractive();
+    const panel = this.add.graphics().setDepth(D + 1);
+    panel.fillStyle(0xf7edd0, 1);
+    panel.fillRoundedRect(x0, y0, pw, ph, 20);
+    panel.lineStyle(4, 0x8a5a12, 1);
+    panel.strokeRoundedRect(x0, y0, pw, ph, 20);
+    const icon = this.add
+      .text(GAME_W / 2, y0 + 60, "🪨", { fontSize: "40px" })
+      .setOrigin(0.5)
+      .setDepth(D + 2);
+    const title = this.add
+      .text(GAME_W / 2, y0 + 116, "Đá Cứng!", {
+        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "22px", color: "#6a4a12",
+      })
+      .setOrigin(0.5)
+      .setDepth(D + 2);
+    const desc = this.add
+      .text(GAME_W / 2, y0 + 176, "Đá cứng không phá được. Xe không gắp được slime nếu có đá cứng chắn đường — hãy chừa lối đi vòng qua nó nhé!", {
+        fontFamily: "Arial, sans-serif", fontSize: "14px", color: "#6a4a12", align: "center",
+        wordWrap: { width: pw - 44 },
+      })
+      .setOrigin(0.5)
+      .setDepth(D + 2);
+    const ok = this.add
+      .text(GAME_W / 2, y0 + ph - 34, "ĐÃ HIỂU!", {
+        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "16px", color: "#ffffff",
+        backgroundColor: "#3a8a3a", padding: { x: 26, y: 8 },
+      })
+      .setOrigin(0.5)
+      .setDepth(D + 2)
+      .setInteractive({ useHandCursor: true });
+    const kill = () => {
+      [dim, panel, icon, title, desc, ok].forEach((o) => o.destroy());
+      this.tutPaused = false;
+    };
+    ok.on("pointerdown", kill);
+    dim.on("pointerdown", kill);
   }
 
   // ---- Level-1 tutorial ----------------------------------------------
@@ -725,7 +804,8 @@ export class GameScene extends Phaser.Scene {
     return { frameW, frameH, ringW: frameW, ringH: frameH };
   }
 
-  // Full-screen forest-floor background image (bottom layer).
+  // Full-screen forest-floor background image (bottom layer). Play scene keeps the
+  // LIGHT forest art (Home uses the dark premium one).
   private buildBackground() {
     this.add
       .image(GAME_W / 2, GAME_H / 2, "background")
@@ -739,6 +819,7 @@ export class GameScene extends Phaser.Scene {
     const { cols, rows, board } = this.level;
     const cx = GAME_W / 2;
     const cy = topY + m.frameH / 2;
+    this.stdCell = 0; // recomputed per track below (fallback = actual cell)
 
     const pad = 16; // outer margin from the frame edge to the road-centre box
     const gap = 4; // grass gap between a road and the grid (small → board fills more)
@@ -800,6 +881,11 @@ export class GameScene extends Phaser.Scene {
       // boundary (cb removed) so tiles never actually reach the road.
       const capCell = Math.floor((this.beltRight - this.beltLeft - roadW - 2 * gap) / STD);
       this.cell = Math.min(Math.round(this.cell * 1.15), capCell);
+      // Same computation pinned to STD=25 → the cell a 25×25 board would use here.
+      // (Identical to this.cell whenever cols,rows ≤ 25; larger on picture levels.)
+      const cell25 = Math.max(6, Math.floor(Math.min(availW, availH) / 25));
+      const cap25 = Math.floor((this.beltRight - this.beltLeft - roadW - 2 * gap) / 25);
+      this.stdCell = Math.min(Math.round(cell25 * 1.15), cap25);
       gridW = cols * this.cell;
       gridH = rows * this.cell;
       this.gridX = cx - gridW / 2;
@@ -834,6 +920,10 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
+    // Tracks without the 25-baseline (line/u/arch) fit the cell directly → no separate
+    // standard size, so runners just use the actual cell.
+    if (!this.stdCell) this.stdCell = this.cell;
+
     // Sand mat re-enabled (user 2026-07-25): grass-green hid the green/teal slimes;
     // warm sand makes every palette colour pop (same call as the reference game).
     this.buildGroundMat(cols, rows, roadW);
@@ -860,8 +950,8 @@ export class GameScene extends Phaser.Scene {
         } else if (isObstacle(id)) {
           this.keys[idx] = this.makeObstacle(id, x, y, keySize, [idx]);
         } else if (this.hiddenSet.has(idx)) {
-          // hidden "?" slime — grey tile with a question mark until revealed
-          this.keys[idx] = this.makeHiddenKey(x, y, keySize);
+          // hidden "?" slime — value-greyscale of the real colour (A+E), revealed on neighbour clear
+          this.keys[idx] = this.makeHiddenKey(x, y, keySize, this.level.board[idx], idx);
         } else {
           this.keys[idx] = this.makeKey(id, x, y, keySize);
           // 2-layer slime: mark it with a small corner fold so the player sees it hides
@@ -938,14 +1028,20 @@ export class GameScene extends Phaser.Scene {
     const h = (this.beltBottom - this.beltTop) - roadW + 2 * tuck;
     const rad = Math.max(10, this.roadRadius - roadW / 2 + tuck);
     const g = this.add.graphics().setDepth(-60); // above the forest bg, below the ROAD & tiles
-    g.fillStyle(0xdcc79c, 1); g.fillRoundedRect(x, y, w, h, rad);              // packed sand
-    g.fillStyle(0xe8dab6, 0.45); g.fillRoundedRect(x + 6, y + 6, w - 12, Math.round(h * 0.35), rad - 4); // soft top light
-    // Subtle 2-tone checkerboard aligned to the board cells (~5% darker on alternate
-    // cells) — makes empty-vs-filled cells readable as the picture gets eaten away.
-    g.fillStyle(0xd3bc8e, 0.55);
-    for (let r = 0; r < rows; r++)
-      for (let c = (r % 2); c < cols; c += 2)
-        g.fillRect(this.gridX + c * this.cell, this.gridY + r * this.cell, this.cell, this.cell);
+    // Per-level theme: default DARK navy (bright tiles pop, like ref game); lightBoard
+    // falls back to the old light sand mat (design comparison).
+    const light = !!this.level.lightBoard;
+    const base = light ? 0xdcc79c : 0x2b2f4a;   // sand vs deep navy
+    const gridLine = light ? 0xc9b184 : 0x232840; // grid-line tone (single-tone caro)
+    g.fillStyle(base, 1); g.fillRoundedRect(x, y, w, h, rad); // one uniform board tone
+    // Single-tone "caro": one board tone + a subtle grid lattice (graph-paper look)
+    // instead of a 2-colour checkerboard — cell boundaries still readable, no busy
+    // alternating tiles.
+    const gx0 = this.gridX, gy0 = this.gridY;
+    const gx1 = this.gridX + cols * this.cell, gy1 = this.gridY + rows * this.cell;
+    g.lineStyle(1, gridLine, light ? 0.5 : 0.55);
+    for (let c = 0; c <= cols; c++) { const gx = gx0 + c * this.cell; g.beginPath(); g.moveTo(gx, gy0); g.lineTo(gx, gy1); g.strokePath(); }
+    for (let r = 0; r <= rows; r++) { const gy = gy0 + r * this.cell; g.beginPath(); g.moveTo(gx0, gy); g.lineTo(gx1, gy); g.strokePath(); }
   }
 
   // Assemble the rounded-rectangle road from sprite pieces: 4 tiled straight
@@ -1066,30 +1162,42 @@ export class GameScene extends Phaser.Scene {
   // tile's color with a little face. Fills the cell so the grid reads as a mosaic.
   // A grid tile = a cute critter sprite (slime) in the tile's color.
   private makeKey(colorId: number, x: number, y: number, s: number) {
-    const img = this.add.image(0, 0, `slime-${colorId}`).setDisplaySize(s * 1.15, s * 1.15); // body ≈ cell → tiles sit flush (no overlap)
+    const img = this.add.image(0, 0, `tile-${colorId}`).setDisplaySize(s * 1.15, s * 1.15); // faceless body ≈ cell → tiles sit flush (no overlap)
     const c = this.add.container(x, y, [img]);
     c.setSize(s, s);
     c.setData("body", img); // kept so the collect animation can bob the body alone
     return c;
   }
 
-  // A hidden "?" slime: a BLACK slime body with a big bold question mark (user
-  // 2026-07-25: đen + "?" to/đậm cho dễ nhìn). Its real colour (level.hidden / board)
-  // shows only once a 4-neighbour opens (revealHiddenAround).
-  private makeHiddenKey(x: number, y: number, s: number) {
-    // Hidden "?" slime = a FRESH WHITE tile (user 2026-07-26: đổi từ đen sang trắng trong
-    // tươi) with a bold blue "?" for contrast.
-    const img = this.add.image(0, 0, "slime-9").setDisplaySize(s * 1.15, s * 1.15).setTint(0xf3f8ff);
-    const q = this.add
-      .text(0, 0, "?", {
-        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: `${Math.round(s * 0.8)}px`,
-        color: "#2f8fd8", stroke: "#ffffff", strokeThickness: Math.max(3, Math.round(s * 0.13)),
-      })
-      .setOrigin(0.5);
-    const c = this.add.container(x, y, [img, q]);
+  // A hidden "?" slime — MECHANIC A+E (user 2026-07-26 prototype): show the tile in the
+  // real colour's VALUE (greyscale by luminance) so the subject's light/dark FORM still
+  // reads (the picture looks "not-yet-coloured", not scarred), while the HUE stays hidden
+  // (the gameplay lever). A subtle "?" is sprinkled only on ~1/3 of hidden tiles (anchors)
+  // instead of a bold glyph on every one. Real colour pops in on reveal (revealHiddenAround).
+  private makeHiddenKey(x: number, y: number, s: number, realColor = 0, idx = 0) {
+    void realColor;
+    // UNIFORM cover (user 2026-07-26: value-greyscale leaked the hue — "dễ đoán quá"). All
+    // hidden tiles share ONE muted slate tone → neither hue NOR value leaks, so the colour
+    // is genuinely unknown, while a muted (non-white) tone + a sprinkled soft "?" still reads
+    // as an intentional "covered/unrevealed" patch rather than a stark white scar.
+    const img = this.add.image(0, 0, "tile-hidden").setDisplaySize(s * 1.15, s * 1.15).setTint(0x8a94a3);
+    const L = 138; // fixed value → marker legibility below picks the light-tile branch consistently
+    const c = this.add.container(x, y, [img]);
     c.setSize(s, s);
     c.setData("body", img);
-    c.setData("qmark", q);
+    // E: a soft "?" on ~1/3 of tiles (deterministic sprinkle), value-adaptive for legibility.
+    if (((idx * 2654435761) >>> 0) % 3 === 0) {
+      const q = this.add
+        .text(0, 0, "?", {
+          fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: `${Math.round(s * 0.5)}px`,
+          color: L > 150 ? "#2a2a34" : "#eef2f7",
+          stroke: L > 150 ? "#ffffff" : "#2a2a34", strokeThickness: Math.max(2, Math.round(s * 0.06)),
+        })
+        .setOrigin(0.5)
+        .setAlpha(0.5);
+      c.add(q);
+      c.setData("qmark", q);
+    }
     return c;
   }
 
@@ -1113,10 +1221,9 @@ export class GameScene extends Phaser.Scene {
         const color = this.level.board[j];
         const body = tile.getData("body") as Phaser.GameObjects.Image;
         body.clearTint();
-        body.setTexture(`slime-${color}`);
-        // setTexture resets the image to the new PNG's NATIVE size (slime PNGs are not
-        // uniform — e.g. slime-14 is 556px vs slime-9's 149px), discarding makeKey's
-        // setDisplaySize → a revealed tile would balloon. Re-apply the tile size.
+        body.setTexture(`tile-${color}`);
+        // tile-* textures are uniform 128px, but setTexture still resets display size,
+        // so re-apply the cell size.
         body.setDisplaySize(this.cell * 1.15, this.cell * 1.15);
         const q = tile.getData("qmark") as Phaser.GameObjects.Text | undefined;
         if (q) q.destroy();
@@ -1148,7 +1255,7 @@ export class GameScene extends Phaser.Scene {
   // blocks line of sight.
   private makeObstacle(code: number, x: number, y: number, tileSize: number, cells: number[]) {
     const kind = obstacleKind(code);
-    const key = kind === "hard" ? "rock-hard" : kind === "soft" ? "rock-soft" : "wood";
+    const key = kind === "hard" ? WALL_TEXTURE : kind === "soft" ? "rock-soft" : "wood";
     const img = this.add.image(0, 0, key).setDisplaySize(tileSize * 1.08, tileSize * 1.08);
     const c = this.add.container(x, y, [img]);
     c.setSize(tileSize, tileSize);
@@ -1473,6 +1580,7 @@ export class GameScene extends Phaser.Scene {
     const maskTop = this.invTop - this.chestSize / 2 - 4;
     const maskBottom =
       this.invTop + (this.invVisRows - 1) * rowStep + this.chestSize / 2 + this.invPeek;
+    this.invMaskBottom = maskBottom; // twin-rope: don't rope to a car clipped below this
     const mg = this.make.graphics();
     mg.fillStyle(0xffffff, 1);
     mg.fillRect(0, maskTop, GAME_W, maskBottom - maskTop);
@@ -2663,6 +2771,27 @@ export class GameScene extends Phaser.Scene {
   // art's transparent padding doesn't affect its on-screen size. Runs once per key.
   // Procedural placeholder slime for a colour that has no slime-*.png yet: a glossy
   // rounded square in the tile colour with a little face, matching the real art's read.
+  // A FACELESS board tile: flat palette colour with a thin darker rim + a soft top
+  // gloss for a little depth. No eyes/mouth — keeps the mosaic clean (faces live only
+  // on the tray cars). Uniform 128px so setTexture on reveal needs no resize juggling.
+  private makeTileTexture(key: string, col: number, size = 128) {
+    if (this.textures.exists(key)) this.textures.remove(key);
+    const g = this.make.graphics({ x: 0, y: 0 }, false);
+    const r = size * 0.24;
+    g.fillStyle(shade(col, 0.82), 1);
+    g.fillRoundedRect(size * 0.03, size * 0.04, size * 0.94, size * 0.94, r); // thin rim
+    g.fillStyle(col, 1);
+    g.fillRoundedRect(size * 0.09, size * 0.08, size * 0.82, size * 0.82, r * 0.9); // flat body
+    g.fillStyle(0xffffff, 0.18);
+    g.fillRoundedRect(size * 0.18, size * 0.14, size * 0.5, size * 0.16, size * 0.09); // soft gloss
+    // Two very small, very faint eyes — a hint of life without the noisy full face.
+    g.fillStyle(0x2a2a34, 0.28);
+    g.fillCircle(size * 0.42, size * 0.5, size * 0.032);
+    g.fillCircle(size * 0.58, size * 0.5, size * 0.032);
+    g.generateTexture(key, size, size);
+    g.destroy();
+  }
+
   private makeSlimeTexture(colorId: number, size = 128) {
     const key = `slime-${colorId}`;
     if (this.textures.exists(key)) this.textures.remove(key);
@@ -3926,7 +4055,7 @@ export class GameScene extends Phaser.Scene {
     }
     key.addAt(legL, 0); // behind the body so only the part below the square shows
     key.addAt(legR, 0);
-    key.setScale(1.08); // pop out of the grid a touch
+    key.setScale(1.08); // pop out of the grid a touch (updateRunners drives size from here)
     key.setDepth(DEPTH_RUNNER); // run above the grid tiles (still below foliage)
 
     this.runners.push({
@@ -3999,8 +4128,11 @@ export class GameScene extends Phaser.Scene {
       // final sprint makes it read as "straining to catch up"
       const st = 0.05 + speedFrac * 0.06 + closing * 0.16;
       // ~20% bigger overall than before; still grows as it reaches the car; a rare
-      // "Nice!" slime is 120% of that
-      const base = 1.3 * (1 + closing * 0.72) * (r.nice ? 1.2 : 1);
+      // "Nice!" slime is 120% of that. sizeComp scales the tiny in-grid tile of a BIG
+      // picture board up to the 25×25 standard, so runners look the SAME size near the
+      // cars on every level (on boards ≤25 stdCell==cell → sizeComp is 1, no change).
+      const sizeComp = this.cell > 0 ? this.stdCell / this.cell : 1;
+      const base = 1.3 * (1 + closing * 0.72) * (r.nice ? 1.2 : 1) * sizeComp;
       if (Math.abs(vx) >= Math.abs(vy)) r.node.setScale(base * (1 + st), base * (1 - st * 0.6));
       else r.node.setScale(base * (1 - st * 0.6), base * (1 + st));
 
@@ -4127,12 +4259,16 @@ export class GameScene extends Phaser.Scene {
       const a = group[seg];
       const b = group[seg + 1];
       if (a.left || b.left || !a.container.scene || !b.container.scene) continue;
+      // Don't rope to a partner that's CLIPPED below the inventory viewport (a deep back
+      // queue row, invisible behind the mask) — that's what made the rope stretch as a long
+      // chord to an off-screen car (user 2026-07-26, L303: a front twin roped 400px down to
+      // its partner in row 6). The rope reappears once that partner scrolls into view / moves
+      // up. Both-visible twins still show it at any on-screen distance.
+      if (this.invMaskBottom > 0 && (a.container.y > this.invMaskBottom || b.container.y > this.invMaskBottom)) continue;
       const ax = a.container.x, ay = a.container.y;
       const bx = b.container.x, by = b.container.y;
       const dist = Phaser.Math.Distance.Between(ax, ay, bx, by);
-      // Draw the rope even when the twins are pulled far apart — different queue rows,
-      // or spread out while lining up. Only skip a truly screen-spanning stretch (e.g.
-      // a mid-launch tween with one car still in the queue) to avoid a stray line.
+      // Backstop against a stray screen-spanning line (e.g. a mid-launch tween).
       if (dist < 1 || dist > GAME_W * 0.95) continue;
 
       // Anchor the rope on each car's EDGE facing its partner (not its centre), so the

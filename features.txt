@@ -243,6 +243,16 @@ Lệnh:
 • XE BA (3 xe khác màu chung pairId): logic như xe đôi (đi/đỗ/rời cùng nhau,
   cần 3 khay cạnh nhau). Game side đã hỗ trợ nhóm N từ trước; build đặt ở
   L20,25,30,45 + pack (mỗi level chia hết 3).
+• 🐛 FIX DÂY NỐI xe đôi DÀI (2026-07-26, user L303): drawTwinLinks vẽ dây tới xe đôi
+  ở HÀNG SAU BỊ CHE KHUẤT (ngoài viewport hàng chờ, y=1188 > GAME_H) → dây kéo ngang
+  ~434px xuống xe vô hình. (Lần đầu thử cap theo cỡ xe *1.6 → QUÁ CHẶT, ẩn cả dây khi 2
+  xe thấy được → user báo "k thấy dây".) SỬA ĐÚNG: bỏ qua nếu 1 xe bị CLIP dưới
+  invMaskBottom (che khuất) → không nối tới xe vô hình; 2 xe ĐỀU THẤY thì vẫn vẽ (giữ
+  ngưỡng rộng GAME_W*0.95). invMaskBottom = biên dưới mask hàng chờ (lưu ở buildInventory).
+  ⚠ GỐC RỄ (không sửa, user chốt "để như cũ"): ~17/30 level rock-wall L301-330 có xe đôi
+  đặt SÂU (row≥3) vì pickGroups đặt cặp ở hàng nông nhất còn SOLVABLE — level tường/màu-dồn
+  làm hàng nông unsolvable → đẩy sâu. Rule "twin nông" mâu thuẫn solvability ở các level này.
+  User chọn GIỮ NGUYÊN placement, chỉ cần fix hiển thị dây (đã xong). Đừng ép rule/rebuild.
 • PACK L101-120 (advanced): tất cả hard/super, đủ cơ chế (2lớp + ? + đôi/ba),
   skill 0.9 (101-110), 0.8 (111-115), 0.98 (116-120; 1.0 là bot tất định nên
   dùng 0.98), target 15-20%%. Winrate thực đo: 8-28%% cả 20 level.
@@ -670,6 +680,104 @@ CHỖ CHỈNH: placeWalls + OBST/isColor + gen-wall-rows.mjs + gen-nowall-rows.m
 ⚠ NHÁNH RIÊNG: đã làm ở git worktree branch "rock-walls" để không đè TRAY_BATCH của
   session kia; ĐÃ MERGE vào main 2026-07-26 (auto-merge sạch: TRAY_BATCH giữ L156-185
   re-tune, rock-walls thêm L301-330 — 2 vùng rời nhau).
+
+════════════════════════════════════════════════════════════════════════════
+20) GIAO DIỆN NHÌN "ĐẸP HƠN" — BOARD TỐI + TILE FACELESS + NỀN TRANH (2026-07-26)
+════════════════════════════════════════════════════════════════════════════
+MỤC TIÊU (so game tham chiếu): game họ đẹp hơn KHÔNG do art xịn hơn mà do TƯƠNG
+PHẢN + bảng màu + độ SẠCH. 4 rule dưới đây là cách áp cho game mình.
+
+RULE 1 — BOARD NỀN TỐI (mặc định) để pixel-art NỔI:
+• Mặt board (mat) = navy đậm 0x2b2f4a (trước là cát 0xdcc79c). Highlight 0x3a4066,
+  ô caro xen kẽ 0x242840. Nền tối → tile màu tương phản value cao → tranh "pop".
+• CHỖ CHỈNH: GameScene.buildGroundMat(). Có rẽ nhánh theo cờ per-level (RULE 4).
+
+RULE 2 — TILE BOARD FACELESS (bỏ mặt cười trong "tranh"):
+• PNG slime có mặt vẽ sẵn → mảng mosaic bị NHIỄU. Nay tile board vẽ bằng texture
+  PHẲNG bo góc (makeTileTexture → "tile-<id>"), CHỈ 2 mắt rất nhỏ & mờ
+  (r=size*0.032, alpha 0.28) cho có chút sức sống. KHÔNG miệng, KHÔNG mặt đầy đủ.
+• Mặt CƯỜI chỉ còn trên XE/CHEST ở khay (car-*.png) + slime chạy (runner) — giữ
+  chất "nhân vật lên xe". Tile ẩn "?" dùng "tile-hidden" (trắng phẳng) + "?" xanh.
+• CHỖ CHỈNH: GameScene.makeTileTexture / makeKey / makeHiddenKey / reveal.
+  (chỉnh alpha mắt 0.28 lên/xuống nếu muốn rõ/mờ hơn; =0 là phẳng hẳn.)
+
+RULE 3 — RUNNER GIỮ KÍCH THƯỚC CHUẨN trên board lớn:
+• Board tranh > 25 thì this.cell nhỏ lại (để vừa đường) → slime chạy ra xe bị nhỏ.
+• Thêm this.stdCell = cell mà board 25×25 sẽ có trong CÙNG layout. updateRunners
+  nhân scale runner với sizeComp = stdCell/cell → slime gần xe LUÔN bằng size như
+  level 25×25. Board ≤25: stdCell==cell → sizeComp=1, không đổi.
+• CHỖ CHỈNH: GameScene buildBoard (tính stdCell) + updateRunners (base * sizeComp).
+
+RULE 4 — NỀN CỦA "TRANH" (đừng để mảng TRẮNG ĐỤC):
+• Lỗi hay gặp: level tranh lấp KÍN cả nền bằng ô trắng/xám nhạt (id 8/9/10) →
+  trên board tối thành mảng "trắng đục" xấu, không pop không lùi.
+• Cách xử lý (chọn theo level):
+   (a) BỎ NỀN: nền tranh = ô trống (-1) → lộ board, chủ thể "float" (giống ref).
+       Dùng build-one.mjs chế độ bỏ nền / editor "Nền: bỏ".
+   (b) NỀN TỐI TRUNG TÍNH: remap ô nền (vd 9,10) → id 12 (#262630 navy-đen). Vẫn
+       có tile để ăn nhưng hoà vào board → chủ thể nổi. (đã làm cho L303.)
+   (c) 2 tông tối cho có chiều sâu (nền id 12 + viền/shadow id 10).
+• CỜ PER-LEVEL "lightBoard": true (Level.lightBoard) → board đó dùng MẶT SÁNG (cát)
+  thay navy. Kết hợp nền tranh TỐI (id 12) → sao/chủ thể trên panel tối, KHUNG board
+  sáng bao ngoài (kiểu "tranh nền đen, khung gỗ sáng"). L303 = ví dụ mẫu.
+  ⚠ getLevel() copy field TAY → field mới PHẢI thêm vào src/game/level.ts (đã thêm
+    lightBoard); quên là cờ bị rớt, đổi JSON không có tác dụng.
+
+CHỌN ART CHO LEVEL TRANH (để hợp board tối):
+• Chủ thể MÀU SÁNG, ít màu, tách nền rõ, silhouette dễ nhận = tốt.
+• TRÁNH viền ĐEN dày quanh chủ thể trên board TỐI (viền đen chìm vào nền, mất nét).
+  Nếu art có viền đen: bỏ/đổi viền sáng khi import, HOẶC để level đó lightBoard.
+
+21) REDESIGN 45 LEVEL ĐẦU TỪ FILE THIẾT KẾ + INTRO ĐÁ CỨNG (2026-07-26)
+────────────────────────────────────────────────────────────────────────────
+• File thiết kế: "Manythings/Design winrate/winratedesign1.csv" — user tự điền
+  45 dòng THEO FORMAT NGƯỜI ĐỌC:
+    lvl,tier,target,max màu,maxxe,minxe,xedoi,track,max slim,slime_ref,win_ref,
+    skill,xe_ref,màu_ref,kích thước(vd "25x25"),Có đá cứng?(Có/Không)
+  → build-levels.mjs loadConfig() giờ ĐỌC ĐƯỢC CẢ 2 FORMAT (tự nhận diện qua ô
+    kích thước dạng "AxB"): format thiết kế NÀY + format build cũ (21 cột).
+  • tier (easy/hard/super) → độ khó (thắng ô "packDiff" tính theo số level).
+  • "Có đá cứng?"=Có → TỰ suy ra viền tường theo tier: easy=T (chỉ mép trên),
+    hard=TL (2 mép), super=TLR (3 mép). Hàm wallEdgesForDesign().
+  • max slime = CHỈ tính layer 1; nếu layer 2 có slime thì vượt cap 1 chút là OK.
+• LUẬT MỞ CƠ CHẾ THEO LEVEL (user 2026-07-26), áp cho n≤45:
+  - Xe chôn "?" + slime 2 lớp: mở từ L15 (layer2FracFor, buryForDesign).
+  - Slime "?" (hidden): mở từ L21 (hiddenFracFor).
+  - Đá cứng: từ L23 (level đầu có đá theo thiết kế).
+  - Các FEATURE độ khó (2-layer/chôn/"?") gate THEO TARGET, không theo tier:
+    target càng thấp → 2-layer càng dày (real slime = friction) để level easy-tier
+    nhưng target thấp vẫn có độ khó. Riêng L5/L10 (hard sớm, target≤50) được chôn
+    xe từ L5 (nới luật) — chôn xe là PERCEPTION-ONLY (không đổi winrate đo được,
+    chỉ tăng khó cho NGƯỜI).
+• INTRO ĐÁ CỨNG (GameScene.ts): modal tiếng Việt "Đá Cứng!" hiện 1 lần ở level
+  đầu tiên có đá cứng (L23), dedupe bằng localStorage "pf_rock_intro". Giống
+  intro xe đôi (TWIN_INTRO_LEVEL). Nội dung: xe không gắp được slime nếu có đá
+  cứng chắn đường.
+• GIỮ NGUYÊN TUTORIAL: build lại board cho HỢP winrate/nền mới, NHƯNG các intro/
+  tutorial (L1 hướng dẫn, L8 xe đôi, booster L6/11/16/21) vẫn chạy vì kích hoạt
+  theo SỐ LEVEL, không phụ thuộc board.
+• WALL_TEXTURE (GameScene.ts): skin đá tường = "rock-hard"(xám) / "rock-soft"(nâu)
+  / "rock-soft-cracked". Đá 2×2 (BIG_HARD=95) render cell*2. (thử nghiệm L303.)
+• Rebuild 1 level ở size khác: BOARDSIZE=26 node build --only N (ép size cho --only).
+• Đo winrate ổn định: mặc định trials=100 (trước 40); env TRIALS override. Skill=1
+  → luôn 0/100% (chỉ đo "có qua nổi"), muốn đo độ khó phải skill<1.
+• TĂNG MÀU CHO LEVEL QUÁ DỄ (2026-07-26): board ít màu → xe khớp dễ → winrate cao.
+  - ĐỪNG rắc màu ngẫu nhiên (ensureColors speckle): tạo ô màu lẻ KHÔNG gắp được
+    (outside-in không tới) → level BẤT KHẢ THI. Đã thử COLORS=12 → 4/5 unsolvable.
+  - CÁCH ĐÚNG = ĐỔI CHỦ THỂ sang ảnh NHIỀU MÀU THẬT (vùng màu liền mạch → solvable):
+    IMG=<path ảnh> COLORS=<N> node build --only <lvl>. COLORS= giờ NÂNG TRẦN
+    MOSAIC (Ksub) để ảnh giữ đủ màu dù max-màu thiết kế thấp (KHÔNG còn speckle).
+  - Đã fix L6/L9 (image-swap) & thêm 7 ART MỚI 10-11 màu (user tạo Nano Banana,
+    2026-07-26): 11_rocket_toys, 11_train_toys, 11_robot_heroes, 10_monster_heroes,
+    10_parrot_animals, 11_parakeet_animals, 10_macaw_animals (ở sliced/_superhard).
+    Fix được L10 (37%), L34 (82%), L42 (52%), L25 (16% solvable, tường T).
+• BÀI HỌC QUAN TRỌNG: nhiều màu CHƯA đủ để khó. Độ khó cần MÀU XEN KẼ ở frontier.
+  Clip-art sạch = MẢNG MÀU TO LIỀN → mỗi màu gắp 1 lượt hết → vẫn dễ, NHẤT LÀ board
+  nhỏ 25×25. Vì vậy L5/L6/L9 (25×25, chủ thể mảng to) VẪN dễ (100/98/74%) dù 9-11 màu.
+  Board to (30-31) + chủ thể chi tiết (robot/train/macaw) thì fix được.
+• GIỚI HẠN CÒN LẠI: L5 (target 50 ở level 5 quá sớm + board nhỏ → nên nới ~85),
+  L6/L9 (easy-tier, hơi dễ nhưng chấp nhận được). Muốn khó hơn: board to hơn, hoặc
+  art CHI TIẾT (nhiều mảng nhỏ xen kẽ, không phải mảng to). Đòn bẩy chắc = tường đá.
 
 ────────────────────────────────────────────────────────────────────────────
 GHI CHÚ CHUNG

@@ -44,6 +44,7 @@ export class LevelSelectScene extends Phaser.Scene {
 
   preload() {
     this.load.image("background", "art/background.png"); // shared theme background
+    this.load.image("backgroundHome", "art/backgroundHome.png"); // premium dark Home art
     this.load.image("avatar", "art/slime-3.png"); // a cute face for the profile chip
     // Start-nav mascot. Placeholder for now → swap to the real cute-slime art when ready.
     this.load.image("start-slime", "art/slime-3.png");
@@ -89,9 +90,19 @@ export class LevelSelectScene extends Phaser.Scene {
 
   // ---- Background -----------------------------------------------------
   private buildBackground() {
-    const img = this.add.image(GAME_W / 2, GAME_H / 2, "background").setDepth(-100);
+    // Premium dark Home art (already moody/twilight) → only a LIGHT veil + vignette so
+    // the golden path + gem nodes pop, without over-darkening the picture.
+    const key = this.textures.exists("backgroundHome") ? "backgroundHome" : "background";
+    const img = this.add.image(GAME_W / 2, GAME_H / 2, key).setDepth(-100);
     img.setDisplaySize(GAME_W, GAME_H);
-    this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0x14260f, 0.32).setDepth(-99);
+    const veil = this.add.graphics().setDepth(-99);
+    veil.fillStyle(0x061308, 0.22);
+    veil.fillRect(0, 0, GAME_W, GAME_H);
+    // Soft top/bottom vignette to focus the eye on the centre climb.
+    const vig = this.add.graphics().setDepth(-98);
+    vig.fillStyle(0x020704, 0.4);
+    vig.fillRect(0, 0, GAME_W, 60);
+    vig.fillRect(0, GAME_H - 80, GAME_W, 80);
   }
 
   // ---- Scrollable level map -------------------------------------------
@@ -106,17 +117,25 @@ export class LevelSelectScene extends Phaser.Scene {
     const map = this.add.container(0, 0).setDepth(5);
     this.map = map;
 
-    // Winding golden road behind the nodes, stroked wide→narrow.
+    // The winding path ("dây") behind the nodes. A smooth Catmull-Rom SPLINE (not a
+    // gappy polyline) stroked in layers so it reads as a clean rope that POPS against
+    // the forest: soft shadow → crisp dark casing → warm amber body → bright core.
+    const pts: Phaser.Math.Vector2[] = [];
+    pts.push(new Phaser.Math.Vector2(this.waveX(1), this.worldY(1) + 60)); // run off-screen at the base
+    for (let L = 1; L <= LEVEL_COUNT; L++) pts.push(new Phaser.Math.Vector2(this.waveX(L), this.worldY(L)));
+    pts.push(new Phaser.Math.Vector2(this.waveX(LEVEL_COUNT), this.worldY(LEVEL_COUNT) - 60)); // and off the top
+    const spline = new Phaser.Curves.Spline(pts);
+    const SAMPLES = LEVEL_COUNT * 6; // smooth enough across the whole climb
     const road = this.add.graphics();
-    const trace = () => {
-      road.beginPath();
-      road.moveTo(this.waveX(1), this.worldY(1) + 40);
-      for (let L = 1; L <= LEVEL_COUNT; L++) road.lineTo(this.waveX(L), this.worldY(L));
-      road.lineTo(this.waveX(LEVEL_COUNT), this.worldY(LEVEL_COUNT) - 40);
+    const stroke = (w: number, color: number, alpha = 1) => {
+      road.lineStyle(w, color, alpha);
+      spline.draw(road, SAMPLES);
     };
-    road.lineStyle(22, 0x0d2c1a, 0.45); trace(); road.strokePath(); // soft shadow
-    road.lineStyle(15, 0xf3af33, 1); trace(); road.strokePath(); // gold road
-    road.lineStyle(5, 0xffe6a0, 0.95); trace(); road.strokePath(); // bright core
+    stroke(28, 0x08170c, 0.45); // soft outer shadow
+    stroke(21, 0x3b2a12, 1);    // crisp dark casing → strong edge on the busy bg
+    stroke(14, 0xf0a828, 1);    // warm amber body
+    stroke(9, 0xffcb54, 1);     // inner glow
+    stroke(4, 0xfff0c2, 0.95);  // bright core highlight
     map.add(road);
 
     for (let L = 1; L <= LEVEL_COUNT; L++) this.makeNode(map, L, progress);
@@ -129,16 +148,18 @@ export class LevelSelectScene extends Phaser.Scene {
 
     // Scroll clamps + initial position (centre the current level in the window).
     const viewMid = (this.viewTop + this.viewBottom) / 2;
-    this.scrollMin = this.viewBottom; // level 1 rests at the bottom
+    const bottomPad = 60; // lift the tree so level 1 clears the bottom edge (fully visible)
+    this.scrollMin = this.viewBottom - bottomPad; // level 1 rests just above the bottom
     this.scrollMax = this.viewTop + (LEVEL_COUNT - 1) * SPACING; // level N reaches the top
     this.scrollC = Phaser.Math.Clamp(viewMid + (progress - 1) * SPACING, this.scrollMin, this.scrollMax);
     map.y = this.scrollC;
   }
 
-  private diffColors(d: Difficulty): { face: number; edge: number; hi: number } {
-    if (d === "superhard") return { face: 0xef3b7a, edge: 0x8a1246, hi: 0xffa8cd };
-    if (d === "hard") return { face: 0xf7902a, edge: 0xb35f0c, hi: 0xffcf86 };
-    return { face: 0x4f97ef, edge: 0x2456a8, hi: 0x9ec8ff };
+  private diffColors(_d: Difficulty): { face: number; edge: number; hi: number } {
+    // Unified PREMIUM tone: one deep emerald-teal gem for every level, gold-rimmed
+    // (added in makeNode) — minimal & luxe. Difficulty still reads via node size + the
+    // 🔥/💀 icon + HARD/SUPER tag; the CURRENT level stays gold to pop.
+    return { face: 0x1c8f79, edge: 0x0a3b30, hi: 0x8fe8d0 };
   }
 
   private makeNode(map: Phaser.GameObjects.Container, level: number, progress: number) {
@@ -170,12 +191,23 @@ export class LevelSelectScene extends Phaser.Scene {
     }
 
     const g = this.add.graphics();
-    this.hex(g, x, y + 5, R + 1, 0x061a10, 0.42); // drop shadow
+    this.hex(g, x, y + 6, R + 2, 0x02080c, 0.5); // deeper drop shadow → lifts off the dark stage
+    this.hex(g, x, y, R + 1.5, 0x02100a, 0.9); // thin dark casing (crisp silhouette)
     this.hex(g, x, y, R, col.edge); // outer edge ring
     this.hex(g, x, y, R - 4.5, col.face); // face
-    this.hex(g, x, y - R * 0.3, R * 0.6, col.hi, 0.55); // glossy top bevel
+    this.hex(g, x, y + R * 0.34, R * 0.66, col.edge, 0.35); // soft lower shade → rounded volume
+    this.hex(g, x, y - R * 0.3, R * 0.62, col.hi, 0.68); // glossy top bevel (brighter)
+    // Thin bright rim on the upper edge for a coated sheen.
+    g.lineStyle(2, 0xffffff, 0.4);
+    this.hexStroke(g, x, y - 0.5, R - 1.5);
     g.lineStyle(current ? 4 : d === "normal" ? 2.5 : 3.5, current ? 0xfff4cf : col.edge, 1);
     this.hexStroke(g, x, y, R);
+    // Gold hairline rim on every gem (skip locked) — a unifying luxe accent, matches
+    // the golden path. Sits just outside the coloured edge.
+    if (!locked) {
+      g.lineStyle(1.5, current ? 0xfff0b0 : 0xf0c463, current ? 1 : 0.9);
+      this.hexStroke(g, x, y, R + 2);
+    }
     if (locked) g.setAlpha(0.6);
     else if (cleared && !current) g.setAlpha(0.72); // beaten levels dim back
     map.add(g);
@@ -194,11 +226,8 @@ export class LevelSelectScene extends Phaser.Scene {
     else if (cleared && !current) num.setAlpha(0.85);
     map.add(num);
 
-    // Locked → padlock badge; beaten → star; current → warm glow (above).
-    if (locked) {
-      const lock = this.add.text(x + R - 5, y - R + 5, "🔒", { fontSize: "15px" }).setOrigin(0.5);
-      map.add(lock);
-    } else if (cleared && !current) {
+    // Beaten → star badge; current → warm glow (above). Locked levels just dim (no lock icon).
+    if (cleared && !current) {
       const star = this.add.text(x + R - 6, y - R + 4, "⭐", { fontSize: "16px" }).setOrigin(0.5);
       map.add(star);
     }

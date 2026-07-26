@@ -124,6 +124,9 @@ export default defineConfig({
   server: {
     host: true,
     port: 5173,
+    // Allow temporary Cloudflare Quick Tunnel URLs (cloudflared --url) to reach the
+    // dev server so the game is playable off-network without a wifi IP.
+    allowedHosts: [".trycloudflare.com"],
   },
   build: {
     outDir: "dist",

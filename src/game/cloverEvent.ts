@@ -18,6 +18,10 @@
 // (Unlock is derived from pf_progress — no extra flag needed.)
 // ---------------------------------------------------------------------------
 
+// TEMP DISABLE (user 2026-07-26): flip to true to bring the Lucky Clover event back.
+// isEventUnlocked() short-circuits on this, so the Home banner + win-screen clover awards
+// all switch off from one place. No data is wiped — progress/clovers are kept for re-enable.
+export const EVENT_ENABLED = false;
 export const EVENT_UNLOCK_LEVEL = 12; // event opens once this level is beaten
 export const EVENT_NAME = "Lucky Clover";
 export const CLOVER_ICON = "🍀";
@@ -99,6 +103,7 @@ function writeInt(key: string, v: number) {
 
 // pf_progress = highest level reached (i.e. next level). Beaten level 12 → >= 13.
 export function isEventUnlocked(): boolean {
+  if (!EVENT_ENABLED) return false; // temporarily disabled — hides the banner + skips clover awards
   return readInt("pf_progress", 1) > EVENT_UNLOCK_LEVEL;
 }
 export function getClovers(): number {

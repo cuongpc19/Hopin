@@ -71,6 +71,9 @@ export interface Level {
   // bay (never straight to the ray); bay cars auto-launch when their colour is reachable,
   // with NO manual relaunch / juggle. Undefined/false = the classic game.
   tray?: boolean;
+  // BOARD THEME: default is the dark navy mat (bright tiles pop). Set true to use the
+  // old light sand mat instead (per-level override, e.g. for a design comparison).
+  lightBoard?: boolean;
 }
 
 // Difficulty tiers: every 5th level is HARD, every 15th is SUPER-HARD.
@@ -191,6 +194,7 @@ export function makeLevel(levelNum = 1): Level {
       hidden: designed.hidden ? [...designed.hidden] : undefined,
       lanes: designed.lanes,
       tray: designed.tray,
+      lightBoard: designed.lightBoard,
     };
   }
 
