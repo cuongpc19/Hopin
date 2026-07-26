@@ -723,6 +723,16 @@ RULE 4 — NỀN CỦA "TRANH" (đừng để mảng TRẮNG ĐỤC):
   ⚠ getLevel() copy field TAY → field mới PHẢI thêm vào src/game/level.ts (đã thêm
     lightBoard); quên là cờ bị rớt, đổi JSON không có tác dụng.
 
+• TỰ ĐỘNG CHỌN NỀN THEO "VIỀN NGOÀI" (2026-07-26, user A+B):
+  - VIỀN NGOÀI TỐI → NỀN SÁNG: nếu rìa chủ thể (ô giáp nền/mép) đa số TỐI (luminance
+    < 95, tỉ lệ ≥ 45%) → viền chìm trên board tối → builder tự fill nền SÁNG (id 8/9/
+    14/15/17, chọn cái tương phản nhất) + set lightBoard. Chủ thể sáng → giữ nền tối
+    id 12 (float). Hàm choosePictureTheme() trong build-levels.mjs; logic y hệt inline
+    trong build-one.mjs. PIC_BG/BG_ID vẫn override.
+  - AUDIT LEVEL CŨ: scripts/audit-dark-outline.mjs (--apply). Rà designed.json, tìm
+    level tranh có viền tối trên nền tối, RELABEL 1:1 màu nền tối → màu sáng chưa dùng
+    (winrate GIỮ NGUYÊN — đã kiểm before==after) + set lightBoard. Đã fix L5/8/9/18/40.
+
 CHỌN ART CHO LEVEL TRANH (để hợp board tối):
 • Chủ thể MÀU SÁNG, ít màu, tách nền rõ, silhouette dễ nhận = tốt.
 • TRÁNH viền ĐEN dày quanh chủ thể trên board TỐI (viền đen chìm vào nền, mất nét).

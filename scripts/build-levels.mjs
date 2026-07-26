@@ -276,7 +276,50 @@ const PIC_DARK = new Set([13, 16, 18]);
 const PIC_IDS = []; for (let i = 0; i < BASE_N; i++) if (!PIC_DARK.has(i)) PIC_IDS.push(i);
 const PIC_RGB = PIC_IDS.map((id) => baseRgb[id]);
 const PIC_MARGIN = 1; // empty cells at the border (SAFE_MARGIN in build-one.mjs)
+
+// Set by buildPicture → read at level assembly to attach `lightBoard` to the level.
+let _picLightBoard = false;
+
+// AUTO board theme for a picture (FEATURES §20 RULE 4). `board` has subject cells (>=0)
+// and EMPTY (-1) elsewhere (bg not yet filled). If the subject's PERIMETER (cells that
+// touch the bg / grid edge) is mostly DARK, its outline would disappear on the dark
+// board → return a LIGHT bg + lightBoard so the outline pops. Otherwise dark bg (id 12).
+// PIC_BG env still overrides: PIC_BG=<id> forces an id (dark theme), PIC_BG=bright = the
+// legacy light-board auto-contrast.
+const _lum = (id) => { const c = baseRgb[id]; return 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]; };
+const DARK_LUM = 95; // below this a tile reads as "dark" (id 12/10/13/18…)
+function choosePictureTheme(board, size) {
+  const used = [...new Set(board.filter((v) => v >= 0))];
+  const usedRgb = used.map((id) => baseRgb[id]);
+  const mostDistinct = (cands) => {
+    let best = cands[0], bd = -1;
+    for (const id of cands) { let mn = Infinity; for (const c of usedRgb) { const d = dist2(baseRgb[id], c); if (d < mn) mn = d; } if (mn > bd) { bd = mn; best = id; } }
+    return best;
+  };
+  const PIC_BG = process.env.PIC_BG;
+  if (PIC_BG != null && PIC_BG !== "bright") return { bgId: parseInt(PIC_BG, 10), lightBoard: false };
+  if (PIC_BG === "bright") return { bgId: mostDistinct([1, 2, 3, 4, 5, 6, 7].filter((id) => !used.includes(id))) ?? 3, lightBoard: true };
+
+  // perimeter darkness of the subject
+  let perim = 0, dark = 0;
+  const N = size * size;
+  for (let i = 0; i < N; i++) {
+    if (board[i] < 0) continue;
+    const r = (i / size) | 0, c = i % size;
+    const edge = r === 0 || c === 0 || r === size - 1 || c === size - 1 ||
+      board[i - 1] < 0 || board[i + 1] < 0 || board[i - size] < 0 || board[i + size] < 0;
+    if (!edge) continue;
+    perim++; if (_lum(board[i]) < DARK_LUM) dark++;
+  }
+  const darkOutline = perim > 0 && dark / perim >= 0.45;
+  if (!darkOutline) return { bgId: 12, lightBoard: false }; // bright subject → dark float
+  // dark-outlined → LIGHT bg (most distinct light neutral) + lightBoard so the outline shows
+  const LIGHT = [8, 9, 14, 15, 17].filter((id) => !used.includes(id));
+  return { bgId: LIGHT.length ? mostDistinct(LIGHT) : 8, lightBoard: true };
+}
+
 function buildPicture(src, IW, IH, K) {
+  _picLightBoard = false;
   const maxSide = BOARD_SIZE - 2 * PIC_MARGIN;
   // crop to subject bbox (same working pass as buildFromImage)
   let rx = 0, ry = 0, rw = IW, rhi = IH;
@@ -323,26 +366,12 @@ function buildPicture(src, IW, IH, K) {
   const full = new Array(BOARD_SIZE * BOARD_SIZE).fill(EMPTY);
   const ox = Math.floor((BOARD_SIZE - cw) / 2), oy = Math.floor((BOARD_SIZE - rh) / 2);
   for (let y = 0; y < rh; y++) for (let x = 0; x < cw; x++) full[(oy + y) * BOARD_SIZE + (ox + x)] = sub[y * cw + x];
-  // FULL-FILL bg. DEFAULT = dark-neutral id 12 (#262630) so the bright subject pops on
-  // the DARK board and there is no dull light-grey mass (FEATURES §20 RULE 4). Override:
-  //   PIC_BG=<id>    force a palette id      PIC_BG=bright  old auto-contrast (light board)
-  const PIC_BG = process.env.PIC_BG;
-  let bgId = 12; // dark neutral (default — matches the navy board theme)
-  if (PIC_BG != null && PIC_BG !== "bright") {
-    bgId = parseInt(PIC_BG, 10);
-  } else if (PIC_BG === "bright") {
-    // legacy: one bright colour most distinct from EVERY subject colour (for lightBoard)
-    const used = [...new Set(full.filter((v) => v >= 0))];
-    const usedRgb = used.map((id) => baseRgb[id]);
-    const cands = PIC_IDS.filter((id) => id !== 8 && id !== 14 && !used.includes(id));
-    bgId = cands[0] ?? 3;
-    let bd = -1;
-    for (const id of cands) {
-      let mn = Infinity;
-      for (const c of usedRgb) { const d = dist2(baseRgb[id], c); if (d < mn) mn = d; }
-      if (mn > bd) { bd = mn; bgId = id; }
-    }
-  }
+  // AUTO THEME (FEATURES §20 RULE 4): does the subject have a DARK OUTLINE? Look at the
+  // subject's perimeter cells (those touching the bg/edge) — if most are dark, they'd
+  // vanish on a dark board, so switch to a LIGHT bg + lightBoard so the outline pops.
+  // A bright/light-edged subject keeps the dark bg (id 12) + dark board (float look).
+  const { bgId, lightBoard } = choosePictureTheme(full, BOARD_SIZE);
+  _picLightBoard = lightBoard;
   const lo = PIC_MARGIN, hi2 = BOARD_SIZE - 1 - PIC_MARGIN;
   for (let r = lo; r <= hi2; r++) for (let c = lo; c <= hi2; c++) {
     const i = r * BOARD_SIZE + c; if (full[i] === EMPTY) full[i] = bgId;
@@ -1863,12 +1892,16 @@ function loadConfig(p) {
     const design = /\d\s*[x×]\s*\d/i.test(cols[14] || "");
     let target, maxmau, maxxe, minxe, xedoi, track, maxslim, skill, size, lanes, bury, l1, tray, img, walls;
     if (design) {
-      // lvl,tier,target,max màu,maxxe,minxe,xedoi,track,max slim,slime_ref,win_ref,skill,xe_ref,màu_ref,kích thước,Có đá cứng?
+      // …,kích thước,Có đá cứng?,[img],[lanes],[walls]  — last 3 optional (persist art & special configs)
       [, , target, maxmau, maxxe, minxe, xedoi, track, maxslim, , , skill] = cols;
       size = parseInt(String(cols[14]).split(/[x×]/i)[0], 10) || null;
       const rock = (cols[15] || "").trim().toLowerCase();
-      walls = /^(có|co|yes|y|1|x|true)/i.test(rock) ? wallEdgesForDesign(tierToDiff(tier)) : null;
-      lanes = bury = l1 = null; tray = 0; img = null;
+      const wallOv = (cols[18] || "").trim(); // explicit edge override (e.g. "T") wins over the Có/Không auto-derive
+      walls = /[TBLR]/i.test(wallOv) ? wallOv.toUpperCase()
+            : /^(có|co|yes|y|1|x|true)/i.test(rock) ? wallEdgesForDesign(tierToDiff(tier)) : null;
+      img = (cols[16] && cols[16].trim()) ? cols[16].trim() : null;   // specific subject image
+      lanes = (cols[17] != null && String(cols[17]).trim() !== "" && !isNaN(+cols[17])) ? +cols[17] : null;
+      bury = l1 = null; tray = 0;
     } else {
       // BUILD format: ...,kích thước(num),line,chôn,l1,tray,img,walls
       [, , target, maxmau, maxxe, minxe, xedoi, track, maxslim, , , skill, , , size, lanes, bury, l1, tray, img, walls] = cols;
@@ -1925,9 +1958,13 @@ let easyPtr = 0, hardPtr = 0;
 // filename prefix = TRUE colour count. Few colours → easy pool, many → hard pools.
 // Pool per level chosen by the CSV colour ceiling: ≤6 → _simple, 7-9 → _hard, ≥10 → _superhard.
 const SLICED_ROOT = path.join(ROOT, "public/art/level art/sliced");
+// Images explicitly assigned to a level via the CSV "img" column are RESERVED — the
+// pointer-based pool must skip them so they don't ALSO leak onto other levels.
+const RESERVED_IMGS = new Set();
+if (CONFIG) for (const c of CONFIG.values()) if (c.img) RESERVED_IMGS.add(c.img);
 const SLICED = {};
 for (const d of ["_simple", "_hard", "_superhard"]) {
-  SLICED[d] = fs.existsSync(path.join(SLICED_ROOT, d)) ? fs.readdirSync(path.join(SLICED_ROOT, d)).filter(isImg).sort() : [];
+  SLICED[d] = fs.existsSync(path.join(SLICED_ROOT, d)) ? fs.readdirSync(path.join(SLICED_ROOT, d)).filter(isImg).filter((f) => !RESERVED_IMGS.has(f)).sort() : [];
 }
 const slicedPtr = { _simple: 0, _hard: 0, _superhard: 0 };
 const slicedPoolFor = (colors) => (colors == null || colors <= 6) ? "_simple" : colors <= 9 ? "_hard" : "_superhard";
@@ -2075,7 +2112,10 @@ for (const n of LEVEL_NUMS) {
   // groups instead); reduceColors easing still applies when a level is too hard.
   // Tuner colour ceiling = the subject's OWN colours for a picture level (never speckle
   // extra colours on — that scatters uncollectable single cells and breaks solvability).
-  const tuned = tuneToTarget(board, track, target, n, diff, { colors: picture ? distinctColors(board) : cfg.colors, maxCars: cfg.maxCars, minCars: cfg.minCars, twins: cfg.twins, triples: triplesFor(n), skill: calSkill, layer2Frac: layer2Pre ? 0 : layer2FracFor(n, diff, cfg), layer2Pre, tray: trayOn }); // → win ≈ target @ skill
+  // Twins are introduced at L8 (game's TWIN_INTRO): never place them earlier even if a CSV
+  // row asks for xe đôi (user 2026-07-26: L4 must not have twins).
+  const twinsWanted = (n < 8 && !isKid(n)) ? 0 : cfg.twins;
+  const tuned = tuneToTarget(board, track, target, n, diff, { colors: picture ? distinctColors(board) : cfg.colors, maxCars: cfg.maxCars, minCars: cfg.minCars, twins: twinsWanted, triples: triplesFor(n), skill: calSkill, layer2Frac: layer2Pre ? 0 : layer2FracFor(n, diff, cfg), layer2Pre, tray: trayOn }); // → win ≈ target @ skill
   board = tuned.board;
   const chests = tuned.chests;
 
@@ -2088,6 +2128,7 @@ for (const n of LEVEL_NUMS) {
   const buriedN = buryFrac > 0 ? buryCars(chests, buryFrac, n * 313 + 7) : 0;
 
   levels[n] = { track, cols: BOARD_SIZE, rows: BOARD_SIZE, board, chests };
+  if (picture && _picLightBoard) levels[n].lightBoard = true; // dark-outlined subject → light board (RULE 4)
   if (LANES !== DEFAULT_LANES) levels[n].lanes = LANES; // queue-line count (game defaults to 4)
   if (trayOn) levels[n].tray = true; // one-way TRAY mode (bays fill 1→5, no pull-out)
   if (tuned.layer2) levels[n].layer2 = tuned.layer2;
