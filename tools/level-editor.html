@@ -82,6 +82,9 @@
   .ctile.sel { outline: 3px solid var(--accent); outline-offset: 1px; }
   .ctile .num { font-size: 20px; font-weight: 800; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.55); }
   .ctile .ord { position: absolute; top: 2px; left: 5px; font-size: 9px; color: rgba(255,255,255,.75); }
+  .ctile { cursor: grab; }
+  .ctile:active { cursor: grabbing; }
+  .ctile.drop-to { outline: 3px dashed var(--accent); outline-offset: 2px; }
   .ctile.hidden-play::after {
     content: ""; position: absolute; inset: 0; border-radius: 7px;
     background: repeating-linear-gradient(45deg, rgba(20,20,28,.0) 0 6px, rgba(20,20,28,.16) 6px 12px);
@@ -162,7 +165,16 @@
       <h2>Khu vực 1 — Bảng chìa khoá</h2>
 
       <div class="row">
-        <span class="hint">Lưới cố định <b>25×25</b> cho mọi level (ảnh tự căn giữa, chừa lề tới đường ray).</span>
+        <label>Kích thước</label>
+        <select id="boardSize" title="Đổi kích thước lưới (giữ nội dung, căn giữa)">
+          <option value="15">15×15</option>
+          <option value="20">20×20</option>
+          <option value="25" selected>25×25</option>
+          <option value="31">31×31</option>
+          <option value="35">35×35</option>
+          <option value="40">40×40</option>
+        </select>
+        <span class="hint">ảnh tự căn giữa, chừa lề tới đường ray.</span>
         <input id="cols" type="hidden" value="25" />
         <input id="rows" type="hidden" value="25" />
         <div class="spacer"></div>
@@ -223,7 +235,7 @@
         <button id="genCars" class="primary">Tạo N xe mẫu</button>
         <span class="hint" id="carHint"></span>
       </div>
-      <p class="hint">Rương xếp <b>4 cột/hàng</b> theo thứ tự, có thể nhiều hàng. Lúc chơi chỉ hiện 2 hàng đầu + ló hàng 3; khi design hiện hết. Click 1 rương để sửa. “Tạo N xe mẫu” chia tile của bảng thành đúng N xe (tối thiểu = số màu) — chỉnh lại sau tuỳ ý.</p>
+      <p class="hint">Rương xếp <b>4 cột/hàng</b> theo thứ tự, có thể nhiều hàng. Lúc chơi chỉ hiện 2 hàng đầu + ló hàng 3; khi design hiện hết. Click 1 rương để sửa; <b>kéo-thả</b> rương để đẩy tới vị trí bất kỳ (hoặc ◀▶ trong ô sửa để nhích từng bước). “Tạo N xe mẫu” chia tile của bảng thành đúng N xe (tối thiểu = số màu) — chỉnh lại sau tuỳ ý.</p>
 
       <div id="chestGrid" style="margin-top:12px;"></div>
 
@@ -309,6 +321,28 @@ let fullPalette = false; // true when the palette is a bespoke image-derived set
 function newBoard(c, r, fill = EMPTY) {
   cols = c; rows = r;
   board = new Array(c * r).fill(fill);
+}
+
+// Resize the grid to n×n, keeping the current drawing CENTERED (crop/pad symmetrically).
+function resizeBoard(n) {
+  if (n === cols && n === rows) return;
+  const old = board, oc = cols, orr = rows;
+  const nb = new Array(n * n).fill(EMPTY);
+  const offC = Math.floor((n - oc) / 2), offR = Math.floor((n - orr) / 2);
+  for (let r = 0; r < orr; r++) for (let c = 0; c < oc; c++) {
+    const nr = r + offR, nc = c + offC;
+    if (nr >= 0 && nr < n && nc >= 0 && nc < n) nb[nr * n + nc] = old[r * oc + c];
+  }
+  cols = rows = n; board = nb;
+  syncSizeUI();
+  renderBoard(); refresh();
+}
+// Keep the size dropdown + hidden inputs in step with the current cols/rows.
+function syncSizeUI() {
+  const inC = document.getElementById("cols"), inR = document.getElementById("rows");
+  if (inC) inC.value = cols; if (inR) inR.value = rows;
+  const sel = document.getElementById("boardSize");
+  if (sel) sel.value = String(cols); // non-preset sizes (e.g. image crop) just leave it unmatched
 }
 
 // Default: an empty fixed 25×25 canvas (all levels use this square).
@@ -431,6 +465,7 @@ document.getElementById("board").addEventListener("touchmove", (e) => {
 
 // ---- Chests UI (grid, 4 per row, all rows shown; play boundary marked) ----
 let selected = -1; // index of selected chest, -1 = none
+let dragSrc = -1;  // index of the chest being dragged (drag-to-reorder), -1 = none
 
 function renderChests() {
   const grid = document.getElementById("chestGrid");
@@ -459,6 +494,20 @@ function renderChests() {
     t.style.background = COLORS[ch.color] ? COLORS[ch.color].hex : "#888";
     t.innerHTML = `<span class="ord">${idx+1}</span><span class="num">${ch.count}</span>`;
     t.onclick = () => { selected = (selected === idx ? -1 : idx); renderChests(); renderEditBar(); };
+    // DRAG-TO-REORDER: grab a car and drop it onto any position (push it wherever you want).
+    t.draggable = true;
+    t.addEventListener("dragstart", (e) => { dragSrc = idx; e.dataTransfer.effectAllowed = "move"; t.style.opacity = ".4"; });
+    t.addEventListener("dragend", () => { dragSrc = -1; t.style.opacity = ""; document.querySelectorAll(".ctile.drop-to").forEach(x => x.classList.remove("drop-to")); });
+    t.addEventListener("dragover", (e) => { if (dragSrc >= 0 && dragSrc !== idx) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; t.classList.add("drop-to"); } });
+    t.addEventListener("dragleave", () => t.classList.remove("drop-to"));
+    t.addEventListener("drop", (e) => {
+      e.preventDefault(); t.classList.remove("drop-to");
+      if (dragSrc < 0 || dragSrc === idx) return;
+      const [moved] = chests.splice(dragSrc, 1);   // pull the dragged car out…
+      chests.splice(idx, 0, moved);                 // …drop it at the target slot
+      selected = idx; dragSrc = -1;
+      renderChests(); refresh();
+    });
     grid.appendChild(t);
   });
   renderEditBar();
@@ -914,7 +963,7 @@ function applyLevel(obj) {
   cols = obj.cols; rows = obj.rows; board = obj.board.slice();
   chests = (obj.chests || []).map(c => ({ color: c.color, count: c.count }));
   restorePalette(obj.palette, obj.paletteFull); selected = -1;
-  document.getElementById("cols").value = cols; document.getElementById("rows").value = rows;
+  syncSizeUI();
   renderPalette(); renderBoard(); renderChests(); refresh(); refreshPicker();
 }
 function toTemplate() {
@@ -958,6 +1007,15 @@ document.getElementById("ceDel").onclick = () => { chests.splice(selected, 1); s
 document.getElementById("ceLeft").onclick = () => { if (selected > 0) { [chests[selected-1], chests[selected]] = [chests[selected], chests[selected-1]]; selected--; renderChests(); refresh(); } };
 document.getElementById("ceRight").onclick = () => { if (selected < chests.length - 1) { [chests[selected+1], chests[selected]] = [chests[selected], chests[selected+1]]; selected++; renderChests(); refresh(); } };
 
+// board size dropdown
+document.getElementById("boardSize").onchange = (e) => {
+  const n = +e.target.value | 0;
+  if (n < 8 || n > 60) return;
+  const hasArt = board.some(v => v >= 0);
+  if (hasArt && (n < cols || n < rows) && !confirm(`Thu nhỏ về ${n}×${n} có thể CẮT bớt ô ở rìa. Tiếp tục?`)) { syncSizeUI(); return; }
+  resizeBoard(n);
+};
+
 document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => {
   document.querySelectorAll("#tabs button").forEach(x => x.classList.remove("active"));
   b.classList.add("active"); currentTab = b.dataset.tab; renderOutput();
@@ -998,7 +1056,7 @@ document.getElementById("lvNew").onclick = () => {
   levelName = nextLevelName();
   COLORS = BASE_COLORS.map(c => ({ ...c })); fullPalette = false;
   loadDefault(); chests = []; selected = -1; paintColor = 0;
-  document.getElementById("cols").value = cols; document.getElementById("rows").value = rows;
+  syncSizeUI();
   renderPalette(); renderBoard(); renderChests(); refresh(); refreshPicker();
 };
 document.getElementById("lvDup").onclick = () => {

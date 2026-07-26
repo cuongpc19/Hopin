@@ -803,6 +803,30 @@ CHỌN ART CHO LEVEL TRANH (để hợp board tối):
   Clip-art sạch = MẢNG MÀU TO LIỀN → mỗi màu gắp 1 lượt hết → vẫn dễ, NHẤT LÀ board
   nhỏ 25×25. Vì vậy L5/L6/L9 (25×25, chủ thể mảng to) VẪN dễ (100/98/74%) dù 9-11 màu.
   Board to (30-31) + chủ thể chi tiết (robot/train/macaw) thì fix được.
+
+22) ÉP LEVEL DỄ VỀ ĐÚNG TARGET BẰNG ẢNH CHIA-MẢNH + TUNER CHÍNH XÁC (2026-07-27)
+────────────────────────────────────────────────────────────────────────────
+• Vấn đề: chủ thể MẢNG TO (đồng hồ/xe buýt/quái vật) trên target-mới-thấp (khó) →
+  chôn xe (order-bias) cỡ nào cũng ~100% → không xuống nổi target. CÁCH ĐÚNG =
+  ĐỔI sang CHỦ THỂ ĐƠN NHIỀU MẢNH MÀU NHỎ XEN KẼ (con vật chia mảng, giỏ trái cây)
+  → frontier nhiều màu → tuner có dư địa ép khó. Mảng to (bạch tuộc thân tím, robot
+  khối) vẫn dễ. Fix: L12→turtle(85→93), L25→fruitbasket(60→59 KHỚP), L27→rainbowfish
+  (80→75), L33→rocket_rainbow(85→89, đẹp hơn tên lửa đỏ trơn).
+• ẢNH MỚI (user thả vào public/art/level art/4, 2026-07-27) → cắt vào sliced/_superhard
+  prefix 11_: sinh vật biển (octopus/fruitbasket/rainbowfish/turtle/whale/crab/…),
+  khủng long (11_*_dino), ảnh đơn (rocket_rainbow/house_colorful/robot_office/
+  tower_blocks), holiday-nền-checkerboard (11_*_holiday — TRÁNH: pipeline giản lược
+  checkerboard → ít xe → dễ). Cắt bằng sharp: extract ô lưới → trim trắng → bỏ ô
+  trống (stats stdev thấp). Ảnh nền TRẮNG: rule nền-sáng có thể rơi về trắng id8
+  (chủ thể đã dùng hết id sáng hơn) — OK, trắng vẫn nổi trên board caro tối.
+• ⚠ TUNER NHIỄU: tuneToTarget dò candidate ở 16 trials (mặc định) → chốt "đúng target"
+  nhưng đo lại 100 trials lệch ±15 (vd L29 tuner-nghĩ-75 → thực 52 QUÁ KHÓ). FIX:
+  env TUNE_TRIALS=80 (nâng trials tuner) + lưới bias mịn 9 mức → re-tune 7 outlier về
+  sát target (L29 52→80, L22 97→88, L14 75→88). Chậm hơn nhưng chuẩn. Quy trình đo
+  chuẩn = --report (100 trials, grade designed.json thật), KHÔNG tin số build-time.
+• ⚠ RULE ẢNH XẤU (user): L3-35 ảnh nào "xấu quá" (1 tông) thì thay ảnh mới — NHƯNG
+  level target 100 (showcase dễ: L21 đèn, L26 sư tử, L31 khỉ) PHẢI giữ ít màu, không
+  swap ảnh nhiều màu (sẽ phá độ dễ). Chỉ swap ở level target < 100.
 • GIỚI HẠN CÒN LẠI: L5 (target 50 ở level 5 quá sớm + board nhỏ → nên nới ~85),
   L6/L9 (easy-tier, hơi dễ nhưng chấp nhận được). Muốn khó hơn: board to hơn, hoặc
   art CHI TIẾT (nhiều mảng nhỏ xen kẽ, không phải mảng to). Đòn bẩy chắc = tường đá.

@@ -1497,7 +1497,7 @@ function tuneToTarget(board0, track, target, n, diff, ov = {}) {
   const L2 = pinned ? { layer2: ov.layer2Pre.layer2, count: ov.layer2Pre.count, counts: ov.layer2Pre.counts }
                     : (ov.layer2Frac ? makeLayer2(board0, BOARD_SIZE, BOARD_SIZE, ov.layer2Frac, seed + 11) : null);
   const l2extra = L2 ? L2.counts : null;
-  const opt = { skill, trials: 16, seed, twins: twinsN, triples: triplesN, layer2: L2 ? L2.layer2 : null, tray: !!ov.tray, biases: [0, 0.18, 0.36, 0.54, 0.72] };
+  const opt = { skill, trials: process.env.TUNE_TRIALS ? Number(process.env.TUNE_TRIALS) : 16, seed, twins: twinsN, triples: triplesN, layer2: L2 ? L2.layer2 : null, tray: !!ov.tray, biases: [0, 0.09, 0.18, 0.27, 0.36, 0.45, 0.54, 0.63, 0.72] };
   const slime = slimeCount(board0) + (L2 ? L2.count : 0); // bottoms add to the load
   // Slimes-per-car (car `count`) is the real feel knob: user wants count in 1..40 but
   // PREFERS 15..35 (ideal ≈ 25). So car count lives in [ceil(slime/40) .. floor(slime/12)]
