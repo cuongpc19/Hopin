@@ -756,55 +756,68 @@ function playAverage(board, cols, rows, order, track, opts) {
     }
     return progressed;
   };
-  // ---- TRAY mode (user 2026-07-25): one-way bays, NO juggle / NO manual relaunch. Cars
-  // stage from the queue into the 5 bays (fill 1→5); a bay car auto-fires the moment its
-  // colour is reachable, then leaves and frees its slot. The ONLY player decision is WHICH
-  // queue front to stage — skill-gated. Lose = every bay full of blocked cars with nothing
-  // reachable. Far more deterministic than the juggle game → an accurate win-rate gauge.
+  // ---- TRAY BATCH mode (user 2026-07-26 redesign): one-way bays, NO auto-fire, NO juggle.
+  // The player STAGES cars into the bays (fill 1→5), then presses GO to launch the WHOLE
+  // batch at once. The squad circles as one unit and keeps looping while ANY member can
+  // still collect (a car peeling an outer ring surfaces a teammate's colour → the batch
+  // chains) — modelled here as a fixed-point collect over all bay cars. When no member can
+  // collect (fixed point), emptied cars leave and still-blocked cars stay in their bays for
+  // the next batch. The ONLY player decisions are WHICH fronts to stage (skill-gated) and
+  // implicitly WHEN to GO (this bot fills the bays greedily, then fires). Bays lock during a
+  // run. Lose = bays full of blocked cars, nothing new to stage, and GO would collect
+  // nothing. Fully deterministic given the staged set → an accurate win-rate gauge.
   if (opts.tray) {
     let g2 = 0;
     while (remaining > 0 && g2++ < order.length * 6 + 400) {
       if (parked.length > peak) peak = parked.length;
-      const E = exposedTiles(occ, cols, rows, edges);
-      const S = new Set(); for (const i of E) S.add(occ[i]);
-      let acted = false;
-      for (const c of parked) { // a reachable bay solo auto-fires
-        if (c.grouped || c.cap <= 0 || !S.has(c.color)) continue;
-        doCollect(c); if (c.cap === 0) removeCar(c); acted = true; break;
-      }
-      if (acted) continue;
-      for (const g of groups) { // a reachable fully-staged group fires together
-        if (g.every((c) => c.cap === 0) || !g.every((c) => parked.includes(c))) continue;
-        if (!g.some((c) => c.cap > 0 && S.has(c.color))) continue;
-        for (const c of g) doCollect(c);
-        if (g.every((c) => c.cap === 0)) for (const c of g) removeCar(c);
-        acted = true; break;
-      }
-      if (acted) continue;
-      if (parked.length < bays) {
-        // stage a READY group (all members at fronts) when the bays have room for all
+      // STAGE PHASE: greedily fill the bays from the queue. Stage a READY group whole (all
+      // members at fronts) when it fits; else a solo front — prefer a REACHABLE one, else
+      // dig the DEEPEST column to reveal more. skill-miss → a random front.
+      let stagedAny = false;
+      while (parked.length < bays) {
+        const E = exposedTiles(occ, cols, rows, edges);
+        const S = new Set(); for (const i of E) S.add(occ[i]);
         let staged = false;
         for (const g of groups) {
           if (g.every((c) => c.cap === 0) || !g.every((c) => isFront(c))) continue;
           if (parked.length + g.length > bays) continue;
           for (const c of g) { removeCar(c); parked.push(c); }
-          staged = true; break;
+          staged = stagedAny = true; break;
         }
         if (staged) continue;
-        // else stage a solo front: prefer a REACHABLE one (fires next turn); if none,
-        // dig the DEEPEST column to reveal more. skill-miss → a random front instead.
         const fronts = [];
         for (let j = 0; j < perRow; j++) { const f = columns[j][0]; if (f && !f.grouped) fronts.push({ j, f }); }
-        if (fronts.length) {
-          const reach = fronts.filter((x) => x.f.cap > 0 && S.has(x.f.color));
-          let pick;
-          if (reach.length) pick = (rng() > skill) ? fronts[Math.floor(rng() * fronts.length)] : reach.reduce((a, b) => (gainOf(b.f.color, E) > gainOf(a.f.color, E) ? b : a));
-          else pick = (rng() > skill) ? fronts[Math.floor(rng() * fronts.length)] : fronts.reduce((a, b) => (columns[b.j].length > columns[a.j].length ? b : a));
-          parked.push(columns[pick.j].shift());
-          acted = true;
-        }
+        if (!fronts.length) break; // nothing left to stage
+        const reach = fronts.filter((x) => x.f.cap > 0 && S.has(x.f.color));
+        let pick;
+        if (reach.length) pick = (rng() > skill) ? fronts[Math.floor(rng() * fronts.length)] : reach.reduce((a, b) => (gainOf(b.f.color, E) > gainOf(a.f.color, E) ? b : a));
+        else pick = (rng() > skill) ? fronts[Math.floor(rng() * fronts.length)] : fronts.reduce((a, b) => (columns[b.j].length > columns[a.j].length ? b : a));
+        parked.push(columns[pick.j].shift());
+        stagedAny = true;
       }
-      if (!acted) break; // bays full & nothing reachable, or no diggable front → stuck (lose)
+
+      // GO PHASE: fixed-point collect. Every bay car collects all reachable tiles of its
+      // colour; repeat full passes until a pass collects nothing (peeling can chain).
+      let collectedAny = false;
+      for (;;) {
+        let acted = false;
+        for (const c of parked) {
+          if (c.cap <= 0) continue;
+          const before = c.cap;
+          doCollect(c); // recomputes reachability internally, grabs all it can right now
+          if (c.cap < before) { acted = collectedAny = true; }
+        }
+        if (!acted) break;
+      }
+      // Emptied cars leave the bays; a grouped car leaves only when its WHOLE group is empty.
+      for (const c of [...parked]) {
+        if (c.cap !== 0) continue;
+        if (c.grouped) { const g = groups.find((gg) => gg.includes(c)); if (g && g.every((m) => m.cap === 0)) removeCar(c); }
+        else removeCar(c);
+      }
+
+      // Couldn't stage anything new AND GO collected nothing → the board can't progress.
+      if (!stagedAny && !collectedAny) break;
     }
     return { win: remaining === 0, peak };
   }

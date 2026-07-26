@@ -585,6 +585,55 @@ CHỖ CHỈNH: makeTwoLayerPicture / makeHidden / pickGroups(early+restore) / pl
   autoRelaunchBays/checkTrayStuck/BURIED_TINT); level.ts (lanes/tray). set-l1.mjs sửa l1.
 
 ────────────────────────────────────────────────────────────────────────────
+18) TRAY → "CHẠY THEO LÔ" (BATCH) — REDESIGN (2026-07-26)
+────────────────────────────────────────────────────────────────────────────
+Ý TƯỞNG (user): 1 LÔ xe đi đón slime, KHÔNG phải từng xe tự phát như cũ.
+• BỎ auto-fire. Xe stage vào khay (1→5) rồi NẰM YÊN. Có 1 NÚT "GO" (placeholder,
+  design sau) → phóng CẢ LÔ (mọi xe trong khay) ra ray cùng lúc.
+• CHAIN: lô vòng ray như 1 đội, CỨ CHẠY TIẾP chừng nào CÒN ≥1 xe trong lô ăn được
+  (xe A bóc vòng ngoài → lộ màu xe B → B ăn) — tới ĐIỂM BẤT ĐỘNG (không xe nào
+  active ăn được nữa) thì cả lô dừng.
+• Kết thúc lô: xe HẾT GHẾ rời sân; xe CÒN KẸT VỀ ĐÚNG KHAY reserve (chờ lô sau).
+• KHOÁ khi chạy: khay đóng, xe dưới không nhảy lên, nút GO tắt (batchRunning).
+• THUA: 5 khay đầy xe kẹt + không stage thêm được + GO không ăn được gì (deadlock).
+• ⭐ TẤT ĐỊNH HƠN cũ (kết quả 1 lần GO = điểm bất động, thứ tự trong lô vô can) →
+  ĐO WINRATE VẪN CHÍNH XÁC.
+CỜ ROLLBACK: TRAY_BATCH=true (GameScene.ts) — false = về auto-fire tray cũ (mục 17).
+CHỖ CHỈNH: GameScene.ts (TRAY_BATCH, buildGoButton/positionGoButton/updateGoButton,
+  launchBatch, canKeepCircling[batch], endBatchIfDone, checkTrayStuck[batch], khoá
+  launchFromInventory, updateSlotWarning). build-levels.mjs playAverage nhánh tray =
+  vòng STAGE(fill khay skill-gated) → GO(fixed-point collect mọi xe khay) → lặp.
+• ĐÃ VERIFY: L156 stage→GO→cả lô 4 xe ra ray (signal 4/5), khay khoá, GO tắt, không
+  lỗi console.
+• 🐛 FIX (2026-07-26): xe rớt LẺ khỏi lô giữa chừng về khay (ảnh user: blue kẹt khay
+  khi 2 xe khác chạy). Gốc: canKeepCircling xét ảnh-chụp-tức-thời → 1 xe chạm cuối
+  vòng đúng lúc tạm-thời-không-với-tới thì đỗ sớm. SỬA: xe trong lô KHÔNG đỗ lẻ nữa —
+  canKeepCircling batch = luôn chạy khi batchRunning; cả lô đỗ ĐỒNG LOẠT khi STALE
+  (không xe nào bắn suốt BATCH_END_GRACE=1600ms) qua endBatchStaleCheck + batchLastProgress
+  (reset trong tryShoot). Verify: 2 xe blocked chạy chung tới stale rồi cùng về khay.
+• 🐛 FIX booster ADD (2026-07-26): (1) nút GO NHẢY SANG TRÁI khi Add làm khay rộng
+  (6 khay ~ kín ngang, hết lề) → đổi positionGoButton về TOẠ ĐỘ CỐ ĐỊNH (góc phải,
+  PHÍA TRÊN hàng khay, trong dải xanh board↔khay), không theo hình học khay nữa.
+  (2) XE CUỐI xuất phát chậm nhiều: MAX_ON_TRACK=5 chặn, khay>5 thì xe thứ 6 chờ ghế
+  (mà xe batch không rời tới hết lô) → xe 6 chỉ chạy SAU khi 5 xe đầu xong. SỬA:
+  onTrackCap()=max(5,slotCount) trong batch → cả lô lên ray cùng lúc (trySpawn + signal).
+• 🐛 FIX stage đè ô + dồn khay (2026-07-26): xe stage NHẢY ĐÈ ô đang có xe (do tính
+  start=SỐ-ô-có-xe rồi đặt vào ô đó, sai khi có GAP giữa) → đổi parkIntoSlot theo
+  findIndex(ô-trống-đầu). VÀ khi lô VỀ khay: dồn xe SÁT TRÁI (endBatchStaleCheck park
+  left-packed 0,1,2… bỏ traySlot cũ) → khay luôn liền mạch, không gap → hết đè.
+• ✅ RÀ SOÁT + XE ĐÔI/NHÓM: test nhóm-3 L156 (14/43/20) — stage/launch/return đều
+  ADJACENT đúng thứ tự; member consecutive trong active nên luôn packed cạnh nhau;
+  nhóm chỉ rời khi mọi member đầy nên không có "nửa nhóm". Không bug. (Ảnh chụp giữa
+  lúc glide track→khay ~950ms trông "lơ lửng nối dây" nhưng về đúng ô — chỉ là animation.)
+• ✅ RE-TUNE XONG (2026-07-26): rebuild cả 30 level tray L156-185 (--only, config
+  winratedesign1.csv) → tuner tự sweep lại SỐ XE theo bot batch mới → 24/30 sát target
+  ngay. 6 outlier (L162 unsolvable, L167/173 quá dễ, L169/178/180 quá khó) sửa bằng
+  set-l1.mjs (l1 per-level: tăng=dễ, giảm=khó) rồi rebuild → 30/30 SOLVABLE, winrate
+  @0.9: super~0-18%, hard~15-40%, medium~28-40% (đa số sát target). L167(40)/L169(15)
+  còn lệch nhẹ do l1 nhảy bậc "lượng tử" — trong ngưỡng nhiễu bot; playtest = thước đo cuối.
+  ⚠ Bước tune l1 nằm trong CSV Manythings/Design winrate/winratedesign1.csv (build input).
+
+────────────────────────────────────────────────────────────────────────────
 GHI CHÚ CHUNG
 ────────────────────────────────────────────────────────────────────────────
 • Stack: Phaser 3 + TypeScript + Vite. Chạy web; sau đóng gói APK bằng Capacitor.

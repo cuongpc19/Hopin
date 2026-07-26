@@ -113,6 +113,21 @@ const MAX_ON_TRACK = 5; // hard cap on cars travelling the ray at the same time
 // broke level-difficulty design — reverted to manual. Flip back to true to re-enable
 // (all the auto-drive code below stays behind this flag). See [[auto-drive-mechanic]].
 const AUTO_CIRCLE = false;
+// TRAY BATCH mode (user 2026-07-26): the redesign of TRAY levels. Instead of each bay car
+// auto-firing the instant its colour is reachable, staged cars sit STILL in the bays; the
+// player presses a GO button to launch the WHOLE batch (every bay car) at once. The batch
+// circles the ray as ONE squad — it keeps looping as long as ANY member can still collect
+// (so one car peeling an outer ring surfaces a teammate's colour → the batch chains). When
+// no member can collect anymore (fixed point), emptied cars leave and still-blocked cars
+// return to their reserved bays for the next batch. Bays are LOCKED while a batch runs.
+// This is MORE deterministic than the old auto-fire tray → an accurate win-rate gauge.
+// Set false to roll back to the old auto-fire tray (autoRelaunchBays handles that path).
+const TRAY_BATCH = true;
+// TRAY_BATCH: how long the whole batch must go with ZERO collection (no member firing)
+// before it's judged "done" and all still-blocked cars park back to their bays together.
+// Long enough to bridge a productive car's travel gap between slime clusters (so it doesn't
+// end mid-run), short enough that the end-of-batch idle circling stays brief.
+const BATCH_END_GRACE = 1600;
 // A parked car that becomes free to hop back onto the ray first BOBS in place for
 // this long (a visible "get ready, I'm about to jump out" tell) before it launches,
 // so the auto-relaunch never surprises the player. Set small to make it snappier.
@@ -225,6 +240,14 @@ export class GameScene extends Phaser.Scene {
   // empty bay (never straight to the ray), and bay cars AUTO-launch when their colour is
   // reachable (no manual relaunch / juggle). Set per level in create().
   private trayMode = false;
+  // TRAY_BATCH: a batch (the whole set of bay cars) is currently out circling the ray.
+  // While true the bays are locked (no staging) and the GO button is disabled; flips back
+  // to false once every batch car has left the ray (leaving or returning to its bay).
+  private batchRunning = false;
+  private goBtn?: Phaser.GameObjects.Container; // the "GO" button that launches the batch
+  private goBtnBg?: Phaser.GameObjects.Image | Phaser.GameObjects.Rectangle;
+  private goBtnEnabled = false; // cached enabled state so we only restyle on change
+  private batchLastProgress = 0; // this.time.now of the last collection by any batch car (stale-timer)
   private audioCtx?: AudioContext; // lazily created for synthesized SFX (pop)
   private slotXs: number[] = [];
   private slotY = 0;
@@ -1241,6 +1264,51 @@ export class GameScene extends Phaser.Scene {
   private buildSlots(topY: number) {
     this.slotY = topY + SLOT_SIZE / 2;
     this.layoutSlots();
+    if (this.trayMode && TRAY_BATCH) this.buildGoButton();
+  }
+
+  // TRAY_BATCH: the GO button. Placeholder styling (user: "cần/button design sau"). The
+  // bottom cluster is packed tight (bays almost touch the inventory), so it sits in the
+  // RIGHT margin beside the bay row where there's guaranteed free space. Tapping launches
+  // the whole batch. positionGoButton() keeps it beside the rightmost bay if the row grows.
+  private buildGoButton() {
+    const r = 24;
+    const bg = this.add.circle(0, 0, r, 0x2ecc71, 1).setStrokeStyle(3, 0x1e8a4c, 1);
+    bg.setInteractive({ useHandCursor: true });
+    const label = this.add
+      .text(0, 0, "GO", { fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "18px", color: "#ffffff" })
+      .setOrigin(0.5);
+    const btn = this.add.container(0, this.slotY, [bg, label]).setDepth(130);
+    bg.on("pointerdown", () => this.launchBatch());
+    this.goBtn = btn;
+    this.goBtnBg = bg as unknown as Phaser.GameObjects.Rectangle;
+    this.goBtnEnabled = true;
+    this.positionGoButton();
+    this.updateGoButton();
+  }
+
+  // Park the GO button just ABOVE the right end of the bay row, in the open strip between
+  // the board and the bays. Anchored to fixed screen coords (NOT the bay geometry) so it
+  // never shifts when the "Add" booster widens the row — with 6 bays the row spans almost
+  // the full width and leaves no side margin, which used to make GO jump to the left.
+  private positionGoButton() {
+    if (!this.goBtn) return;
+    const art = Math.round(SLOT_SIZE * 1.5);
+    this.goBtn.setPosition(GAME_W - 40, this.slotY - art / 2 - 30);
+  }
+
+  // Enable GO when the batch isn't running and at least one car sits in the bays; grey it
+  // out (and ignore taps) otherwise. Cheap to call every frame — only restyles on change.
+  private updateGoButton() {
+    if (!this.goBtn || !this.goBtnBg) return;
+    const hasCar = this.slots.some((s) => s !== null);
+    const on = !this.batchRunning && hasCar && !this.won && !this.lost && !this.handMode && !this.magnetMode && !this.tutPaused;
+    if (on === this.goBtnEnabled) return;
+    this.goBtnEnabled = on;
+    const bg = this.goBtnBg as Phaser.GameObjects.Rectangle;
+    bg.setFillStyle(on ? 0x2ecc71 : 0x9aa0a6, 1);
+    bg.setStrokeStyle(3, on ? 0x1e8a4c : 0x6b6f73, 1);
+    this.goBtn.setAlpha(on ? 1 : 0.6);
   }
 
   // (Re)position the waiting bays for the current slotCount, creating any new tile
@@ -1282,12 +1350,19 @@ export class GameScene extends Phaser.Scene {
         });
       }
     }
+    if (this.goBtn) this.positionGoButton(); // keep GO beside the (possibly grown) bay row
   }
 
   // Flash the waiting bays red when they're ALL full — a warning that the next car
   // forced to park will overflow the queue and lose the level. Call after any change
   // to which bays are occupied.
   private updateSlotWarning() {
+    // TRAY_BATCH: bays stay RESERVED (occupied) while the squad is out, but they LOOK empty
+    // — don't flash the "full" warning during a run, only once cars have settled back.
+    if (this.trayMode && TRAY_BATCH && this.batchRunning) {
+      if (this.slotWarnActive) this.stopSlotWarning();
+      return;
+    }
     const occ = this.slots.reduce((n, s) => n + (s ? 1 : 0), 0);
     const full = this.slotCount > 0 && occ >= this.slotCount;
     if (full && !this.slotWarnActive) this.startSlotWarning();
@@ -2843,18 +2918,23 @@ export class GameScene extends Phaser.Scene {
     // straight to the ray — the bay then auto-launches them when their colour is reachable
     // (see autoRelaunchBays). Needs a free bay per member; a group needs that many.
     if (this.trayMode) {
+      if (TRAY_BATCH && this.batchRunning) { this.smallNotice("Wait — the batch is out collecting!"); return; } // bays locked mid-run
       const freeBays = this.slots.reduce((n, s) => n + (s ? 0 : 1), 0);
       if (freeBays < group.length) { this.trackFullNotice(); return; }
       this.playPop();
-      const start = this.slots.reduce((n, s) => n + (s ? 1 : 0), 0); // left-packed → next slots
-      group.forEach((v, k) => {
+      group.forEach((v) => {
         const p = this.findInInventory(v)!;
         p.col.splice(p.r, 1);
         const hit = v.container.getData("hit") as Phaser.GameObjects.Rectangle;
         hit.disableInteractive();
         v.container.clearMask();
         this.revealBuried(v); // it's committed to a bay → flip any "?" face-up
-        this.parkIntoSlot(v, start + k);
+        // Stage into the FIRST EMPTY bay (parkIntoSlot marks it occupied), NOT a left-packed
+        // count — after a batch, emptied cars leave GAPS, so counting occupied bays could aim
+        // a new car straight onto one that's already parked (user bug: all cars piled onto
+        // the "20" bay). findIndex always lands each car in a genuinely free slot.
+        const si = this.slots.findIndex((s) => s === null);
+        if (si >= 0) this.parkIntoSlot(v, si);
       });
       this.layoutInventory(true);
       this.updateSlotWarning();
@@ -2920,6 +3000,36 @@ export class GameScene extends Phaser.Scene {
     this.updateSlotWarning(); // a bay just freed → clear the full-queue warning
   }
 
+  // TRAY_BATCH: launch the WHOLE batch — every car currently sitting in a bay darts out
+  // onto the ray at once. Each keeps its bay RESERVED (traySlot) so a still-blocked car
+  // returns to the same slot; emptied cars leave. The bays lock (batchRunning) until the
+  // last batch car is off the ray. The squad chains laps while any member can still eat
+  // (see canKeepCircling). GO is the only launch trigger in this mode — no auto-fire.
+  private launchBatch() {
+    if (!this.trayMode || !TRAY_BATCH) return;
+    if (this.won || this.lost || this.handMode || this.magnetMode || this.tutPaused) return;
+    if (this.batchRunning) return;
+    const cars: ChestView[] = [];
+    for (let i = 0; i < this.slots.length; i++) {
+      const v = this.slots[i];
+      if (v) cars.push(v);
+    }
+    if (cars.length === 0) return;
+    this.playPop();
+    this.batchRunning = true;
+    for (let i = 0; i < this.slots.length; i++) {
+      const v = this.slots[i];
+      if (!v) continue;
+      v.traySlot = i; // reserve this bay — the car returns here if still blocked
+      this.disarmBay(v); // clear any leftover telegraph
+      (v.container.getData("hit") as Phaser.GameObjects.Rectangle).disableInteractive();
+      this.pending.push(v); // trySpawn glides it onto the ray next frames
+    }
+    this.batchLastProgress = this.time.now; // start the stale-timer
+    this.updateGoButton();
+    if (this.tutStep === 3) { this.clearTutHint(); this.tutStep = 0; }
+  }
+
   // Synthesize a short "pop" via Web Audio (no audio asset needed).
   private playPop() {
     try {
@@ -2958,9 +3068,17 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  // TRAY_BATCH: the whole batch (every bay car) must be able to roll out together, so the
+  // ray cap rises to the bay count when the "Add" booster has grown it past 5 — otherwise a
+  // 6th staged car would sit stuck in its bay waiting for a seat (looked like "the last car
+  // launches much later"). Classic play keeps the hard 5-car cap.
+  private onTrackCap(): number {
+    return this.trayMode && TRAY_BATCH ? Math.max(MAX_ON_TRACK, this.slotCount) : MAX_ON_TRACK;
+  }
+
   private trySpawn() {
     if (this.pending.length === 0) return;
-    if (this.active.length >= MAX_ON_TRACK) return; // at most 5 cars on the ray at once
+    if (this.active.length >= this.onTrackCap()) return; // ray cap (5, or the bay count in batch mode)
     const head = this.pending[0];
     if (head.launchAt && this.time.now < head.launchAt) return; // still doing its launch hop
     const N = this.track.length;
@@ -2976,7 +3094,7 @@ export class GameScene extends Phaser.Scene {
         else break;
       }
     }
-    if (this.active.length + count > MAX_ON_TRACK) return;
+    if (this.active.length + count > this.onTrackCap()) return;
 
     // Target node for each member: member 0 leads (furthest along); the rest trail by
     // TWIN_SPAWN_GAP each. So a group occupies startIndex .. startIndex+(count-1)*GAP.
@@ -3061,10 +3179,11 @@ export class GameScene extends Phaser.Scene {
     if (AUTO_CIRCLE || this.trayMode) this.computeReachableColors(); // which colours can be shot right now
     this.trySpawn();
     this.autoRelaunchBays(); // parked cars self-relaunch when their colour is reachable again
+    if (this.trayMode && TRAY_BATCH) { this.endBatchStaleCheck(time); this.endBatchIfDone(); this.updateGoButton(); }
     if (this.trayMode) this.checkTrayStuck(); // one-way bays: all 5 blocked & idle → lose
 
     // Live "cars on the ray" count on the start signal.
-    if (this.signalCount) this.signalCount.setText(`${this.active.length}/${MAX_ON_TRACK}`);
+    if (this.signalCount) this.signalCount.setText(`${this.active.length}/${this.onTrackCap()}`);
 
     // Endgame speed-up: once the queue (zone 3) is empty, the in-play cars PICK
     // faster — a shorter cooldown PLUS grabbing every matching slime in sight each
@@ -3231,6 +3350,7 @@ export class GameScene extends Phaser.Scene {
     if (fired) {
       a.lastShot = time;
       a.approaching = false; // first slime grabbed → back to normal drive speed
+      if (this.batchRunning) this.batchLastProgress = time; // batch made progress → reset the stale-timer
     }
   }
 
@@ -3321,6 +3441,12 @@ export class GameScene extends Phaser.Scene {
   // A car keeps circling (instead of parking) while it can still collect. Linked cars
   // move as ONE unit, so the whole group keeps going if ANY member can still collect.
   private canKeepCircling(a: ActiveChest): boolean {
+    // TRAY_BATCH: the batch circles as ONE squad — NO member ever parks on its own at a
+    // lap-end (an instantaneous "nothing reachable right now" is a transient: a teammate
+    // mid-travel or a colour not yet peeled to the edge). The squad keeps looping until the
+    // batch is genuinely stale (no collection by ANY member for a grace window) and then
+    // ALL members park together (endBatchStaleCheck). So here: keep circling while running.
+    if (this.trayMode && TRAY_BATCH) return this.batchRunning;
     if (!AUTO_CIRCLE) return false;
     return this.liveGroup(a.view).some((m) => this.carCanCollect(m));
   }
@@ -3343,6 +3469,7 @@ export class GameScene extends Phaser.Scene {
   // The car doesn't jump out instantly: it first BOBS in place for a beat (armBay) so
   // the player can SEE it's about to relaunch, then it launches (see the telegraph const).
   private autoRelaunchBays() {
+    if (this.trayMode && TRAY_BATCH) return; // batch tray: cars fire only via the GO button, never auto
     if (!AUTO_CIRCLE && !this.trayMode) return;
     if (this.tutStep > 0 || this.handMode || this.magnetMode) {
       this.disarmAllBays(); // tutorial/booster takes over — don't leave a car bobbing
@@ -3383,12 +3510,57 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  // TRAY-mode lose: every bay is occupied, nothing is driving/entering the ray, no bay
-  // car's colour is reachable (so none will auto-launch) and none is armed → the board
-  // can never progress. That's the one-way-tray deadlock (you staged the wrong cars).
+  // TRAY_BATCH: end the run when the squad is STALE — no member has collected anything for
+  // BATCH_END_GRACE (so no more peeling is happening; the batch can't progress). Park every
+  // still-circling car back to its reserved bay TOGETHER (emptied ones already drove off),
+  // so a blocked car never drops out of the squad mid-run on a transient dead frame.
+  private endBatchStaleCheck(time: number) {
+    if (!this.batchRunning) return;
+    if (this.pending.length > 0) return; // squad still rolling onto the ray
+    if (this.active.length === 0) return; // endBatchIfDone will close it out
+    if (this.active.some((a) => a.entering)) return; // a member still gliding on
+    if (this.active.some((a) => this.groupInFlight(a.view) > 0)) return; // runners still boarding
+    if (time - this.batchLastProgress < BATCH_END_GRACE) return; // collected recently → keep going
+    // Batch done: return the whole squad to the bays LEFT-PACKED (adjacent, no gaps) — the
+    // emptied cars already drove off, so the still-blocked ones queue up neatly from slot 0
+    // for the next GO (user: "khi batch về hàng đợi thì các xe xếp cạnh nhau"). Packing here
+    // also means the bays never carry mid-row gaps, so staging can't collide onto a taken bay.
+    const squad = this.active.map((a) => a.view);
+    for (const a of [...this.active]) { this.removeActive(a); a.view.waiting = false; }
+    for (let i = 0; i < this.slots.length; i++) this.slots[i] = null; // drop stale reservations
+    squad.forEach((v, i) => { v.traySlot = i; this.parkIntoSlot(v, i); });
+  }
+
+  // TRAY_BATCH: the batch is finished once every one of its cars is off the ray — the
+  // blocked ones have returned to their bays and the emptied ones have driven away. Flip
+  // the lock off so the player can stage more and press GO again.
+  private endBatchIfDone() {
+    if (!this.batchRunning) return;
+    if (this.active.length > 0 || this.pending.length > 0) return; // squad still moving
+    this.batchRunning = false;
+    this.updateSlotWarning();
+    this.updateGoButton();
+  }
+
+  // TRAY-mode lose. Batch mode: the bays are full of blocked cars, nothing is out on the
+  // ray, there's nothing new to stage (no free bay / empty queue) and pressing GO would
+  // collect nothing (no bay car's colour is reachable) → deadlock. Auto mode: original
+  // check (no bay car reachable/armed → none will ever auto-launch).
   private checkTrayStuck() {
     if (this.won || this.lost || this.tutPaused) return;
     if (this.active.length > 0 || this.pending.length > 0) return; // cars still in motion
+    if (this.trayMode && TRAY_BATCH) {
+      if (this.batchRunning) return; // squad still working
+      // The player can still change the board by staging a fresh queue car (needs both a
+      // free bay AND a car left in the queue). If so, not stuck.
+      const freeBay = this.slots.some((s) => s === null);
+      if (freeBay && !this.queueEmpty()) return;
+      if (this.slots.every((s) => s === null)) return; // no cars at all (pre-win frame)
+      // Otherwise GO is the only lever: if any bay car's colour is reachable, GO progresses.
+      for (const v of this.slots) { if (v && this.carCanCollect(v)) return; }
+      this.lose();
+      return;
+    }
     if (this.slots.some((s) => s === null)) return; // a free bay → the player can still act
     for (const v of this.slots) {
       if (!v) continue;
