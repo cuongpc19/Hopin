@@ -31,7 +31,7 @@ const DRY = process.argv.includes("--dry");
 // binary/untunable), so the win-rate tester models manual play by DEFAULT. Set AUTODRIVE=1
 // to measure the auto-drive variant. See playAverage()'s autoDrive branch.
 const AUTO_DRIVE = process.env.AUTODRIVE === "1";
-const N_LEVELS = 185; // …+ 60 two-layer/tray pack L126-185 (30 Non-Tray + 30 Tray, user 2026-07-25)
+const N_LEVELS = 330; // …+ 15 rock-wall L301-315 + 15 no-wall 25×25 same-target L316-330 (user 2026-07-26)
 // KID pack L200-300 (user 2026-07-24): easy levels for the user's child. The L2..L8
 // difficulty cycle repeats (targets/skill from the CSV), subjects at max size, borders
 // only in cool greens/blues (dịu mắt), twins everywhere + a triple every 10th level,
@@ -391,7 +391,7 @@ function exposedTiles(occ, cols, rows, edges) {
         if (br < 0 || br >= rows || bc < 0 || bc >= cols) rc = 1;      // ray enters from the edge here
         else { const bi = br * cols + bc; rc = occ[bi] < 0 ? reach[bi] : 0; } // blocked by an occupied cell
         reach[i] = rc;
-        if (rc && occ[i] >= 0) S.add(i); // first occupied along this ray → exposed
+        if (rc && isColor(occ[i])) S.add(i); // first COLLECTABLE cell along this ray → exposed (a rock still blocks the ray via reach[] but is never a target)
       }
     }
   }
@@ -401,7 +401,7 @@ function exposedTiles(occ, cols, rows, edges) {
 function peelLayers(board, cols, rows, edges) {
   const occ = board.slice();
   const layer = new Array(board.length).fill(-1);
-  let L = 0, remaining = occ.reduce((a, v) => a + (v >= 0 ? 1 : 0), 0), guard = 0;
+  let L = 0, remaining = occ.reduce((a, v) => a + (isColor(v) ? 1 : 0), 0), guard = 0;
   while (remaining > 0 && guard++ < board.length + 5) {
     const E = exposedTiles(occ, cols, rows, edges);
     if (E.size === 0) break;
@@ -414,7 +414,7 @@ function peelLayers(board, cols, rows, edges) {
 function colorOuterness(board, layer) {
   const sum = new Map(), cnt = new Map();
   for (let i = 0; i < board.length; i++) {
-    const v = board[i]; if (v < 0) continue;
+    const v = board[i]; if (!isColor(v)) continue; // skip obstacles (rock walls)
     sum.set(v, (sum.get(v) || 0) + layer[i]); cnt.set(v, (cnt.get(v) || 0) + 1);
   }
   const out = new Map();
@@ -428,7 +428,7 @@ function solvable(board, cols, rows, order, track, bays = 5, perRow = LANES, lay
   const singlePass = track === "line" || track === "u" || track === "arch";
   const occ = board.slice();
   const lay = layer2 ? layer2.slice() : null; // 2-layer bottoms revealed on collect
-  let remaining = occ.reduce((a, v) => a + (v >= 0 ? 1 : 0), 0) + (lay ? lay.reduce((a, v) => a + (v >= 0 ? 1 : 0), 0) : 0);
+  let remaining = occ.reduce((a, v) => a + (isColor(v) ? 1 : 0), 0) + (lay ? lay.reduce((a, v) => a + (v >= 0 ? 1 : 0), 0) : 0);
   const clearCell = (i) => { if (lay && lay[i] >= 0) { occ[i] = lay[i]; lay[i] = -1; } else occ[i] = -1; remaining--; };
   const columns = Array.from({ length: perRow }, () => []);
   order.forEach((c, i) => columns[i % perRow].push({ color: c.color, cap: c.count }));
@@ -481,7 +481,7 @@ function solvablePairs(board, cols, rows, order, track, groups, bays = 5, perRow
   const singlePass = track === "line" || track === "u" || track === "arch";
   const occ = board.slice();
   const lay = layer2 ? layer2.slice() : null; // 2-layer bottoms revealed on collect
-  let remaining = occ.reduce((a, v) => a + (v >= 0 ? 1 : 0), 0) + (lay ? lay.reduce((a, v) => a + (v >= 0 ? 1 : 0), 0) : 0);
+  let remaining = occ.reduce((a, v) => a + (isColor(v) ? 1 : 0), 0) + (lay ? lay.reduce((a, v) => a + (v >= 0 ? 1 : 0), 0) : 0);
   const clearCell = (i) => { if (lay && lay[i] >= 0) { occ[i] = lay[i]; lay[i] = -1; } else occ[i] = -1; remaining--; };
   const cars = order.map((c) => ({ color: c.color, cap: c.count, grouped: false }));
   const groupCars = (groups || []).map((idxs) => { const g = idxs.map((i) => cars[i]); g.forEach((c) => (c.grouped = true)); return g; });
@@ -673,7 +673,7 @@ function playAverage(board, cols, rows, order, track, opts) {
   const singlePass = track === "line" || track === "u" || track === "arch";
   const occ = board.slice();
   const lay = opts.layer2 ? opts.layer2.slice() : null; // 2-layer: bottom colour per cell (-1 none)
-  let remaining = occ.reduce((a, v) => a + (v >= 0 ? 1 : 0), 0) + (lay ? lay.reduce((a, v) => a + (v >= 0 ? 1 : 0), 0) : 0);
+  let remaining = occ.reduce((a, v) => a + (isColor(v) ? 1 : 0), 0) + (lay ? lay.reduce((a, v) => a + (v >= 0 ? 1 : 0), 0) : 0);
   const clearCell = (i) => { if (lay && lay[i] >= 0) { occ[i] = lay[i]; lay[i] = -1; } else occ[i] = -1; remaining--; };
   // Linked car GROUPS (2=twin, 3=triple, …): chests sharing a pairId launch / drive /
   // park / leave together. `grouped` marks a car as a group member (can't act alone).
@@ -1065,6 +1065,26 @@ function makeTwoLayerPicture(full, topY, seed) {
   return { board: top, layer2, count, counts };
 }
 
+// ---- EDGE ROCK WALLS (user 2026-07-26) --------------------------------------
+// Overwrite the outer row(s)/col(s) of the given edges with HARD ROCK (code 90), so the
+// square track's rays from those edges hit rock and stop — the board plays like a U /
+// arch / line (narrow frontier → few colours exposed at once → LOGIC over fast fingers,
+// and fewer live slimes → not a slog). `edges` = a string with any of T B L R. Mutates
+// `board`. Returns how many cells became rock. `thick` walls (default 1) block harder.
+function placeWalls(board, cols, rows, edges, thick = 1) {
+  if (!edges) return 0;
+  const E = edges.toUpperCase();
+  let n = 0;
+  const rock = (r, c) => { if (r >= 0 && r < rows && c >= 0 && c < cols) { const i = r * cols + c; if (board[i] !== OBST) { board[i] = OBST; n++; } } };
+  for (let t = 0; t < thick; t++) {
+    if (E.includes("T")) for (let c = 0; c < cols; c++) rock(t, c);
+    if (E.includes("B")) for (let c = 0; c < cols; c++) rock(rows - 1 - t, c);
+    if (E.includes("L")) for (let r = 0; r < rows; r++) rock(r, t);
+    if (E.includes("R")) for (let r = 0; r < rows; r++) rock(r, cols - 1 - t);
+  }
+  return n;
+}
+
 // ---- hidden "?" slime generation --------------------------------------------
 // Pick interior cells (ALL 4 neighbours are slime) to start hidden: hidden[i] = the
 // cell's real colour (board keeps the colour too — solver unaffected; hiding is a
@@ -1114,7 +1134,7 @@ function makeHidden(board, cols, rows, frac, seed) {
 // capacity covers BOTH layers.
 function allocateCars(board, N, extraCounts) {
   const counts = new Map();
-  for (const id of board) if (id >= 0) counts.set(id, (counts.get(id) || 0) + 1);
+  for (const id of board) if (isColor(id)) counts.set(id, (counts.get(id) || 0) + 1);
   if (extraCounts) for (const [c, n] of extraCounts) counts.set(c, (counts.get(c) || 0) + n);
   const colorsPresent = [...counts.keys()].sort((a, b) => a - b);
   if (colorsPresent.length === 0) return [];
@@ -1254,7 +1274,12 @@ const TRACKS = {
 // Subject fills fewer/more cells by scaling it to a smaller/larger sub-grid
 // (maxSide). Targets rise L1→L10; L1-5 are hard-capped at 100 slimes.
 const EARLY_TARGET = [45, 60, 74, 86, 97, 125, 160, 195, 225, 260]; // L1..L10
-const slimeCount = (board) => board.reduce((a, v) => a + (v >= 0 ? 1 : 0), 0);
+// OBSTACLES: board codes >= OBST are hard-rock WALLS (never collected, never counted,
+// permanently block rays) — used to wall off board edges into U / arch / line frontiers
+// (user 2026-07-26). Only a COLOUR cell is 0..OBST-1.
+const OBST = 90;
+const isColor = (v) => v >= 0 && v < OBST;
+const slimeCount = (board) => board.reduce((a, v) => a + (isColor(v) ? 1 : 0), 0);
 
 function buildEarly(src, IW, IH, opts, n, prevCount) {
   const target = EARLY_TARGET[n - 1];
@@ -1275,15 +1300,15 @@ function buildEarly(src, IW, IH, opts, n, prevCount) {
 }
 
 // ---- difficulty tuning for the 100-level build ------------------------------
-const distinctColors = (board) => new Set(board.filter((v) => v >= 0)).size;
+const distinctColors = (board) => new Set(board.filter(isColor)).size;
 // Scatter fresh palette colours in until the board has ~targetColors distinct
 // colours (each new colour ~6% of tiles) — the knob for making a level harder.
 function ensureColors(board, targetColors, seed) {
   const b = board.slice();
-  const idxs = []; for (let i = 0; i < b.length; i++) if (b[i] >= 0) idxs.push(i);
+  const idxs = []; for (let i = 0; i < b.length; i++) if (isColor(b[i])) idxs.push(i); // skip obstacles
   if (!idxs.length) return b;
   const rng = makeRng(seed);
-  const present = new Set(b.filter((v) => v >= 0));
+  const present = new Set(b.filter(isColor));
   const avail = BRIGHT_IDS.filter((id) => !present.has(id)); // bright only — no dark colours
   let ai = 0;
   while (present.size < targetColors && ai < avail.length) {
@@ -1300,7 +1325,7 @@ function ensureColors(board, targetColors, seed) {
 function reduceColors(board, k, seed) {
   const b = board.slice();
   const rgbD = (a, c) => (a[0] - c[0]) ** 2 + (a[1] - c[1]) ** 2 + (a[2] - c[2]) ** 2;
-  const present = () => { const s = new Set(); for (const v of b) if (v >= 0) s.add(v); return [...s]; };
+  const present = () => { const s = new Set(); for (const v of b) if (isColor(v)) s.add(v); return [...s]; }; // skip obstacle codes (rock walls)
   let cols = present();
   while (cols.length > Math.max(1, k)) {
     const freq = new Map(cols.map((c) => [c, 0]));
@@ -1492,7 +1517,7 @@ async function boardToPng(board, file, scale = 10) {
   const S = BOARD_SIZE * scale, buf = Buffer.alloc(S * S * 4);
   for (let r = 0; r < BOARD_SIZE; r++) for (let c = 0; c < BOARD_SIZE; c++) {
     const v = board[r * BOARD_SIZE + c];
-    const col = v >= 0 ? baseRgb[v] : [34, 34, 40];
+    const col = v >= OBST ? [110, 105, 100] : v >= 0 ? baseRgb[v] : [34, 34, 40]; // rock walls → grey
     for (let dy = 0; dy < scale; dy++) for (let dx = 0; dx < scale; dx++) {
       const x = c * scale + dx, y = r * scale + dy, i = (y * S + x) * 4;
       buf[i] = col[0]; buf[i + 1] = col[1]; buf[i + 2] = col[2]; buf[i + 3] = 255;
@@ -1794,9 +1819,9 @@ function loadConfig(p) {
     //   cars buried face-down ("?") · l1 = TOP-layer colour count Y for the clean
     //   two-layer split (blank/0 = no split; hidden bottom carries X−Y colours) ·
     //   tray = 1 → one-way TRAY mode (bays fill 1→5, no pull-out), 0/blank = classic.
-    const [lvl, , target, maxmau, maxxe, minxe, xedoi, track, maxslim, , , skill, , , size, lanes, bury, l1, tray, img] = cols;
+    const [lvl, , target, maxmau, maxxe, minxe, xedoi, track, maxslim, , , skill, , , size, lanes, bury, l1, tray, img, walls] = cols;
     const n = parseInt(lvl, 10); if (!n) continue; // skips the header row
-    map.set(n, { target: num(target), colors: num(maxmau), maxCars: num(maxxe), minCars: num(minxe), twins: num(xedoi), track: (track && track.toLowerCase() !== "auto") ? track : null, maxSlime: num(maxslim), skill: num(skill), size: num(size), lanes: num(lanes), bury: num(bury), l1: num(l1), tray: (tray != null && String(tray).trim() === "1") ? 1 : 0, img: (img && img.trim()) ? img.trim() : null });
+    map.set(n, { target: num(target), colors: num(maxmau), maxCars: num(maxxe), minCars: num(minxe), twins: num(xedoi), track: (track && track.toLowerCase() !== "auto") ? track : null, maxSlime: num(maxslim), skill: num(skill), size: num(size), lanes: num(lanes), bury: num(bury), l1: num(l1), tray: (tray != null && String(tray).trim() === "1") ? 1 : 0, img: (img && img.trim()) ? img.trim() : null, walls: (walls && /[TBLRtblr]/.test(walls)) ? walls.trim().toUpperCase() : null });
   }
   console.log(`config: ${map.size} levels from ${path.relative(ROOT, p)}`);
   return map;
@@ -1941,6 +1966,13 @@ for (const n of LEVEL_NUMS) {
   // (CSV "l1" or env L1COLORS) and it's below the picture's X colours, split into a
   // Y-colour clean TOP + an (X−Y)-colour hidden BOTTOM (the subject's detail). Difficulty
   // then lives in the hidden layer, so the visible surface can stay few-colour & pretty.
+  // EDGE ROCK WALLS (user 2026-07-26): wall off some board edges (CSV "walls" col, e.g.
+  // T / TLR / TB, or env WALLS) into a U / arch / line frontier — narrow frontier = LOGIC
+  // over fast fingers, and fewer live slimes = not a slog. Placed BEFORE the two-layer
+  // split (rock is excluded from it) and BEFORE tuning so win-rate/solver see the frontier.
+  const wallEdges = process.env.WALLS != null ? process.env.WALLS : cfg.walls;
+  const walledN = (picture && wallEdges) ? placeWalls(board, BOARD_SIZE, BOARD_SIZE, wallEdges, Number(process.env.WALLTHICK) || 1) : 0;
+
   let layer2Pre = null;
   const l1y = process.env.L1COLORS != null ? Number(process.env.L1COLORS) : cfg.l1;
   if (picture && l1y != null && l1y >= 2 && l1y < distinctColors(board)) {

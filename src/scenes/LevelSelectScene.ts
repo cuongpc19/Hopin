@@ -12,7 +12,7 @@ import {
   type EventReward,
 } from "../game/cloverEvent";
 
-const LEVEL_COUNT = 300; // how many levels the map shows — covers the kid pack at L200-300
+const LEVEL_COUNT = 330; // kid pack L200-300 + rock-wall L301-315 + no-wall logic L316-330
 const SPACING = 104; // vertical gap between level nodes
 const BASE_R = 34; // base hex radius (harder tiers are bigger)
 
