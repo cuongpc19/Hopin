@@ -723,15 +723,25 @@ RULE 4 — NỀN CỦA "TRANH" (đừng để mảng TRẮNG ĐỤC):
   ⚠ getLevel() copy field TAY → field mới PHẢI thêm vào src/game/level.ts (đã thêm
     lightBoard); quên là cờ bị rớt, đổi JSON không có tác dụng.
 
-• TỰ ĐỘNG CHỌN NỀN THEO "VIỀN NGOÀI" (2026-07-26, user A+B):
-  - VIỀN NGOÀI TỐI → NỀN SÁNG: nếu rìa chủ thể (ô giáp nền/mép) đa số TỐI (luminance
-    < 95, tỉ lệ ≥ 45%) → viền chìm trên board tối → builder tự fill nền SÁNG (id 8/9/
-    14/15/17, chọn cái tương phản nhất) + set lightBoard. Chủ thể sáng → giữ nền tối
-    id 12 (float). Hàm choosePictureTheme() trong build-levels.mjs; logic y hệt inline
-    trong build-one.mjs. PIC_BG/BG_ID vẫn override.
-  - AUDIT LEVEL CŨ: scripts/audit-dark-outline.mjs (--apply). Rà designed.json, tìm
-    level tranh có viền tối trên nền tối, RELABEL 1:1 màu nền tối → màu sáng chưa dùng
-    (winrate GIỮ NGUYÊN — đã kiểm before==after) + set lightBoard. Đã fix L5/8/9/18/40.
+• ⭐ RULE MỚI THAY THẾ (2026-07-26, user): BOARD LUÔN CARO TỐI + NỀN TRANH SÁNG.
+  Bỏ hẳn cơ chế lightBoard/tự-chọn-board-sáng ở trên. Thay bằng:
+  - BOARD MAT: LUÔN caro tối (navy 0x2b2f4a xen 0x323858) — không còn board sáng.
+    (lightBoard không set nữa; field bị bỏ khỏi mọi level trong designed.json.)
+  - NỀN TRANH (bg fill) = 1 MÀU SÁNG (mặc định XANH DA TRỜI id15). Nếu chủ thể ĐÃ
+    dùng id15 → chọn màu sáng khác KHÔNG trùng (ưu tiên teal 4 / blue 5 / peach 17 /
+    yellow 2…, danh sách BRIGHT_BG_PREF). Chọn màu né chủ thể nên KHÔNG bao giờ gộp
+    → chủ thể (kể cả chủ thể TỐI như chim cánh cụt) nổi trên panel sáng thay vì chìm.
+  - Vì sao viền đen hết chìm: trước để chủ thể "float" trên board tối → viền đen id10/
+    12 lẫn vào navy. Nay chủ thể nằm trên PANEL SÁNG → tối trên sáng luôn rõ nét.
+  - CHỖ CHỈNH BUILD: choosePictureTheme() trong build-levels.mjs (đã rút gọn: luôn
+    lightBoard=false, bgId = màu sáng đầu tiên trong BRIGHT_BG_PREF mà chủ thể chưa
+    dùng). PIC_BG=<id> vẫn override thủ công.
+  - MIGRATE 45 LEVEL CŨ: scripts/migrate-bright-bg.mjs — dò bgId mỗi level (mode viền
+    bbox), RELABEL 1:1 bgId → màu sáng chưa dùng trên board+layer2+hidden+chests, bỏ
+    lightBoard. Đổi tên 1 lớp màu song ánh → winrate/độ khó GIỮ NGUYÊN TUYỆT ĐỐI.
+    Đã chạy cho L1-45 (đa số → 15; L17/20/21/40→5, L6/27/35/37→17, L23→4).
+  - (LỊCH SỬ, đã bỏ) Cơ chế cũ "viền tối→nền sáng+lightBoard" + audit-dark-outline.mjs
+    chỉ còn để tham khảo; rule caro-tối/nền-sáng ở trên thay thế toàn bộ.
 
 CHỌN ART CHO LEVEL TRANH (để hợp board tối):
 • Chủ thể MÀU SÁNG, ít màu, tách nền rõ, silhouette dễ nhận = tốt.

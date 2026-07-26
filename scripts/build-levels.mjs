@@ -288,34 +288,19 @@ let _picLightBoard = false;
 // legacy light-board auto-contrast.
 const _lum = (id) => { const c = baseRgb[id]; return 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]; };
 const DARK_LUM = 95; // below this a tile reads as "dark" (id 12/10/13/18…)
+// Board mat is ALWAYS dark caro now (user rule 2026-07-26). The picture BACKGROUND
+// FILL is a BRIGHT panel colour — sky-blue by default — chosen distinct from every
+// subject colour so it never merges with it and the subject (even a dark one) pops on
+// a light panel instead of vanishing into the dark board. `lightBoard` is never set.
+// Bright bg preference: sky-blue first, then other clearly-bright hues (no dark ids).
+const BRIGHT_BG_PREF = [15, 4, 5, 17, 2, 1, 3, 7, 8, 6, 0, 14];
 function choosePictureTheme(board, size) {
-  const used = [...new Set(board.filter((v) => v >= 0))];
-  const usedRgb = used.map((id) => baseRgb[id]);
-  const mostDistinct = (cands) => {
-    let best = cands[0], bd = -1;
-    for (const id of cands) { let mn = Infinity; for (const c of usedRgb) { const d = dist2(baseRgb[id], c); if (d < mn) mn = d; } if (mn > bd) { bd = mn; best = id; } }
-    return best;
-  };
+  const used = new Set(board.filter((v) => v >= 0));
   const PIC_BG = process.env.PIC_BG;
-  if (PIC_BG != null && PIC_BG !== "bright") return { bgId: parseInt(PIC_BG, 10), lightBoard: false };
-  if (PIC_BG === "bright") return { bgId: mostDistinct([1, 2, 3, 4, 5, 6, 7].filter((id) => !used.includes(id))) ?? 3, lightBoard: true };
-
-  // perimeter darkness of the subject
-  let perim = 0, dark = 0;
-  const N = size * size;
-  for (let i = 0; i < N; i++) {
-    if (board[i] < 0) continue;
-    const r = (i / size) | 0, c = i % size;
-    const edge = r === 0 || c === 0 || r === size - 1 || c === size - 1 ||
-      board[i - 1] < 0 || board[i + 1] < 0 || board[i - size] < 0 || board[i + size] < 0;
-    if (!edge) continue;
-    perim++; if (_lum(board[i]) < DARK_LUM) dark++;
-  }
-  const darkOutline = perim > 0 && dark / perim >= 0.45;
-  if (!darkOutline) return { bgId: 12, lightBoard: false }; // bright subject → dark float
-  // dark-outlined → LIGHT bg (most distinct light neutral) + lightBoard so the outline shows
-  const LIGHT = [8, 9, 14, 15, 17].filter((id) => !used.includes(id));
-  return { bgId: LIGHT.length ? mostDistinct(LIGHT) : 8, lightBoard: true };
+  if (PIC_BG != null) return { bgId: parseInt(PIC_BG, 10), lightBoard: false }; // manual override
+  let bgId = BRIGHT_BG_PREF.find((id) => !used.has(id));
+  if (bgId == null) bgId = 15; // subject somehow uses every bright hue
+  return { bgId, lightBoard: false };
 }
 
 function buildPicture(src, IW, IH, K) {
