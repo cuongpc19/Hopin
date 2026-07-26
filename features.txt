@@ -253,6 +253,14 @@ Lệnh:
   đặt SÂU (row≥3) vì pickGroups đặt cặp ở hàng nông nhất còn SOLVABLE — level tường/màu-dồn
   làm hàng nông unsolvable → đẩy sâu. Rule "twin nông" mâu thuẫn solvability ở các level này.
   User chọn GIỮ NGUYÊN placement, chỉ cần fix hiển thị dây (đã xong). Đừng ép rule/rebuild.
+• ⭐ RULE ĐỘ SÂU XE ĐÔI (2026-07-26, user L9): nhóm liên kết PHẢI nằm trong 3 HÀNG ĐẦU
+  của hàng chờ (rows 1-3) để dây LUÔN thấy. Game mask hàng 4+ rồi bỏ dây tới xe bị clip →
+  xe đôi chôn sâu = KHÔNG có dây. User: "xe đôi khác hàng thì xe sâu nhất tối đa hàng 3"
+  (1 xe hàng 4 nối chéo xuống xe hàng đầu → dây khuất). ĐÃ SỬA pickGroups: cap cả vòng đặt
+  cặp (same-row) lẫn vòng xe-ba vào VISIBLE_ROWS=3 (rowCap=3*perRow); không nhét được nông
+  thì đặt ÍT xe đôi hơn chứ không chôn sâu. Rebuild L9/20/30/35/44/45 (--only) → mọi nhóm
+  giờ ở hàng 1-3, winrate vẫn bám target. (Khác với ca L301-330 ở trên: bộ 45 chấp nhận
+  bớt xe đôi để giữ dây thấy; bộ rock-wall thì ưu tiên solvability.)
 • PACK L101-120 (advanced): tất cả hard/super, đủ cơ chế (2lớp + ? + đôi/ba),
   skill 0.9 (101-110), 0.8 (111-115), 0.98 (116-120; 1.0 là bot tất định nên
   dùng 0.98), target 15-20%%. Winrate thực đo: 8-28%% cả 20 level.

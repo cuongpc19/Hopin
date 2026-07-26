@@ -1021,7 +1021,7 @@ export class GameScene extends Phaser.Scene {
   // 2026-07-25: no grass gap between road and mat). The fill tucks under the road
   // band — it sits BELOW the road (road at DEPTH_ROAD −50, mat at −60) so the road
   // always draws over it and the seam can never show.
-  private buildGroundMat(cols: number, rows: number, roadW: number) {
+  private buildGroundMat(_cols: number, _rows: number, roadW: number) {
     const tuck = Math.round(roadW * 0.5); // reach the road's centreline — fully under the band
     const x = this.beltLeft + roadW / 2 - tuck, y = this.beltTop + roadW / 2 - tuck;
     const w = (this.beltRight - this.beltLeft) - roadW + 2 * tuck;
@@ -1035,22 +1035,29 @@ export class GameScene extends Phaser.Scene {
     const alt = light ? 0xd2bb8c : 0x323858;    // the OTHER caro tone (subtle, so bright tiles still pop)
     const gridLine = light ? 0xc9b184 : 0x232840; // faint cell-boundary line
     g.fillStyle(base, 1); g.fillRoundedRect(x, y, w, h, rad); // base board tone
-    // Two-tone "caro" checkerboard: fill every other cell with the alt tone. Kept
-    // subtle (small navy/sand delta) so it reads as a board pattern without the busy
-    // high-contrast look, and bright pixel-art tiles still pop on top.
-    const gx0 = this.gridX, gy0 = this.gridY;
-    const gx1 = this.gridX + cols * this.cell, gy1 = this.gridY + rows * this.cell;
+    // Two-tone "caro" checkerboard filling the WHOLE mat (not just the tile grid) so a
+    // small board like 15×15 doesn't look like a tiny caro square floating in a plain
+    // navy panel. Cells are phase-aligned to the tile grid (gridX/gridY) so tiles sit
+    // flush on the caro, and the whole thing is masked to the rounded-rect mat shape so
+    // corners stay clean. Kept subtle so bright pixel-art tiles still pop on top.
+    const cell = this.cell;
+    const c0 = Math.floor((x - this.gridX) / cell), r0 = Math.floor((y - this.gridY) / cell);
+    const c1 = Math.ceil((x + w - this.gridX) / cell), r1 = Math.ceil((y + h - this.gridY) / cell);
     g.fillStyle(alt, 1);
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
+    for (let r = r0; r < r1; r++) {
+      for (let c = c0; c < c1; c++) {
         if (((r + c) & 1) === 0) continue; // only the "odd" cells → checker
-        g.fillRect(gx0 + c * this.cell, gy0 + r * this.cell, this.cell, this.cell);
+        g.fillRect(this.gridX + c * cell, this.gridY + r * cell, cell, cell);
       }
     }
-    // A faint lattice on top keeps every cell boundary crisp.
+    // A faint lattice on top keeps every cell boundary crisp, across the whole mat.
     g.lineStyle(1, gridLine, light ? 0.4 : 0.35);
-    for (let c = 0; c <= cols; c++) { const gx = gx0 + c * this.cell; g.beginPath(); g.moveTo(gx, gy0); g.lineTo(gx, gy1); g.strokePath(); }
-    for (let r = 0; r <= rows; r++) { const gy = gy0 + r * this.cell; g.beginPath(); g.moveTo(gx0, gy); g.lineTo(gx1, gy); g.strokePath(); }
+    for (let c = c0; c <= c1; c++) { const gx = this.gridX + c * cell; g.beginPath(); g.moveTo(gx, y); g.lineTo(gx, y + h); g.strokePath(); }
+    for (let r = r0; r <= r1; r++) { const gy = this.gridY + r * cell; g.beginPath(); g.moveTo(x, gy); g.lineTo(x + w, gy); g.strokePath(); }
+    // Clip everything (checker + lattice overflow) to the rounded-rect mat shape.
+    const mk = this.make.graphics({ x: 0, y: 0 }, false);
+    mk.fillStyle(0xffffff, 1); mk.fillRoundedRect(x, y, w, h, rad);
+    g.setMask(mk.createGeometryMask());
   }
 
   // Assemble the rounded-rectangle road from sprite pieces: 4 tiled straight

@@ -612,8 +612,15 @@ function pickGroups(order, board, track, pairs, triples, perRow = LANES, layer2 
   // duplicate/lose cars (a real bug that collapsed the palette). Snapshot the WHOLE order
   // and restore it fully whenever an attempt is rejected.
   const restore = (snapAll) => { for (let z = 0; z < order.length; z++) order[z] = snapAll[z]; };
+  // Linked groups MUST stay in the first VISIBLE_ROWS rows of the inventory so their
+  // connecting rope is always on-screen (the game masks row 4+ and then suppresses the
+  // rope to a clipped partner → a buried twin shows NO rope). User rule 2026-07-26 (L9):
+  // "xe đôi khác hàng thì xe sâu nhất tối đa hàng 3" — a car in row 4 roped to a front car
+  // crosses diagonally and the rope is hidden. So cap every placement to rows 1-3.
+  const VISIBLE_ROWS = 3;
+  const rowCap = VISIBLE_ROWS * perRow; // exclusive index bound (rows 0..VISIBLE_ROWS-1)
   let nT = 0;
-  const lastBase = Math.floor((order.length - 3) / perRow) * perRow;
+  const lastBase = Math.min(Math.floor((order.length - 3) / perRow) * perRow, rowCap - perRow);
   for (let base = 0; base <= lastBase && nT < (triples || 0); base += perRow) {
     const idx = [base, base + 1, base + 2];
     if (idx.some((i) => i + 1 > order.length || used.has(i)) || !sameRow(...idx)) continue;
@@ -623,7 +630,7 @@ function pickGroups(order, board, track, pairs, triples, perRow = LANES, layer2 
     else restore(snapAll); // revert the swaps fully
   }
   let nP = 0;
-  const lastPair = Math.floor((order.length - 2) / 2) * 2;
+  const lastPair = Math.min(Math.floor((order.length - 2) / 2) * 2, rowCap - 2);
   for (let i = 0; i <= lastPair && nP < (pairs || 0); i += 2) {
     if (i + 1 >= order.length || used.has(i) || used.has(i + 1) || !sameRow(i, i + 1)) continue;
     const idx = [i, i + 1];
