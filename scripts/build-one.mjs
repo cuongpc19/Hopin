@@ -233,28 +233,41 @@ if (cellIndex < 0) {
 const board = buildFromImage(cellBuf, cbw, cbh, { K, maxSide: IMG_INNER });
 if (!board) { console.error("no subject found in cell"); process.exit(1); }
 
-// Fill the background so the level reads as a complete framed picture. DEFAULT bg =
-// dark-neutral id 12 (#262630): the bright subject pops on the DARK board and there is
-// NO dull light-grey mass (FEATURES §20 RULE 4). Leaves a 1-cell empty frame so slime
-// never touches the road. Override: BG_ID=<id> forces one; BG_ID=bright = old
-// auto-contrast (a saturated colour most distinct from the subject — for lightBoard).
+// Fill the background. AUTO THEME (FEATURES §20 RULE 4): if the subject has a DARK
+// OUTLINE (its perimeter cells are mostly dark) it would vanish on the dark board → use
+// a LIGHT bg + lightBoard so the outline pops; otherwise dark-neutral id 12 (bright
+// subject floats on the dark board). Override: BG_ID=<id> forces one (dark theme);
+// BG_ID=bright = legacy light-board auto-contrast.
+let levelLightBoard = false;
 if (FILL_BG) {
   const subCells = board.filter((v) => v >= 0);
-  let bgId = 12; // dark neutral (default — matches the navy board theme)
+  const used = [...new Set(subCells)];
+  const usedRgb = used.map((id) => baseRgb[id]);
+  const lum = (id) => { const c = baseRgb[id]; return 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]; };
+  const mostDistinct = (cands) => { let best = cands[0], bd = -1; for (const id of cands) { let mn = Infinity; for (const c of usedRgb) { const d = dist2(baseRgb[id], c); if (d < mn) mn = d; } if (mn > bd) { bd = mn; best = id; } } return best; };
+  let bgId = 12; // dark neutral default
   const BG_ID = process.env.BG_ID;
   if (BG_ID != null && BG_ID !== "bright") {
     bgId = parseInt(BG_ID, 10);
   } else if (BG_ID === "bright") {
-    // legacy: colour MOST DISTINCT from EVERY colour the character uses (drop white/tan)
-    const used = [...new Set(subCells)];
-    const usedRgb = used.map((id) => baseRgb[id]);
-    const BG_CANDS = BRIGHT_IDS.filter((id) => id !== 8 && id !== 14);
-    bgId = BG_CANDS[0];
-    let bd = -1;
-    for (const id of BG_CANDS) {
-      let mn = Infinity;
-      for (const c of usedRgb) { const d = dist2(baseRgb[id], c); if (d < mn) mn = d; }
-      if (mn > bd) { bd = mn; bgId = id; }
+    bgId = mostDistinct(BRIGHT_IDS.filter((id) => id !== 8 && id !== 14 && !used.includes(id)));
+    levelLightBoard = true;
+  } else {
+    // detect dark outline: perimeter subject cells that are dark
+    let perim = 0, dark = 0;
+    for (let i = 0; i < board.length; i++) {
+      if (board[i] < 0) continue;
+      const r = (i / BOARD_SIZE) | 0, c = i % BOARD_SIZE;
+      const edge = r === 0 || c === 0 || r === BOARD_SIZE - 1 || c === BOARD_SIZE - 1 ||
+        board[i - 1] < 0 || board[i + 1] < 0 || board[i - BOARD_SIZE] < 0 || board[i + BOARD_SIZE] < 0;
+      if (!edge) continue;
+      perim++; if (lum(board[i]) < 95) dark++;
+    }
+    if (perim > 0 && dark / perim >= 0.45) {
+      const LIGHT = [8, 9, 14, 15, 17].filter((id) => !used.includes(id));
+      bgId = LIGHT.length ? mostDistinct(LIGHT) : 8;
+      levelLightBoard = true;
+      console.log(`dark outline detected (${Math.round(100 * dark / perim)}% perimeter) → light bg id ${bgId} + lightBoard`);
     }
   }
   // bg = fill the WHOLE inner square (SAFE_MARGIN border kept empty) so the picture
@@ -278,6 +291,7 @@ console.log(`cell ${cellIndex} -> L${levelNum}: ${slimes} slimes, ${colors} colo
 // patch designed.json (keep every other level)
 const designed = JSON.parse(fs.readFileSync(OUT, "utf8"));
 designed[levelNum] = { track: "square", cols: BOARD_SIZE, rows: BOARD_SIZE, board, chests };
+if (levelLightBoard) designed[levelNum].lightBoard = true; // dark-outlined subject → light board (RULE 4)
 const sorted = {};
 for (const k of Object.keys(designed).map(Number).sort((a, b) => a - b)) sorted[k] = designed[k];
 fs.writeFileSync(OUT, JSON.stringify(sorted, null, 2));

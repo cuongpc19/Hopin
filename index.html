@@ -6,6 +6,13 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
     />
+    <!-- iOS "Add to Home Screen" caches index.html very aggressively in its own
+         web-clip storage, so it keeps pointing at the OLD hashed bundle and never
+         picks up a new deploy. These force the HTML to always revalidate so the
+         home-screen app loads the latest bundle like the Safari tab does. -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
     <title>Hop In!</title>
     <!-- Fetch the splash poster in parallel with the JS bundle so it's already
          cached by the time Phaser boots — the splash then appears the instant the

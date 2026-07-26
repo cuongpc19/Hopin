@@ -1032,14 +1032,23 @@ export class GameScene extends Phaser.Scene {
     // falls back to the old light sand mat (design comparison).
     const light = !!this.level.lightBoard;
     const base = light ? 0xdcc79c : 0x2b2f4a;   // sand vs deep navy
-    const gridLine = light ? 0xc9b184 : 0x232840; // grid-line tone (single-tone caro)
-    g.fillStyle(base, 1); g.fillRoundedRect(x, y, w, h, rad); // one uniform board tone
-    // Single-tone "caro": one board tone + a subtle grid lattice (graph-paper look)
-    // instead of a 2-colour checkerboard — cell boundaries still readable, no busy
-    // alternating tiles.
+    const alt = light ? 0xd2bb8c : 0x323858;    // the OTHER caro tone (subtle, so bright tiles still pop)
+    const gridLine = light ? 0xc9b184 : 0x232840; // faint cell-boundary line
+    g.fillStyle(base, 1); g.fillRoundedRect(x, y, w, h, rad); // base board tone
+    // Two-tone "caro" checkerboard: fill every other cell with the alt tone. Kept
+    // subtle (small navy/sand delta) so it reads as a board pattern without the busy
+    // high-contrast look, and bright pixel-art tiles still pop on top.
     const gx0 = this.gridX, gy0 = this.gridY;
     const gx1 = this.gridX + cols * this.cell, gy1 = this.gridY + rows * this.cell;
-    g.lineStyle(1, gridLine, light ? 0.5 : 0.55);
+    g.fillStyle(alt, 1);
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (((r + c) & 1) === 0) continue; // only the "odd" cells → checker
+        g.fillRect(gx0 + c * this.cell, gy0 + r * this.cell, this.cell, this.cell);
+      }
+    }
+    // A faint lattice on top keeps every cell boundary crisp.
+    g.lineStyle(1, gridLine, light ? 0.4 : 0.35);
     for (let c = 0; c <= cols; c++) { const gx = gx0 + c * this.cell; g.beginPath(); g.moveTo(gx, gy0); g.lineTo(gx, gy1); g.strokePath(); }
     for (let r = 0; r <= rows; r++) { const gy = gy0 + r * this.cell; g.beginPath(); g.moveTo(gx0, gy); g.lineTo(gx1, gy); g.strokePath(); }
   }
