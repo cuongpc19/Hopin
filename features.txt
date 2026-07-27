@@ -261,6 +261,23 @@ Lệnh:
   thì đặt ÍT xe đôi hơn chứ không chôn sâu. Rebuild L9/20/30/35/44/45 (--only) → mọi nhóm
   giờ ở hàng 1-3, winrate vẫn bám target. (Khác với ca L301-330 ở trên: bộ 45 chấp nhận
   bớt xe đôi để giữ dây thấy; bộ rock-wall thì ưu tiên solvability.)
+• ⭐ XE ĐÔI THẲNG HÀNG (CÙNG CỘT) CHÔN SÂU ĐƯỢC (2026-07-27, user): ngoại lệ của rule
+  trên — nếu 2 xe đôi Ở CÙNG CỘT, xếp TRÊN-DƯỚI liền nhau (không xe lạ chen giữa) thì
+  dây là link DỌC ngắn, KHÔNG BAO GIỜ lệch nhau (cùng 1 cột rút đều) → chôn sâu bao
+  nhiêu cũng thấy dây khi nổi lên. CHỈ ca khác-cột (ngang) mới bị lệch→chéo→khuất.
+  ĐÃ TRIỂN KHAI 3 chỗ ĐỒNG BỘ:
+  1) GAME launchFromInventory: điều kiện launch nhóm đổi từ "mọi xe ở hàng đầu (r=0)"
+     → "không xe LẠ nào đứng TRƯỚC nó trong cột" (front-prefix). Cặp cùng cột rows 0,1
+     launch cả cụm. (p.col.slice(0,p.r).every(∈group))
+  2) SIM: solvablePairs & playAverage thêm groupReady(g) = mỗi xe parked HOẶC không có
+     xe-lạ đứng trước trong cột; removeCar đổi shift(col[0]) → indexOf+splice (xoá xe ở
+     bất kỳ độ sâu). Thay hết các check g.every(isFront). groupReady ≡ isFront cho cặp
+     ngang-nông (verify: L10/20/30 winrate KHÔNG đổi 63/61/46).
+  3) BUILDER pickGroups: thêm vòng đặt cặp DỌC (idx a & a+perRow = cùng cột, sâu kề)
+     ở BẤT KỲ độ sâu, chạy sau vòng same-row-nông. Test ép L30 xedoi=6 → 2 cặp tự xếp
+     dọc row 4-5, level vẫn solvable. Vòng same-row vẫn cap 3 hàng (ngang phải nông).
+  ⇒ Builder giờ đặt xe đôi nông-ngang TRƯỚC, hết chỗ thì dọc-sâu (thay vì bỏ bớt). Xe 45
+  hiện tại chưa rebuild (đang bám target, xe đôi đều nông) — tính năng dùng cho build sau.
 • PACK L101-120 (advanced): tất cả hard/super, đủ cơ chế (2lớp + ? + đôi/ba),
   skill 0.9 (101-110), 0.8 (111-115), 0.98 (116-120; 1.0 là bot tất định nên
   dùng 0.98), target 15-20%%. Winrate thực đo: 8-28%% cả 20 level.

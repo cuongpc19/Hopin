@@ -3050,12 +3050,14 @@ export class GameScene extends Phaser.Scene {
     const pos = this.findInInventory(view);
     if (!pos || pos.r !== 0) return; // only the front chest of a column launches
 
-    // Linked cars leave together — EVERY member must be at the front of its column;
-    // otherwise wait for the lagging one(s) to reach the front.
+    // Linked cars leave together. A member is launchable when NO non-member sits ahead
+    // of it in its column — so a same-column STACKED pair (rows 0,1) launches as one unit
+    // (its rope stays a clean short vertical link even buried deep, user 2026-07-27), while
+    // a member with a stranger in front still waits for that column to drain.
     const group = this.groupOf(view);
     for (const v of group) {
       const p = this.findInInventory(v);
-      if (!p || p.r !== 0) {
+      if (!p || !p.col.slice(0, p.r).every((c) => group.includes(c))) {
         this.smallNotice(group.length > 2 ? "Wait for all linked cars to reach the front!" : "Wait for both cars to reach the front!");
         return;
       }

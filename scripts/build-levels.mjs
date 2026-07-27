@@ -521,7 +521,15 @@ function solvablePairs(board, cols, rows, order, track, groups, bays = 5, perRow
     else { while (car.cap > 0) { const E = exposedTiles(occ, cols, rows, edges); let t = -1; for (const i of E) if (occ[i] === car.color) { t = i; break; } if (t < 0) break; clearCell(t); car.cap--; } }
   };
   const isFront = (c) => columns.some((col) => col[0] === c);
-  const removeCar = (c) => { for (const col of columns) if (col[0] === c) { col.shift(); return; } const p = parked.indexOf(c); if (p >= 0) parked.splice(p, 1); };
+  // A linked group is launchable when every member is either parked or has NO non-member
+  // ahead of it in its column — so a same-column STACKED pair (front-prefix) launches as a
+  // unit, matching the game (user 2026-07-27: xe đôi thẳng hàng chôn sâu được).
+  const groupReady = (g) => g.every((c) => {
+    if (parked.includes(c)) return true;
+    for (const col of columns) { const k = col.indexOf(c); if (k >= 0) return col.slice(0, k).every((x) => g.includes(x)); }
+    return false;
+  });
+  const removeCar = (c) => { for (const col of columns) { const k = col.indexOf(c); if (k >= 0) { col.splice(k, 1); return; } } const p = parked.indexOf(c); if (p >= 0) parked.splice(p, 1); };
   const TR = process.env.DEBUG_SOLVE && (groups || []).length > 0 && !globalThis.__traced; // trace ONE grouped solve
   if (TR) globalThis.__traced = true;
   let guard = 0;
@@ -535,7 +543,7 @@ function solvablePairs(board, cols, rows, order, track, groups, bays = 5, perRow
     // group would squat in the bays forever and wedge the level).
     for (const g of groupCars) {
       if (g.every((c) => c.cap === 0)) continue;
-      if (!g.every((c) => isFront(c) || parked.includes(c))) continue;
+      if (!groupReady(g)) continue;
       if (!g.some((c) => c.cap > 0 && S.has(c.color))) continue; // a member that can STILL eat
       const own = g.filter((c) => parked.includes(c)).length;
       if (parked.length - own > bays - g.length) continue; // not enough bays to park the group
@@ -567,7 +575,7 @@ function solvablePairs(board, cols, rows, order, track, groups, bays = 5, perRow
     let sent = false;
     for (const g of groupCars) {
       if (g.every((c) => c.cap === 0)) continue;
-      if (!g.every((c) => isFront(c))) continue; // all still in the queue, at fronts
+      if (!groupReady(g)) continue; // all still in the queue, launchable as a unit
       if (parked.length > bays - g.length) continue;
       for (const c of g) removeCar(c);
       for (const c of g) collect(c); // may collect nothing — that's fine
@@ -638,6 +646,20 @@ function pickGroups(order, board, track, pairs, triples, perRow = LANES, layer2 
     if (!distinctify(idx)) { if (process.env.DEBUG_GROUPS) console.error(`  pair@${i}: distinctify FAIL`); restore(snapAll); continue; }
     if (solvablePairs(board, BOARD_SIZE, BOARD_SIZE, order, track, [...groups, idx], 5, perRow, layer2)) { groups.push(idx); used.add(i); used.add(i + 1); nP++; }
     else { if (process.env.DEBUG_GROUPS) console.error(`  pair@${i}: solvable FAIL`); restore(snapAll); } // revert the swaps fully
+  }
+  // VERTICAL-adjacent pairs (user 2026-07-27: "xe đôi thẳng hàng chôn sâu được"): a pair
+  // stacked in the SAME column at consecutive depths (indices a & a+perRow) never drifts
+  // apart as columns drain, so its rope stays a clean short vertical link at ANY depth.
+  // Place remaining pairs this way (front-first) so deep twins can exist without a hidden
+  // diagonal rope — the shallow-row cap above no longer forces a level to shed twins.
+  for (let a = 0; a + perRow < order.length && nP < (pairs || 0); a++) {
+    const b = a + perRow; // directly below a in the same column (a % perRow)
+    if (used.has(a) || used.has(b)) continue;
+    const idx = [a, b];
+    const snapAll = order.slice();
+    if (!distinctify(idx)) { restore(snapAll); continue; }
+    if (solvablePairs(board, BOARD_SIZE, BOARD_SIZE, order, track, [...groups, idx], 5, perRow, layer2)) { groups.push(idx); used.add(a); used.add(b); nP++; }
+    else restore(snapAll);
   }
   // EARLY cross-row fallback (user 2026-07-25): a linked pair should sit in the SAME row
   // (handled above); if some couldn't, allow a cross-row pair but ONLY in the FIRST rows
@@ -732,7 +754,14 @@ function playAverage(board, cols, rows, order, track, opts) {
   let peak = 0;
   const gainOf = (color, E) => { let n = 0; for (const i of E) if (occ[i] === color) n++; return n; };
   const isFront = (c) => columns.some((col) => col[0] === c);
-  const removeCar = (c) => { for (const col of columns) if (col[0] === c) { col.shift(); return; } let p = parked.indexOf(c); if (p >= 0) { parked.splice(p, 1); return; } p = circ.indexOf(c); if (p >= 0) circ.splice(p, 1); };
+  // Launchable = parked, or no non-member ahead of it in its column (same-column stacked
+  // pair launches as a unit → deep vertical twins, user 2026-07-27). Matches the game.
+  const groupReady = (g) => g.every((c) => {
+    if (parked.includes(c)) return true;
+    for (const col of columns) { const k = col.indexOf(c); if (k >= 0) return col.slice(0, k).every((x) => g.includes(x)); }
+    return false;
+  });
+  const removeCar = (c) => { for (const col of columns) { const k = col.indexOf(c); if (k >= 0) { col.splice(k, 1); return; } } let p = parked.indexOf(c); if (p >= 0) { parked.splice(p, 1); return; } p = circ.indexOf(c); if (p >= 0) circ.splice(p, 1); };
   const juggleOne = () => {
     if (circ.length >= CIRC_CAP) return false; // no track room
     // Pushing out a 4th circling car is a rare "tay nhanh" burst, not routine.
@@ -818,7 +847,7 @@ function playAverage(board, cols, rows, order, track, opts) {
         const S = new Set(); for (const i of E) S.add(occ[i]);
         let staged = false;
         for (const g of groups) {
-          if (g.every((c) => c.cap === 0) || !g.every((c) => isFront(c))) continue;
+          if (g.every((c) => c.cap === 0) || !groupReady(g)) continue;
           if (parked.length + g.length > bays) continue;
           for (const c of g) { removeCar(c); parked.push(c); }
           staged = stagedAny = true; break;
@@ -886,7 +915,7 @@ function playAverage(board, cols, rows, order, track, opts) {
     // launch). The manual game keeps the old "needs groupSize bays free up-front" gate.
     for (const g of groups) {
       if (g.every((c) => c.cap === 0)) continue;
-      if (!g.every((c) => isFront(c) || parked.includes(c))) continue;
+      if (!groupReady(g)) continue;
       if (!g.some((c) => c.cap > 0 && S.has(c.color))) continue; // a member that can STILL eat
       const own = g.filter((c) => parked.includes(c)).length;
       const canPark = parked.length - own <= bays - g.length;
@@ -939,7 +968,7 @@ function playAverage(board, cols, rows, order, track, opts) {
     let sent = false;
     for (const g of groups) {
       if (g.every((c) => c.cap === 0)) continue;
-      if (!g.every((c) => isFront(c))) continue;
+      if (!groupReady(g)) continue;
       if (parked.length > bays - g.length) continue;
       for (const c of g) removeCar(c);
       for (const c of g) doCollect(c);
