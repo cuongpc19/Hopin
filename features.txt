@@ -276,8 +276,13 @@ Lệnh:
   3) BUILDER pickGroups: thêm vòng đặt cặp DỌC (idx a & a+perRow = cùng cột, sâu kề)
      ở BẤT KỲ độ sâu, chạy sau vòng same-row-nông. Test ép L30 xedoi=6 → 2 cặp tự xếp
      dọc row 4-5, level vẫn solvable. Vòng same-row vẫn cap 3 hàng (ngang phải nông).
-  ⇒ Builder giờ đặt xe đôi nông-ngang TRƯỚC, hết chỗ thì dọc-sâu (thay vì bỏ bớt). Xe 45
-  hiện tại chưa rebuild (đang bám target, xe đôi đều nông) — tính năng dùng cho build sau.
+  ⇒ Builder giờ đặt xe đôi nông-ngang TRƯỚC, hết chỗ thì dọc-sâu (thay vì bỏ bớt).
+  • ÉP xe đôi dọc-sâu: env VERT_DEEP=N → floor số twin ≥N (n≥8) + pickGroups đặt N cặp
+    DỌC ở slot SÂU NHẤT solvable (row≥2, quét deep→shallow) TRƯỚC vòng nông. ĐÃ ÁP L20:
+    VERT_DEEP=1 → 1 cặp dọc sâu row 6-7, solvable 1/1, winrate 65→59 (twin sâu làm khó
+    thêm ~2-6đ, tuner không kéo hết về target). VERT_DEEP=2 làm L20 quá khó (52) → dùng 1.
+    ⚠ Level CHẬT (ít xe + nhiều twin sẵn, vd L10 16 xe 4 twin) ép dọc-sâu → greedy-solver
+    KẸT (0/1) dù bot vẫn thắng → chỉ ép ở level RỘNG (≥~30 xe). Các level 45 khác GIỮ NGUYÊN.
 • PACK L101-120 (advanced): tất cả hard/super, đủ cơ chế (2lớp + ? + đôi/ba),
   skill 0.9 (101-110), 0.8 (111-115), 0.98 (116-120; 1.0 là bot tất định nên
   dùng 0.98), target 15-20%%. Winrate thực đo: 8-28%% cả 20 level.

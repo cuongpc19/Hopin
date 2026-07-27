@@ -638,6 +638,24 @@ function pickGroups(order, board, track, pairs, triples, perRow = LANES, layer2 
     else restore(snapAll); // revert the swaps fully
   }
   let nP = 0;
+  // FORCED deep-vertical pairs (env VERT_DEEP=N, user 2026-07-27): place N pairs as
+  // same-column stacked pairs in the DEEPEST solvable slot (row ≥ 3) FIRST, to seed each
+  // level with buried vertical twins. Runs before the shallow pass so those N are
+  // guaranteed deep + vertical; the remaining pairs then fill shallow rows as usual.
+  const forceVert = Math.min(Number(process.env.VERT_DEEP || 0), pairs || 0);
+  for (let f = 0; f < forceVert; f++) {
+    let placed = false;
+    for (let a = order.length - perRow - 1; a >= 2 * perRow; a--) { // deep→shallow, row(a) ≥ 2
+      const b = a + perRow;                                          // directly below (same column)
+      if (used.has(a) || used.has(b) || b >= order.length) continue;
+      const idx = [a, b];
+      const snapAll = order.slice();
+      if (!distinctify(idx)) { restore(snapAll); continue; }
+      if (solvablePairs(board, BOARD_SIZE, BOARD_SIZE, order, track, [...groups, idx], 5, perRow, layer2)) { groups.push(idx); used.add(a); used.add(b); nP++; placed = true; break; }
+      restore(snapAll);
+    }
+    if (!placed) break; // no deeper solvable slot → stop forcing
+  }
   const lastPair = Math.min(Math.floor((order.length - 2) / 2) * 2, rowCap - 2);
   for (let i = 0; i <= lastPair && nP < (pairs || 0); i += 2) {
     if (i + 1 >= order.length || used.has(i) || used.has(i + 1) || !sameRow(i, i + 1)) continue;
@@ -2135,7 +2153,10 @@ for (const n of LEVEL_NUMS) {
   // extra colours on — that scatters uncollectable single cells and breaks solvability).
   // Twins are introduced at L8 (game's TWIN_INTRO): never place them earlier even if a CSV
   // row asks for xe đôi (user 2026-07-26: L4 must not have twins).
-  const twinsWanted = (n < 8 && !isKid(n)) ? 0 : cfg.twins;
+  // VERT_DEEP=N floors the twin count so each eligible level carries ≥N pairs for the
+  // forced deep-vertical seeding in pickGroups (still gated off before L8).
+  const minPairs = process.env.VERT_DEEP ? Number(process.env.VERT_DEEP) : 0;
+  const twinsWanted = (n < 8 && !isKid(n)) ? 0 : Math.max(cfg.twins || 0, minPairs);
   const tuned = tuneToTarget(board, track, target, n, diff, { colors: picture ? distinctColors(board) : cfg.colors, maxCars: cfg.maxCars, minCars: cfg.minCars, twins: twinsWanted, triples: triplesFor(n), skill: calSkill, layer2Frac: layer2Pre ? 0 : layer2FracFor(n, diff, cfg), layer2Pre, tray: trayOn }); // → win ≈ target @ skill
   board = tuned.board;
   const chests = tuned.chests;
