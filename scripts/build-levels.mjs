@@ -679,24 +679,11 @@ function pickGroups(order, board, track, pairs, triples, perRow = LANES, layer2 
     if (solvablePairs(board, BOARD_SIZE, BOARD_SIZE, order, track, [...groups, idx], 5, perRow, layer2)) { groups.push(idx); used.add(a); used.add(b); nP++; }
     else restore(snapAll);
   }
-  // EARLY cross-row fallback (user 2026-07-25): a linked pair should sit in the SAME row
-  // (handled above); if some couldn't, allow a cross-row pair but ONLY in the FIRST rows
-  // (both members within the first EARLY_ROWS) so they appear right at the start with a
-  // short, readable rope — never one at the front and its mate buried deep. Still gated
-  // by solvablePairs so an early group that would wedge the level is rejected.
-  const EARLY_ROWS = 3;
-  const earlyMax = EARLY_ROWS * perRow;
-  for (let a = 0; a < earlyMax && nP < (pairs || 0); a++) {
-    if (used.has(a) || a >= order.length) continue;
-    for (let b = a + 1; b < earlyMax && b < order.length; b++) {
-      if (used.has(b) || sameRow(a, b) || (b % perRow) === (a % perRow)) continue; // want different row AND column
-      const idx = [a, b];
-      const snapAll = order.slice();
-      if (!distinctify(idx)) { restore(snapAll); continue; }
-      if (solvablePairs(board, BOARD_SIZE, BOARD_SIZE, order, track, [...groups, idx], 5, perRow, layer2)) { groups.push(idx); used.add(a); used.add(b); nP++; break; }
-      else restore(snapAll);
-    }
-  }
+  // (REMOVED 2026-07-27, user L9: the old EARLY cross-row fallback placed a pair at
+  // different row AND different column — e.g. col3/row0 + col0/row1 — giving a LONG diagonal
+  // rope spanning the board. A linked pair must be ADJACENT: same-row neighbouring columns
+  // (horizontal, handled above) OR same-column neighbouring rows (vertical, handled above).
+  // No diagonal placement. If neither fits, the level simply carries fewer pairs.)
   if (process.env.DEBUG_GROUPS) console.error(`  pickGroups: want P${pairs}/T${triples} → placed ${groups.length}`);
   return groups;
 }
