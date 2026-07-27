@@ -2493,6 +2493,28 @@ export class GameScene extends Phaser.Scene {
       this.openSettings();
     });
 
+    // DEBUG "WIN" button (user 2026-07-27): instantly clear the level without playing —
+    // a test convenience sitting in the free strip between the gear and the level pill.
+    const winX = 105;
+    const winPill = this.add.graphics().setDepth(D);
+    winPill.fillStyle(0x4caf50, 1);
+    winPill.fillRoundedRect(winX - 30, y - 14, 60, 28, 14);
+    winPill.lineStyle(2, 0xffffff, 0.9);
+    winPill.strokeRoundedRect(winX - 30, y - 14, 60, 28, 14);
+    this.add
+      .text(winX, y, "WIN", { fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "15px", color: "#ffffff" })
+      .setOrigin(0.5)
+      .setDepth(D + 2);
+    const winHit = this.add
+      .rectangle(winX, y, 60, 28, 0xffffff, 0.001)
+      .setDepth(D + 3)
+      .setInteractive({ useHandCursor: true });
+    winHit.on("pointerdown", () => {
+      if (this.won || this.lost) return;
+      this.tweens.add({ targets: [winPill], scale: 0.9, duration: 80, yoyo: true });
+      this.win();
+    });
+
     // Level pill (center): red rounded pill with bold white text.
     const lvlText = this.add
       .text(GAME_W / 2, y, `LEVEL ${levelNum}`, {
@@ -4756,8 +4778,9 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
+    const nextLevel = this.levelNum + 1;
     const t2 = this.add
-      .text(cx, infoY + 12, "Tap to return home", {
+      .text(cx, infoY + 12, `Tap for Level ${nextLevel}`, {
         fontFamily: "Arial, sans-serif",
         fontStyle: "bold",
         fontSize: "15px",
@@ -4765,7 +4788,8 @@ export class GameScene extends Phaser.Scene {
       })
       .setOrigin(0.5)
       .setDepth(401);
-    // After finishing a level, return to the Home map (not straight to the next).
+    // After finishing a level, go STRAIGHT into the next one (user 2026-07-27) instead of
+    // returning to the Home map — keep the player in a continuous run.
     dim.on("pointerdown", () => {
       dim.destroy();
       cover.destroy();
@@ -4773,7 +4797,7 @@ export class GameScene extends Phaser.Scene {
       t1?.destroy();
       for (const o of extra) o.destroy();
       t2.destroy();
-      this.scene.start("select");
+      this.startLevel(nextLevel);
     });
   }
 
