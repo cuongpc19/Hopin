@@ -1,10 +1,11 @@
 import { defineConfig, type Plugin } from "vite";
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, appendFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const LEVELS = root + "src/levels/designed.json";
+const PLAYLOG = root + "playlog.jsonl"; // slam playtest telemetry (one JSON summary per line)
 
 // Auto build version shown on the start screen. Derived from git so it increases by
 // itself every commit/deploy (no manual bump): version = 0.0.<commit count>, plus the
@@ -89,6 +90,19 @@ function levelEditorApi(): Plugin {
           for (const k of Object.keys(data).map(Number).sort((a, b) => a - b)) sorted[k] = data[k];
           writeFileSync(LEVELS, JSON.stringify(sorted, null, 2) + "\n");
           send(res, 200, { ok: true, number: n });
+        } catch (e) {
+          send(res, 400, { ok: false, error: String(e) });
+        }
+      });
+
+      // Slam playtest telemetry: the game POSTs a play summary here on win/lose; we append it to
+      // playlog.jsonl on the dev machine (so playing on a phone still records to a file we can read).
+      server.middlewares.use("/api/hoplog", async (req, res, next) => {
+        if (req.method !== "POST") return next();
+        try {
+          const body = (await readBody(req)).trim();
+          if (body) appendFileSync(PLAYLOG, body + "\n");
+          send(res, 200, { ok: true });
         } catch (e) {
           send(res, 400, { ok: false, error: String(e) });
         }

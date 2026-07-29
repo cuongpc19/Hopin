@@ -256,6 +256,12 @@ export class GameScene extends Phaser.Scene {
   // frees the bay when it fills and leaves. Multiple cars run at once. No auto-launch, no GO
   // batch. Lose = deadlock (no bay car can collect + no fresh car can enter).
   private slamMode = false;
+  // Playtest telemetry (slam): record the player's launch decisions + bay pressure + result so real
+  // play can be compared to the model / difficulty tools. Dumped as [HOPLOG] JSON to the console and
+  // accumulated in localStorage("hopin_playlog"). In the browser console: hopLog() to dump, hopLogClear().
+  private playLog: { ev: string; [k: string]: unknown }[] = [];
+  private playStart = 0;
+  private peakUsed = 0;
   // TRAY_BATCH: a batch (the whole set of bay cars) is currently out circling the ray.
   // While true the bays are locked (no staging) and the GO button is disabled; flips back
   // to false once every batch car has left the ray (leaving or returning to its bay).
@@ -424,6 +430,8 @@ export class GameScene extends Phaser.Scene {
 
   private startLevel(levelNum: number) {
     this.levelNum = levelNum;
+    this.playLog = []; this.playStart = (typeof performance !== "undefined" ? performance.now() : 0); this.peakUsed = 0;
+    if (typeof window !== "undefined") { (window as any).hopLog = () => console.log(localStorage.getItem("hopin_playlog") || "[]"); (window as any).hopLogClear = () => localStorage.removeItem("hopin_playlog"); }
     this.children.removeAll();
     this.tweens.killAll();
     this.active = [];
@@ -3129,6 +3137,8 @@ export class GameScene extends Phaser.Scene {
       if (freeSlots < need) { this.smallNotice("All waiting slots are locked!"); return; }
       if (this.active.length + this.pending.length + need > MAX_ON_TRACK) { this.trackFullNotice(); return; }
       this.playPop();
+      // TELEMETRY: a queue tap is the player's core DECISION — log it with context.
+      this.playLog.push({ ev: "launch", t: Math.round((typeof performance !== "undefined" ? performance.now() : 0) - this.playStart), colors: group.map((v) => v.chest.color), counts: group.map((v) => v.chest.count), buried: group.some((v) => !!(v.chest as unknown as { buried?: boolean }).buried), freeSlotsBefore: freeSlots, onRay: this.active.length + this.pending.length, twin: group.length > 1 });
       for (const v of group) {
         const p = this.findInInventory(v)!;
         p.col.splice(p.r, 1);
@@ -3144,6 +3154,7 @@ export class GameScene extends Phaser.Scene {
           if (parked) this.relaunchFromSlot(si);
         });
       }
+      this.notePeak();
       this.layoutInventory(true);
       this.updateSlotWarning();
       return;
@@ -4632,9 +4643,22 @@ export class GameScene extends Phaser.Scene {
 
   // ---- Lose -----------------------------------------------------------
 
+  private notePeak() { const u = this.slots.filter(Boolean).length; if (u > this.peakUsed) this.peakUsed = u; }
+  private emitPlayLog(result: "win" | "lose") {
+    if (!this.slamMode) return; // telemetry only for slam playtests
+    this.notePeak();
+    const summary = { lvl: this.levelNum, result, ms: Math.round((typeof performance !== "undefined" ? performance.now() : 0) - this.playStart), launches: this.playLog.length, peakBays: this.peakUsed, bays: this.slots.length, log: this.playLog };
+    const json = JSON.stringify(summary);
+    console.log("[HOPLOG] " + json);
+    try { const arr = JSON.parse(localStorage.getItem("hopin_playlog") || "[]"); arr.push(summary); localStorage.setItem("hopin_playlog", JSON.stringify(arr)); } catch { /* ignore */ }
+    // POST to the dev server → playlog.jsonl on the PC (works even when playing from a phone).
+    try { fetch("/api/hoplog", { method: "POST", headers: { "Content-Type": "application/json" }, body: json }).catch(() => { }); } catch { /* ignore */ }
+  }
+
   private lose(pending?: ActiveChest) {
     if (this.won || this.lost) return;
     this.lost = true;
+    this.emitPlayLog("lose");
     this.failedThisAttempt = true; // a loss means a later win is worth 1 rock, not 2
     Audio.finish(); // (placeholder sfx)
 
@@ -4777,6 +4801,7 @@ export class GameScene extends Phaser.Scene {
   private win() {
     if (this.won) return;
     this.won = true;
+    this.emitPlayLog("win");
     const next = this.levelNum + 1;
     // Gold is granted only the FIRST time a level is cleared (no replay farming).
     const firstClear = this.claimFirstClearReward(this.levelNum);
