@@ -2515,8 +2515,9 @@ if (process.argv.includes("--ideacal")) {
 
 // Shared analyzer for the twin-decision meter (used by --twincheck and --tunetwins). Pass chestsArg to
 // evaluate a HYPOTHETICAL pairing without mutating the level. Returns {nDec, nTrivial, nMeaningful, ...}.
-function analyzeTwins(L, chestsArg) {
+function analyzeTwins(L, chestsArg, opts = {}) {
   const _ch = chestsArg || L.chests;
+  const allForks = !!opts.allForks; // true → measure EVERY decision fork, not just twin ones
   const track = L.track || "square", cols = L.cols, rows = L.rows, bays = 5, perRow = L.lanes || DEFAULT_LANES;
   const edges = trackEdges(track);
   const initState = () => {
@@ -2566,8 +2567,9 @@ function analyzeTwins(L, chestsArg) {
     if (mv.length) {
       const twinMoves = mv.filter((m) => m.kind === "group");
       const alts = mv.filter((m) => m.kind !== "group");
-      if (twinMoves.length && (alts.length || twinMoves.length > 1)) {
-        const choices = [...twinMoves]; if (alts.length) choices.push(alts[0]);
+      // twin mode: fork only where a twin competes. allForks: fork EVERY ≥2-choice turn.
+      const choices = allForks ? mv : (twinMoves.length ? [...twinMoves, ...(alts.length ? [alts[0]] : [])] : []);
+      if (choices.length >= 2) {
         const outs = choices.map((c) => { const s2 = clone(s); apply(s2, c); return finish(s2, guard); });
         nDec++;
         const allClear = outs.every((o) => o.cleared);
@@ -2673,6 +2675,88 @@ if (process.argv.includes("--twincheck")) {
     const r = analyze(L);
     const verdict = r.nDec === 0 ? "không có ngã rẽ xe đôi" : r.nMeaningful === 0 ? "❌ TẤT CẢ xe đôi trivial (chọn sao cũng thắng)" : `✔ ${r.nMeaningful}/${r.nDec} quyết định có hậu quả`;
     console.log(`L${k}  ${String(r.nDec).padStart(6)}  ${String(r.nTrivial).padStart(9)}  ${String(r.nMeaningful).padStart(9)}   ${verdict}`);
+  }
+  process.exit(0);
+}
+
+// ---- --tuneorder: raise a level's THINK-SCORE by re-ordering cars so some DEEP-colour cars arrive
+// EARLY (before their colour is exposed) → the player must HOLD them in bays while clearing shallow
+// layers → real bay pressure + choices that matter. Tries moving K deepest-colour solo cars to the
+// front (K=0..5), keeps the solvable ordering with the most meaningful decisions. Twins move as units.
+// Surgical + bounded (≈6 evals/level), unlike an infeasible full search. Run with ONLY=… to target.
+if (process.argv.includes("--tuneorder")) {
+  const data = JSON.parse(fs.readFileSync(OUT, "utf8"));
+  const LEVELS = (process.env.ONLY ? process.env.ONLY.split(",") : ["109", "110", "129"]).map(Number);
+  const depthOf = (L) => {
+    const { cols, rows } = L, occ = L.board.slice(), idx = (r, c) => r * cols + c, isC = (v) => v >= 0 && v < 90;
+    const sum = {}, cnt = {}; let layer = 0, alive = occ.filter(isC).length;
+    while (alive > 0 && layer < 500) { const exp = [];
+      for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) { const i = idx(r, c); if (!isC(occ[i])) continue;
+        if (r === 0 || c === 0 || r === rows - 1 || c === cols - 1 || !isC(occ[idx(r - 1, c)]) || !isC(occ[idx(r + 1, c)]) || !isC(occ[idx(r, c - 1)]) || !isC(occ[idx(r, c + 1)])) exp.push(i); }
+      if (!exp.length) break; for (const i of exp) { const col = occ[i]; sum[col] = (sum[col] || 0) + layer; cnt[col] = (cnt[col] || 0) + 1; occ[i] = -1; alive--; } layer++; }
+    const res = {}; for (const k in cnt) res[k] = sum[k] / cnt[k]; return res;
+  };
+  for (const k of LEVELS) {
+    const L = data[k]; if (!L || !L.slam) { console.log(`L${k} skip`); continue; }
+    const lanes = L.lanes || DEFAULT_LANES, dep = depthOf(L);
+    // units: twins (adjacent same pairId) stay together; solos single. Preserve current sequence.
+    const units = []; for (let i = 0; i < L.chests.length; i++) { const c = L.chests[i]; if (c.pairId != null && i + 1 < L.chests.length && L.chests[i + 1].pairId === c.pairId) { units.push([c, L.chests[i + 1]]); i++; } else units.push([c]); }
+    const isSolo = (u) => u.length === 1;
+    const unitDepth = (u) => Math.max(...u.map((c) => dep[c.color] || 0));
+    const flatten = (us) => us.flatMap((u) => u.map((c) => ({ ...c })));
+    const evalOrder = (us) => {
+      const ch = flatten(us);
+      const byp = {}; ch.forEach((c, i) => { if (c.pairId != null) (byp[c.pairId] = byp[c.pairId] || []).push(i); });
+      LANES = lanes;
+      const ok = solvablePairs(L.board, L.cols, L.rows, ch, L.track || "square", Object.values(byp), 5, lanes, L.layer2 || null);
+      if (!ok) return { ok: false };
+      // CLEARABILITY GUARD: a perfect solver clearing isn't enough (solvablePairs can false-positive
+      // into near-deadlock). Require a GOOD player (MC auto-drive, slam bay-lock) to clear it often
+      // enough that it's fair, not a lock-up. Rejects the too-tight reorderings that ground the sim.
+      const mc = testerReport(L.board, L.cols, L.rows, ch, L.track || "square", { skill: 0.9, trials: 8, seed: 4242, layer2: L.layer2 || null, tray: false, autoDrive: true, slam: true, choiceModel: false, bays: 5 }).winRate;
+      if (mc < 0.4) return { ok: false };
+      const r = analyzeTwins(L, ch, { allForks: true });
+      return { ok: r.cleared, meaningful: r.nMeaningful, nDec: r.nDec, mc, ch };
+    };
+    const base = evalOrder(units);
+    let best = { K: 0, ...base };
+    // deepest solo units, in front-ward move order
+    const solos = units.map((u, i) => ({ u, i })).filter((x) => isSolo(x.u)).sort((a, b) => unitDepth(b.u) - unitDepth(a.u));
+    for (let K = 1; K <= Math.min(3, solos.length); K++) {
+      const moveSet = new Set(solos.slice(0, K).map((x) => x.i));
+      const front = [], rest = [];
+      units.forEach((u, i) => (moveSet.has(i) ? front : rest).push(u));
+      // keep first row (lanes units) of `rest` visible up front, then the pulled-deep cars, then the rest
+      const head = rest.slice(0, lanes), tail = rest.slice(lanes);
+      const cand = [...head, ...front, ...tail];
+      const r = evalOrder(cand);
+      if (r.ok && (r.meaningful > (best.meaningful || 0))) best = { K, order: cand, ...r };
+    }
+    if (best.K > 0 && best.order) {
+      L.chests = best.ch;
+      console.log(`L${k}: baseline ${base.ok ? base.meaningful : "unsolv"}/${base.nDec} → moved ${best.K} deep cars up → ${best.meaningful}/${best.nDec} meaningful, solvable ✓`);
+    } else console.log(`L${k}: no reorder beat baseline (${base.ok ? base.meaningful : "unsolv"}/${base.nDec}) — kept as-is`);
+  }
+  const sorted = {}; for (const key of Object.keys(data).map(Number).sort((a, b) => a - b)) sorted[key] = data[key];
+  fs.writeFileSync(OUT, JSON.stringify(sorted, null, 2));
+  console.log(`\n✔ wrote reordered cars into designed.json — verify with --thinkscore / --diag`);
+  process.exit(0);
+}
+
+// ---- --thinkscore: whole-level "does it make you THINK" gauge — meaningful decisions across ALL
+// forks (not just twins), via the same fork-and-compare meter. Low % = the flow is forced/obvious
+// (launch front, collect, repeat) = trivial. Run: node scripts/build-levels.mjs --thinkscore
+if (process.argv.includes("--thinkscore")) {
+  const data = JSON.parse(fs.readFileSync(OUT, "utf8"));
+  const only = process.env.ONLY ? process.env.ONLY.split(",").map(Number) : null;
+  const list = Object.keys(data).map(Number).filter((k) => data[k] && data[k].slam && (!only || only.includes(k))).sort((a, b) => a - b);
+  console.log("Think-score — quyết định CÓ HẬU QUẢ trên MỌI ngã rẽ (fork mọi lượt ≥2 lựa chọn):\n");
+  console.log("lvl   meaningful/tổng   %    verdict");
+  for (const k of list) {
+    const L = data[k]; const r = analyzeTwins(L, null, { allForks: true });
+    const pct = r.nDec ? Math.round(100 * r.nMeaningful / r.nDec) : 0;
+    const verdict = r.nDec === 0 ? "không có ngã rẽ" : pct === 0 ? "❌ luồng ép buộc (không nghĩ)" : pct < 20 ? "hơi có nghĩ" : "✔ phải nghĩ";
+    console.log(`L${k}   ${String(r.nMeaningful).padStart(3)}/${String(r.nDec).padEnd(3)}        ${String(pct).padStart(3)}   ${verdict}`);
   }
   process.exit(0);
 }
