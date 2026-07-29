@@ -3155,7 +3155,7 @@ export class GameScene extends Phaser.Scene {
         this.time.delayedCall(340, () => {
           if (this.won || this.lost) return;
           const parked = this.slots[si] === v && !this.pending.includes(v) && !this.active.some((a) => a.view === v);
-          if (parked) this.relaunchFromSlot(si);
+          if (parked) this.relaunchFromSlot(si, true); // auto hop-2 of the queue launch — not a player bay tap (telemetry)
         });
       }
       this.notePeak();
