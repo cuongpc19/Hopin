@@ -2688,6 +2688,11 @@ if (process.argv.includes("--fixtwinrows")) {
   for (let k = 101; k <= 130; k++) {
     const L = data[k]; if (!L || !L.slam) continue;
     const lanes = L.lanes || DEFAULT_LANES;
+    // VERTICAL pairs (same column, i & i+lanes — commit 7c802fe) are valid and position-pinned; the
+    // horizontal re-pack below would tear them apart, so skip any level that has one.
+    const byp = {}; L.chests.forEach((c, i) => { if (c.pairId != null) (byp[c.pairId] = byp[c.pairId] || []).push(i); });
+    const hasVertical = Object.values(byp).some((g) => g.length === 2 && g[1] - g[0] === lanes);
+    if (hasVertical) continue;
     const units = []; for (let i = 0; i < L.chests.length; i++) { const c = L.chests[i]; if (c.pairId != null && i + 1 < L.chests.length && L.chests[i + 1].pairId === c.pairId) { units.push([c, L.chests[i + 1]]); i++; } else units.push([c]); }
     const out = [], pend = units.slice();
     while (pend.length) { let idx = 0; if (pend[0].length >= 2 && out.length % lanes === lanes - 1) { const si = pend.findIndex((u) => u.length === 1); if (si >= 0) idx = si; } out.push(...pend.splice(idx, 1)[0]); }
@@ -2820,13 +2825,18 @@ if (process.argv.includes("--tunetwins")) {
     const evalSet = (pairs) => { const ch = base.map((c) => ({ ...c })); pairs.forEach((p, idx) => { ch[p.a].pairId = idx; ch[p.b].pairId = idx; }); return { ch, r: analyzeTwins(L, ch) }; };
     // score each adjacent same-row diff-colour pair by meaningful decisions it makes on its own
     const cands = [];
-    const VIS_ROWS = 3; // twins only in the first rows (rope render rule, commit 2f12d6f; user bug 2026-07-30)
-    for (let i = 0; i < base.length - 1; i++) { if (i % lanes === lanes - 1) continue; if (base[i].color === base[i + 1].color) continue;
-      if (Math.floor(i / lanes) >= VIS_ROWS) continue;              // deep-row twin → rope not visible
-      if (base[i].color === 12 || base[i + 1].color === 12) continue; // navy-dark car reads as "rope to nothing" (user 2026-07-30)
-      const { r } = evalSet([{ a: i, b: i + 1 }]);
-      if (r.cleared && r.nMeaningful >= 1) cands.push({ a: i, b: i + 1, m: r.nMeaningful });
-    }
+    // Twins may sit ANY depth (user 2026-07-30). Valid shapes: HORIZONTAL (adjacent columns, same
+    // row) or VERTICAL (same column, adjacent rows — commit 7c802fe stacked twins). Row gap ≤1 by
+    // construction, so the rope stays short/visible as the queue pushes up. Only hard rule: no
+    // navy-12 member — that car blends into the mat and the rope reads as "nối vào không khí".
+    const tryPair = (a, b) => {
+      if (base[a].color === base[b].color) return;
+      if (base[a].color === 12 || base[b].color === 12) return;
+      const { r } = evalSet([{ a, b }]);
+      if (r.cleared && r.nMeaningful >= 1) cands.push({ a, b, m: r.nMeaningful });
+    };
+    for (let i = 0; i < base.length - 1; i++) { if (i % lanes !== lanes - 1) tryPair(i, i + 1); }         // horizontal
+    for (let i = 0; i + lanes < base.length; i++) tryPair(i, i + lanes);                                  // vertical (stacked)
     cands.sort((x, y) => y.m - x.m);
     // greedily combine non-overlapping pairs, keep only additions that RAISE meaningful & stay clearable
     const used = new Set(); let chosen = [], curM = 0;
