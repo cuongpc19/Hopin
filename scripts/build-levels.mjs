@@ -2679,6 +2679,26 @@ if (process.argv.includes("--twincheck")) {
   process.exit(0);
 }
 
+// ---- --fixtwinrows: repair the "twin straddles two rows" bug (user 2026-07-29) — a twin whose two
+// cars land in different rows (diagonal rope). Re-packs every level's car list so twin units never
+// start at the last column; preserves pairings and the overall order (only nudges when needed).
+if (process.argv.includes("--fixtwinrows")) {
+  const data = JSON.parse(fs.readFileSync(OUT, "utf8"));
+  let fixed = 0;
+  for (let k = 101; k <= 130; k++) {
+    const L = data[k]; if (!L || !L.slam) continue;
+    const lanes = L.lanes || DEFAULT_LANES;
+    const units = []; for (let i = 0; i < L.chests.length; i++) { const c = L.chests[i]; if (c.pairId != null && i + 1 < L.chests.length && L.chests[i + 1].pairId === c.pairId) { units.push([c, L.chests[i + 1]]); i++; } else units.push([c]); }
+    const out = [], pend = units.slice();
+    while (pend.length) { let idx = 0; if (pend[0].length >= 2 && out.length % lanes === lanes - 1) { const si = pend.findIndex((u) => u.length === 1); if (si >= 0) idx = si; } out.push(...pend.splice(idx, 1)[0]); }
+    if (JSON.stringify(out) !== JSON.stringify(L.chests)) { L.chests = out; fixed++; console.log(`L${k}: re-packed (twin row-straddle fixed)`); }
+  }
+  const sorted = {}; for (const key of Object.keys(data).map(Number).sort((a, b) => a - b)) sorted[key] = data[key];
+  fs.writeFileSync(OUT, JSON.stringify(sorted, null, 2));
+  console.log(`\n✔ ${fixed} level(s) re-packed`);
+  process.exit(0);
+}
+
 // ---- --tuneorder: raise a level's THINK-SCORE by re-ordering cars so some DEEP-colour cars arrive
 // EARLY (before their colour is exposed) → the player must HOLD them in bays while clearing shallow
 // layers → real bay pressure + choices that matter. Tries moving K deepest-colour solo cars to the
@@ -2703,7 +2723,18 @@ if (process.argv.includes("--tuneorder")) {
     const units = []; for (let i = 0; i < L.chests.length; i++) { const c = L.chests[i]; if (c.pairId != null && i + 1 < L.chests.length && L.chests[i + 1].pairId === c.pairId) { units.push([c, L.chests[i + 1]]); i++; } else units.push([c]); }
     const isSolo = (u) => u.length === 1;
     const unitDepth = (u) => Math.max(...u.map((c) => dep[c.color] || 0));
-    const flatten = (us) => us.flatMap((u) => u.map((c) => ({ ...c })));
+    // ROW-AWARE flatten: a twin unit must not start at the LAST column (i%lanes==lanes-1) or its two
+    // members fall in different rows (diagonal rope bug). When a twin would straddle, slot a solo in
+    // first to bump alignment. Keeps every twin in adjacent columns of the SAME row.
+    const flatten = (us) => {
+      const out = [], pend = us.map((u) => u.map((c) => ({ ...c })));
+      while (pend.length) {
+        let idx = 0;
+        if (pend[0].length >= 2 && out.length % lanes === lanes - 1) { const si = pend.findIndex((u) => u.length === 1); if (si >= 0) idx = si; }
+        out.push(...pend.splice(idx, 1)[0]);
+      }
+      return out;
+    };
     const evalOrder = (us) => {
       const ch = flatten(us);
       const byp = {}; ch.forEach((c, i) => { if (c.pairId != null) (byp[c.pairId] = byp[c.pairId] || []).push(i); });
@@ -2714,7 +2745,7 @@ if (process.argv.includes("--tuneorder")) {
       // into near-deadlock). Require a GOOD player (MC auto-drive, slam bay-lock) to clear it often
       // enough that it's fair, not a lock-up. Rejects the too-tight reorderings that ground the sim.
       const mc = testerReport(L.board, L.cols, L.rows, ch, L.track || "square", { skill: 0.9, trials: 8, seed: 4242, layer2: L.layer2 || null, tray: false, autoDrive: true, slam: true, choiceModel: false, bays: 5 }).winRate;
-      if (mc < 0.4) return { ok: false };
+      if (mc < (Number(process.env.TUNE_GUARD) || 0.4)) return { ok: false }; // TUNE_GUARD lowers the floor (harder levels) — safe now that telemetry catches unfair ones
       const r = analyzeTwins(L, ch, { allForks: true });
       return { ok: r.cleared, meaningful: r.nMeaningful, nDec: r.nDec, mc, ch };
     };
