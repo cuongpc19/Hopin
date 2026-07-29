@@ -432,6 +432,7 @@ export class GameScene extends Phaser.Scene {
     this.levelNum = levelNum;
     this.playLog = []; this.playStart = (typeof performance !== "undefined" ? performance.now() : 0); this.peakUsed = 0;
     if (typeof window !== "undefined") { (window as any).hopLog = () => console.log(localStorage.getItem("hopin_playlog") || "[]"); (window as any).hopLogClear = () => localStorage.removeItem("hopin_playlog"); }
+    // "start" streams AFTER makeLevel below (needs this.level); see the postLog("start") call there.
     this.children.removeAll();
     this.tweens.killAll();
     this.active = [];
@@ -473,6 +474,7 @@ export class GameScene extends Phaser.Scene {
     this.level = makeLevel(levelNum);
     this.slamMode = this.level.slam === true; // lock mode (tap bay cars; slot locks while out)
     this.trayMode = this.level.tray === true || this.slamMode; // slam reuses the tray bay system
+    this.postLog({ ev: "start", cars: this.level.chests.length, twins: new Set(this.level.chests.filter((c) => c.pairId != null).map((c) => c.pairId)).size, buried: this.level.chests.filter((c) => (c as unknown as { buried?: boolean }).buried).length });
     // SLAM: ALWAYS 5 waiting slots (the "Add" booster grows it to 6). No per-level bays.
     // Win when all REMOVABLE cells are gone (slimes + wood + soft rock). Hard rocks
     // stay forever and are not counted. A 2-layer cell counts TWICE (top + hidden bottom).
@@ -3137,8 +3139,10 @@ export class GameScene extends Phaser.Scene {
       if (freeSlots < need) { this.smallNotice("All waiting slots are locked!"); return; }
       if (this.active.length + this.pending.length + need > MAX_ON_TRACK) { this.trackFullNotice(); return; }
       this.playPop();
-      // TELEMETRY: a queue tap is the player's core DECISION — log it with context.
-      this.playLog.push({ ev: "launch", t: Math.round((typeof performance !== "undefined" ? performance.now() : 0) - this.playStart), colors: group.map((v) => v.chest.color), counts: group.map((v) => v.chest.count), buried: group.some((v) => !!(v.chest as unknown as { buried?: boolean }).buried), freeSlotsBefore: freeSlots, onRay: this.active.length + this.pending.length, twin: group.length > 1 });
+      // TELEMETRY: a queue tap is the player's core DECISION — log it with context (streamed live).
+      const launchEv = { ev: "launch", t: Math.round((typeof performance !== "undefined" ? performance.now() : 0) - this.playStart), colors: group.map((v) => v.chest.color), counts: group.map((v) => v.chest.count), buried: group.some((v) => !!(v.chest as unknown as { buried?: boolean }).buried), freeSlotsBefore: freeSlots, onRay: this.active.length + this.pending.length, twin: group.length > 1 };
+      this.playLog.push(launchEv);
+      this.postLog(launchEv);
       for (const v of group) {
         const p = this.findInInventory(v)!;
         p.col.splice(p.r, 1);
@@ -3226,6 +3230,7 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     this.playPop(); // cheerful "pop" as the car springs out of its bay
+    if (!auto) this.postLog({ ev: "bayTap", colors: group.map((m) => m.chest.color), counts: group.map((m) => m.chest.count), slot: slotIndex }); // slam: tapping a bay is the player's 2nd decision type
     for (const v of group) {
       const si = this.slots.indexOf(v);
       // TRAY mode: the car darts out to collect but its bay stays RESERVED (slots[si]
@@ -4644,15 +4649,20 @@ export class GameScene extends Phaser.Scene {
   // ---- Lose -----------------------------------------------------------
 
   private notePeak() { const u = this.slots.filter(Boolean).length; if (u > this.peakUsed) this.peakUsed = u; }
+  // Stream ONE telemetry event to the dev server IMMEDIATELY (user 2026-07-30: log every move as it
+  // happens — start/launch/bayTap — so an abandoned run still leaves its trail, not just win/lose).
+  private postLog(obj: Record<string, unknown>) {
+    if (!this.slamMode) return;
+    const line = JSON.stringify({ lvl: this.levelNum, t: Math.round((typeof performance !== "undefined" ? performance.now() : 0) - this.playStart), ...obj });
+    console.log("[HOPLOG] " + line);
+    try { fetch("/api/hoplog", { method: "POST", headers: { "Content-Type": "application/json" }, body: line }).catch(() => { }); } catch { /* ignore */ }
+  }
   private emitPlayLog(result: "win" | "lose") {
     if (!this.slamMode) return; // telemetry only for slam playtests
     this.notePeak();
     const summary = { lvl: this.levelNum, result, ms: Math.round((typeof performance !== "undefined" ? performance.now() : 0) - this.playStart), launches: this.playLog.length, peakBays: this.peakUsed, bays: this.slots.length, log: this.playLog };
-    const json = JSON.stringify(summary);
-    console.log("[HOPLOG] " + json);
     try { const arr = JSON.parse(localStorage.getItem("hopin_playlog") || "[]"); arr.push(summary); localStorage.setItem("hopin_playlog", JSON.stringify(arr)); } catch { /* ignore */ }
-    // POST to the dev server → playlog.jsonl on the PC (works even when playing from a phone).
-    try { fetch("/api/hoplog", { method: "POST", headers: { "Content-Type": "application/json" }, body: json }).catch(() => { }); } catch { /* ignore */ }
+    this.postLog({ ev: "result", ...summary }); // final recap line (streamed like every other event)
   }
 
   private lose(pending?: ActiveChest) {
