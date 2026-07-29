@@ -2415,7 +2415,7 @@ if (process.argv.includes("--slamgrade")) {
   console.log(`Slam grade — DIRECT model: ceiling × logistic(cognitive load)\n`);
   console.log("lvl   tgt  →win   ceil  load  note");
   const only = process.env.ONLY ? process.env.ONLY.split(",").map(Number) : null;
-  for (let k = 101; k <= 130; k++) {
+  for (let k = 101; k <= 150; k++) {
     if (only && !only.includes(k)) continue;
     const L = data[k]; if (!L || !L.slam) continue;
     // MECH=1: grade with the OLD mechanical sim (skill-slip Monte Carlo) instead of cogWinrate,
