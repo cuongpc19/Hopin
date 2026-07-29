@@ -2747,26 +2747,34 @@ if (process.argv.includes("--tuneorder")) {
       const mc = testerReport(L.board, L.cols, L.rows, ch, L.track || "square", { skill: 0.9, trials: 8, seed: 4242, layer2: L.layer2 || null, tray: false, autoDrive: true, slam: true, choiceModel: false, bays: 5 }).winRate;
       if (mc < (Number(process.env.TUNE_GUARD) || 0.4)) return { ok: false }; // TUNE_GUARD lowers the floor (harder levels) — safe now that telemetry catches unfair ones
       const r = analyzeTwins(L, ch, { allForks: true });
-      return { ok: r.cleared, meaningful: r.nMeaningful, nDec: r.nDec, mc, ch };
+      const loseForks = (r.meaningful || []).filter((m) => !m.allClear).length;
+      return { ok: r.cleared, meaningful: r.nMeaningful, loseForks, nDec: r.nDec, mc, ch };
     };
     const base = evalOrder(units);
-    let best = { K: 0, ...base };
-    // deepest solo units, in front-ward move order
+    // Score = LOSE-forks first (choices that actually LOSE — the real difficulty signal; bay-spread
+    // alone proved ≠ difficulty), then meaningful count. Deep cars are INSERTED at unit positions
+    // ~row1-row3 so the crunch lands at cars ~6-15 (user rule: lose mid-game, not at the very end).
+    const score = (r) => (r.ok ? (r.loseForks || 0) * 100 + (r.meaningful || 0) : -1);
+    let best = { K: 0, ...base, sc: score(base) };
     const solos = units.map((u, i) => ({ u, i })).filter((x) => isSolo(x.u)).sort((a, b) => unitDepth(b.u) - unitDepth(a.u));
-    for (let K = 1; K <= Math.min(3, solos.length); K++) {
-      const moveSet = new Set(solos.slice(0, K).map((x) => x.i));
-      const front = [], rest = [];
-      units.forEach((u, i) => (moveSet.has(i) ? front : rest).push(u));
-      // keep first row (lanes units) of `rest` visible up front, then the pulled-deep cars, then the rest
-      const head = rest.slice(0, lanes), tail = rest.slice(lanes);
-      const cand = [...head, ...front, ...tail];
+    const deepPool = solos.slice(0, 8); // the 8 deepest solo cars are the candidate "hold me" pieces
+    let s = (k * 2654435761) >>> 0; const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 0xffffffff);
+    const TRIES = Number(process.env.TRIES) || 40;
+    for (let t = 0; t < TRIES; t++) {
+      const K = 1 + Math.floor(rnd() * Math.min(4, deepPool.length));
+      const picks = deepPool.slice().sort(() => rnd() - 0.5).slice(0, K);
+      const moveSet = new Set(picks.map((x) => x.i));
+      const rest = units.filter((_, i) => !moveSet.has(i));
+      const at = lanes + Math.floor(rnd() * Math.min(8, Math.max(1, rest.length - lanes))); // insert in the car-5..13 band
+      const cand = [...rest.slice(0, at), ...picks.map((x) => x.u), ...rest.slice(at)];
       const r = evalOrder(cand);
-      if (r.ok && (r.meaningful > (best.meaningful || 0))) best = { K, order: cand, ...r };
+      const sc = score(r);
+      if (sc > best.sc) best = { K, order: cand, ...r, sc };
     }
     if (best.K > 0 && best.order) {
       L.chests = best.ch;
-      console.log(`L${k}: baseline ${base.ok ? base.meaningful : "unsolv"}/${base.nDec} → moved ${best.K} deep cars up → ${best.meaningful}/${best.nDec} meaningful, solvable ✓`);
-    } else console.log(`L${k}: no reorder beat baseline (${base.ok ? base.meaningful : "unsolv"}/${base.nDec}) — kept as-is`);
+      console.log(`L${k}: base lose${base.loseForks || 0}/mean${base.meaningful || 0} → moved ${best.K} deep cars mid → LOSE-forks ${best.loseForks}, meaningful ${best.meaningful}/${best.nDec}, mc=${Math.round((best.mc || 0) * 100)}% ✓`);
+    } else console.log(`L${k}: no reorder beat baseline (lose${base.loseForks || 0}/mean${base.meaningful || 0}) — kept as-is`);
   }
   const sorted = {}; for (const key of Object.keys(data).map(Number).sort((a, b) => a - b)) sorted[key] = data[key];
   fs.writeFileSync(OUT, JSON.stringify(sorted, null, 2));
@@ -2786,8 +2794,12 @@ if (process.argv.includes("--thinkscore")) {
   for (const k of list) {
     const L = data[k]; const r = analyzeTwins(L, null, { allForks: true });
     const pct = r.nDec ? Math.round(100 * r.nMeaningful / r.nDec) : 0;
-    const verdict = r.nDec === 0 ? "không có ngã rẽ" : pct === 0 ? "❌ luồng ép buộc (không nghĩ)" : pct < 20 ? "hơi có nghĩ" : "✔ phải nghĩ";
-    console.log(`L${k}   ${String(r.nMeaningful).padStart(3)}/${String(r.nDec).padEnd(3)}        ${String(pct).padStart(3)}   ${verdict}`);
+    // SPLIT the cause: a choice that actually LOSES (real difficulty) vs one that only shifts bay
+    // pressure (spread>1). Bay pressure ≠ difficulty (L105 proof) — so LOSE-count is the honest signal.
+    const loseN = (r.meaningful || []).filter((m) => !m.allClear).length;
+    const spreadN = (r.meaningful || []).filter((m) => m.allClear).length;
+    const verdict = r.nDec === 0 ? "không có ngã rẽ" : loseN === 0 ? "❌ không có nước THUA (dễ)" : "phải nghĩ";
+    console.log(`L${k}   meaningful ${String(r.nMeaningful).padStart(3)}/${String(r.nDec).padEnd(3)} (${String(pct).padStart(3)}%)  | LỰA-SAI-THUA ${String(loseN).padStart(2)}  bay-spread ${String(spreadN).padStart(2)}  ${verdict}`);
   }
   process.exit(0);
 }
@@ -2808,7 +2820,10 @@ if (process.argv.includes("--tunetwins")) {
     const evalSet = (pairs) => { const ch = base.map((c) => ({ ...c })); pairs.forEach((p, idx) => { ch[p.a].pairId = idx; ch[p.b].pairId = idx; }); return { ch, r: analyzeTwins(L, ch) }; };
     // score each adjacent same-row diff-colour pair by meaningful decisions it makes on its own
     const cands = [];
+    const VIS_ROWS = 3; // twins only in the first rows (rope render rule, commit 2f12d6f; user bug 2026-07-30)
     for (let i = 0; i < base.length - 1; i++) { if (i % lanes === lanes - 1) continue; if (base[i].color === base[i + 1].color) continue;
+      if (Math.floor(i / lanes) >= VIS_ROWS) continue;              // deep-row twin → rope not visible
+      if (base[i].color === 12 || base[i + 1].color === 12) continue; // navy-dark car reads as "rope to nothing" (user 2026-07-30)
       const { r } = evalSet([{ a: i, b: i + 1 }]);
       if (r.cleared && r.nMeaningful >= 1) cands.push({ a: i, b: i + 1, m: r.nMeaningful });
     }
