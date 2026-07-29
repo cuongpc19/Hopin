@@ -739,7 +739,23 @@ function playAverage(board, cols, rows, order, track, opts) {
   const clearCell = (i) => { if (lay && lay[i] >= 0) { occ[i] = lay[i]; lay[i] = -1; } else occ[i] = -1; remaining--; };
   // Linked car GROUPS (2=twin, 3=triple, …): chests sharing a pairId launch / drive /
   // park / leave together. `grouped` marks a car as a group member (can't act alone).
-  const cars = order.map((c) => ({ color: c.color, cap: c.count, grouped: false }));
+  // BURIED "?" cars: colour HIDDEN from the player until launched (revealed on commit). In the
+  // choice model the player can't score them by colour — launching one is a gamble that clogs a
+  // bay if it turns out unreachable. `revealed` flips true once launched (then its colour is known).
+  // IDEA B keeps buried cars VISIBLE for movement (revealed:true) — a hidden-info gamble makes the
+  // sim non-monotonic (deterministic high-skill play wedges the same way every trial). Instead the
+  // `buried` flag only RAISES the per-turn mistake probability (w_?), so difficulty stays monotonic.
+  const cars = order.map((c) => ({ color: c.color, cap: c.count, grouped: false, buried: (opts.choiceModel || opts.ideaB) && !!c.buried, revealed: opts.ideaB ? true : !(opts.choiceModel && !!c.buried) }));
+  // COGNITIVE LOAD (user 2026-07-29): a perfect player wins almost any solvable slam level, so
+  // real difficulty = human ERROR, and error rises with how much the level asks you to TRACK —
+  // hidden "?" cars, many colours, many cars. LOAD scales the softmax temperature so a rich /
+  // confusing board makes more mistakes (lower winrate) than a simple one at the SAME skill.
+  const _nCars = order.length || 1;
+  const _nBuried = opts.choiceModel ? order.reduce((a, c) => a + (c.buried ? 1 : 0), 0) : 0;
+  const _nColors = new Set(board.filter((v) => v >= 0 && v < 90)).size;
+  const LOAD = 1 + (Number(process.env.LOAD_A) || 1.5) * (_nBuried / _nCars)
+    + (Number(process.env.LOAD_B) || 0.8) * (_nColors / 12)
+    + (Number(process.env.LOAD_C) || 0.4) * (_nCars / 20);
   const byPid = new Map();
   order.forEach((c, i) => { if (c.pairId != null) { (byPid.get(c.pairId) || byPid.set(c.pairId, []).get(c.pairId)).push(i); } });
   const groups = [];
@@ -768,6 +784,7 @@ function playAverage(board, cols, rows, order, track, opts) {
   });
   const removeCar = (c) => { for (const col of columns) { const k = col.indexOf(c); if (k >= 0) { col.splice(k, 1); return; } } let p = parked.indexOf(c); if (p >= 0) { parked.splice(p, 1); return; } p = circ.indexOf(c); if (p >= 0) circ.splice(p, 1); };
   const juggleOne = () => {
+    if (process.env.NOJUGGLE === "1") return false; // SLAM: no "extra cars beyond bays" escape
     if (circ.length >= CIRC_CAP) return false; // no track room
     // Pushing out a 4th circling car is a rare "tay nhanh" burst, not routine.
     if (circ.length >= CIRC_EASY && rng() > CIRC_BURST) return false;
@@ -911,9 +928,28 @@ function playAverage(board, cols, rows, order, track, opts) {
       if (parked.length < bays) { parked.push(c); circ.splice(i, 1); }
     }
     const prod = [];
-    // productive solo cars (parked + column fronts)
-    for (const p of parked) if (!p.grouped && S.has(p.color)) prod.push({ kind: "s", car: p, gain: gainOf(p.color, E) });
-    for (let j = 0; j < perRow; j++) { const f = columns[j][0]; if (f && !f.grouped && S.has(f.color)) prod.push({ kind: "s", car: f, gain: gainOf(f.color, E) }); }
+    // SLAM: a car FROM THE QUEUE (hàng Xếp) can only come up if a bay is FREE — it occupies
+    // that bay the whole trip. A car ALREADY in a bay relaunches freely (keeps its bay). So
+    // when all bays are full of blocked cars, only bay cars can act → the real deadlock risk.
+    const queueCanEnter = !opts.slam || parked.length < bays;
+    // productive solo cars (parked + column fronts) — only ones whose colour the player KNOWS
+    // (not a still-covered "?" car).
+    for (const p of parked) if (!p.grouped && p.revealed && S.has(p.color)) prod.push({ kind: "s", car: p, gain: gainOf(p.color, E) });
+    if (queueCanEnter) for (let j = 0; j < perRow; j++) { const f = columns[j][0]; if (f && !f.grouped && f.revealed && S.has(f.color)) prod.push({ kind: "s", car: f, gain: gainOf(f.color, E) }); }
+    // BURIED "?" fronts: colour unknown → the player can only GAMBLE. Expected value = P(its
+    // colour is currently reachable) × a typical grab. If picked and it turns out blocked, it
+    // parks and clogs a bay (handled at launch). More "?" cars → more blind gambles → more risk.
+    let gambles = [];
+    const GMARGIN = Number(process.env.GAMBLE_MARGIN) || 2; // keep a safety buffer — never gamble the level into deadlock
+    if (opts.choiceModel && queueCanEnter && (bays - parked.length) >= GMARGIN) {
+      // Bayesian belief: P(a hidden car's colour is currently reachable) ≈ fraction of the tiles
+      // STILL on the board whose colour is exposed. A wiser gamble than a blind coin-flip.
+      const remCount = new Map(); let totalRem = 0;
+      for (const v of occ) if (v >= 0 && v < 90) { remCount.set(v, (remCount.get(v) || 0) + 1); totalRem++; }
+      let pReach = 0; for (const c of S) pReach += (remCount.get(c) || 0); pReach = totalRem ? pReach / totalRem : 0;
+      let meanGain = 0, ng = 0; for (const c of S) { meanGain += gainOf(c, E); ng++; } meanGain = ng ? meanGain / ng : 0;
+      for (let j = 0; j < perRow; j++) { const f = columns[j][0]; if (f && !f.grouped && !f.revealed) gambles.push({ kind: "s", car: f, gain: pReach * meanGain, gamble: true }); }
+    }
     // productive READY groups (ALL members at column-fronts or parked). Under auto-drive a
     // productive group is ALWAYS launchable — it circles the track & PEELS (freeing bays as
     // buried colours surface), needing bays only IF still blocked afterwards (handled at
@@ -925,13 +961,143 @@ function playAverage(board, cols, rows, order, track, opts) {
       const own = g.filter((c) => parked.includes(c)).length;
       const canPark = parked.length - own <= bays - g.length;
       const fullClear = g.every((c) => gainOf(c.color, E) >= c.cap);
-      if (autoDrive || canPark || fullClear) prod.push({ kind: "g", g, gain: g.reduce((s, c) => s + gainOf(c.color, E), 0) });
+      // SLAM: a queue group needs g.length FREE bays to come up (own members already hold theirs).
+      if (opts.slam ? (own === g.length || canPark) : (autoDrive || canPark || fullClear)) prod.push({ kind: "g", g, gain: g.reduce((s, c) => s + gainOf(c.color, E), 0) });
     }
-    if (prod.length) {
+    if (prod.length || gambles.length) {
       const slip = rng() > skill;
       if (!autoDrive && slip && rng() < 0.4 && parkOne()) continue; // manual only: perception miss → needless park (auto-drive never needlessly parks)
       let ch;
-      if (!slip) {
+      if (opts.choiceModel && opts.ideaB) {
+        // IDEA B (user 2026-07-29): keep the mechanical cap-5 sim, but replace the FIXED skill
+        // slip with a per-turn MISTAKE probability that RISES for hard situations (blind "?",
+        // twin baggage, big-count commitment, buried "key" colour) and FALLS for an obvious safe
+        // move — all gated by (1-skill) so higher skill is always ≥ as good (monotonic). When the
+        // mistake fires the player takes the RISKY move of that situation (blind gamble / clog a
+        // bay), so a hard situation actually "cắn". A level's winrate emerges from how often,
+        // across 100 trials, the flow throws these hard situations at the player. Knobs are env-
+        // tunable (IDEAB_*) and calibrated to real playtests (L114≈80, L115≈60, L130≈10).
+        const W_EASY = Number(process.env.IDEAB_EASY ?? 0.6);
+        const W_Q = Number(process.env.IDEAB_Q ?? 0.9);
+        const W_DOI = Number(process.env.IDEAB_DOI ?? 0.9);
+        const W_COUNT = Number(process.env.IDEAB_COUNT ?? 0.6);
+        const W_CHON = Number(process.env.IDEAB_CHON ?? 0.7);
+        const freeBays = bays - parked.length;
+        // unlock(c): how many NEW tiles a colour would expose if its exposed tiles were peeled now.
+        const unlockOf = (color) => {
+          const o2 = occ.slice(); for (const i of E) if (o2[i] === color) o2[i] = -1;
+          const E2 = exposedTiles(o2, cols, rows, edges);
+          let n = 0; for (const i of E2) if (!E.has(i) && isColor(o2[i])) n++; return n;
+        };
+        const remCount = new Map(); for (const v of occ) if (isColor(v)) remCount.set(v, (remCount.get(v) || 0) + 1);
+
+        // (1) w_? — buried "?" cars at/near the column fronts you must act on WITHOUT reading ahead;
+        // worse when bays are tight. (Cars stay visible in the sim; the "?" only raises mistake odds.)
+        let nBuriedFront = 0; for (let j = 0; j < perRow; j++) { const f = columns[j][0]; if (f && !f.grouped && f.buried) nBuriedFront++; }
+        const bayPressure = Math.max(0, Math.min(1, (2 - freeBays) / 2));
+        const kQ = W_Q * (Math.min(nBuriedFront, 2) / 2) * (0.4 + 0.6 * bayPressure);
+
+        // (2) w_đôi — twins that force BAGGAGE: one member useful (∈S) while another is wasted (∉S),
+        // so launching it grabs the needed half but clogs a bay with the unwanted half. More such
+        // competing twins (which cục nợ to accept) + bigger counts → harder.
+        const dilTwin = new Set(); let maxTwinCount = 0;
+        for (const g of groups) {
+          if (g.every((c) => c.cap === 0) || !groupReady(g)) continue;
+          const useful = g.some((c) => c.revealed && c.cap > 0 && S.has(c.color));
+          const waste = g.some((c) => c.revealed && c.cap > 0 && !S.has(c.color));
+          if (useful && waste) { dilTwin.add(g); const cc = g.reduce((s, c) => s + c.cap, 0); if (cc > maxTwinCount) maxTwinCount = cc; }
+        }
+        const kDoi = W_DOI * (Math.min(dilTwin.size, 3) / 3) * Math.min(maxTwinCount / 60, 1);
+
+        // (3) w_count — a big-count car to commit while the frontier already offers ≥2 colours
+        // (a heavy, hard-to-undo choice made while juggling several options).
+        let maxC = 0; for (const p of prod) if (p.kind === "s" && p.car.cap > maxC) maxC = p.car.cap;
+        const kCount = W_COUNT * Math.max(0, Math.min(1, (maxC - 15) / 15)) * Math.max(0, Math.min(1, (S.size - 1) / 2));
+
+        // (4) w_chôn — the useful colours are BURIED: the frontier is mostly "dead surface" (peeling
+        // it opens nothing) across several colours, while a big colour sits un-exposed underneath —
+        // the "A B C / D E F / X X X" trap where you must pick which dig-path reaches X.
+        let lowSurface = 0; for (const c of S) if (unlockOf(c) <= 1) lowSurface++;
+        let buriedBig = 0; for (const [col, ct] of remCount) if (!S.has(col) && ct > buriedBig) buriedBig = ct;
+        const kChon = W_CHON * (S.size ? lowSurface / S.size : 0) * Math.max(0, Math.min(1, (S.size - 1) / 2)) * Math.min(1, buriedBig / 20);
+
+        // easy: an obvious safe solo (empties this trip → never clogs a bay) and no ambiguity around it.
+        let easy = 0;
+        for (const p of prod) if (p.kind === "s" && p.car.revealed && S.has(p.car.color) && p.gain >= p.car.cap) { easy = 1; break; }
+        if (nBuriedFront > 0 || dilTwin.size > 0) easy = 0;
+
+        const pLo = Math.max(0, Math.min(1, (1 - skill) * (1 - W_EASY * easy + kQ + kDoi + kCount + kChon)));
+        const mistake = rng() < pLo;
+
+        // SMART play (no mistake): relaunch a bay car that empties > clean (non-baggage) twin >
+        // clean solo (empties this trip, never clogs) > among the rest the SMALLEST blocker (least
+        // bay clog), not raw max-gain — a skilled player minimises bay pressure, not tile count.
+        const smart = (arr) => {
+          const pick = (a) => { a.sort((x, y) => y.gain - x.gain); return a[0]; };
+          const freeing = arr.filter((p) => p.kind === "s" && parked.includes(p.car) && p.gain >= p.car.cap);
+          const grp = arr.filter((p) => p.kind === "g" && !dilTwin.has(p.g));
+          const clean = arr.filter((p) => p.kind === "s" && p.gain >= p.car.cap);
+          if (freeing.length) return pick(freeing);
+          if (grp.length) return pick(grp);
+          if (clean.length) return pick(clean);
+          // only blockers left: take the one that clogs a bay the LEAST (smallest leftover cap)
+          const rest = arr.slice().sort((a, b) => (a.kind === "s" ? a.car.cap - a.gain : 99) - (b.kind === "s" ? b.car.cap - b.gain : 99));
+          return rest[0];
+        };
+        if (!mistake) {
+          ch = smart(prod);
+          // A skilled player won't wedge the LAST free bay with a car that stays blocked — they DIG
+          // (park a front to reveal deeper cars) instead of clogging into deadlock. Keeps the
+          // movement policy from wedging deterministically at high skill.
+          if (ch.kind === "s" && !parked.includes(ch.car) && ch.gain < ch.car.cap && (bays - parked.length) <= 2 && parkOne()) continue;
+        } else {
+          // Mistake fired. If a HARD signal is active this turn, take ITS trap so it "cắn": commit a
+          // baggage twin (clogs a bay with the unwanted half), or launch a big blocker, or — under
+          // "?"/dig confusion — a blind random front (may be a blocker). Otherwise a mild random slip.
+          const dil = prod.filter((p) => p.kind === "g" && dilTwin.has(p.g));
+          const blockers = prod.filter((p) => p.kind === "s" && !parked.includes(p.car) && p.gain < p.car.cap);
+          if (dil.length) ch = dil[Math.floor(rng() * dil.length)];
+          else if ((kCount > 0.15 || nBuriedFront > 0 || kChon > 0.15) && blockers.length) ch = blockers.reduce((a, b) => (b.car.cap > a.car.cap ? b : a));
+          else ch = prod[Math.floor(rng() * prod.length)];
+        }
+      } else if (opts.choiceModel) {
+        // CHOICE MODEL (user 2026-07-29): the player picks by VISIBLE APPEAL, not perfect
+        // bay-planning. Score = tiles grabbed now (gain) + small bonuses for "obvious good"
+        // cues: a bay car that will EMPTY (frees a slot), a ready twin, and — the user's
+        // "liếc xe ngay sau" — a queue front whose NEXT car in the column is also reachable
+        // (digging reveals a usable car). Softmax(temperature T) turns skill into realistic
+        // imperfection: T rises as skill drops, so a 0.75 player mostly grabs the best move
+        // but sometimes takes an appealing-yet-bay-clogging one → real deadlock risk on
+        // bay-locked / twin-heavy boards. Tunable via env TEMP / weights for calibration.
+        const T = Math.max(0.4, (Number(process.env.TEMP) || 6) * (1 - skill) * LOAD);
+        const BAYW = Number(process.env.BAYW) || 20; // how strongly the player keeps bays free
+        const freeBays = bays - parked.length;
+        const behindReach = (p) => {
+          if (p.kind !== "s") return 0;
+          for (const col of columns) { const k = col.indexOf(p.car); if (k >= 0) { const b = col[k + 1]; return b && S.has(b.color) ? 1 : 0; } }
+          return 0; // a parked car has no "car behind"
+        };
+        // A decent player mostly keeps a bay FREE (so a blocked car always has somewhere to
+        // wait / a queue car can still enter). Bay-safety dominates raw gain; temperature adds
+        // occasional slips → real deadlock risk without the absurd over-clogging of the old score.
+        const score = (p) => {
+          let s = p.gain * 0.4;
+          if (p.kind === "s") {
+            const empties = p.gain >= p.car.cap;
+            if (parked.includes(p.car)) { if (empties) s += BAYW; }        // relaunch a bay car that EMPTIES → frees a slot (best)
+            else if (empties) s += BAYW * 0.6;                             // queue car that empties this trip → bay-neutral
+            else s -= BAYW / Math.max(1, freeBays);                        // queue car that will BLOCK → clogs a bay (worse when bays scarce)
+          } else if (p.kind === "g") s += BAYW * 0.3;                       // twins while ready
+          s += 3 * behindReach(p);                                          // liếc xe sau
+          return s;
+        };
+        const cand = prod.length ? prod : gambles; // play KNOWN moves first; only gamble on "?" when stuck
+        const ws = cand.map((p) => Math.exp(score(p) / T));
+        let sum = 0; for (const w of ws) sum += w;
+        let r = rng() * sum, idx = 0;
+        for (; idx < ws.length - 1; idx++) { r -= ws[idx]; if (r <= 0) break; }
+        ch = cand[idx];
+      } else if (!slip) {
         // Bay-aware smart play — keep waiting-bay space free so linked groups (which need
         // groupSize ADJACENT bays to park) never get wedged out by blocked solos. Priority:
         //  1) relaunch a PARKED car that will fully EMPTY → frees a bay
@@ -946,8 +1112,9 @@ function playAverage(board, cols, rows, order, track, opts) {
       } else ch = prod[Math.floor(rng() * prod.length)];
       if (ch.kind === "s") {
         const car = ch.car, wasParked = parked.includes(car);
+        car.revealed = true;      // launching a "?" car reveals its colour (gamble resolved)
         removeCar(car);           // take it off the queue / out of its bay to circle the track
-        doCollect(car);           // circle & peel its colour
+        doCollect(car);           // circle & peel its colour (a wrong gamble grabs nothing → it parks)
         if (autoDrive) autoRelaunch(); // peeling surfaced buried colours → parked cars self-clear, freeing bays
         if (car.cap > 0) {        // still blocked → it must wait in a bay
           if (parked.length < bays) parked.push(car);
@@ -998,11 +1165,11 @@ function playAverage(board, cols, rows, order, track, opts) {
   }
   return { win: remaining === 0, peak };
 }
-function testerReport(board, cols, rows, order, track, { skill = 0.6, trials = 100, seed = 1, bays = 5, perRow = LANES, layer2 = null, autoDrive = AUTO_DRIVE, tray = false } = {}) {
+function testerReport(board, cols, rows, order, track, { skill = 0.6, trials = 100, seed = 1, bays = 5, perRow = LANES, layer2 = null, autoDrive = AUTO_DRIVE, tray = false, slam = false, choiceModel = false, ideaB = false } = {}) {
   let wins = 0, peakSum = 0;
   for (let t = 0; t < trials; t++) {
     const rng = makeRng(seed + t * 7919 + 1);
-    const r = playAverage(board, cols, rows, order, track, { skill, bays, perRow, rng, layer2, autoDrive, tray });
+    const r = playAverage(board, cols, rows, order, track, { skill, bays, perRow, rng, layer2, autoDrive, tray, slam, choiceModel, ideaB });
     if (r.win) wins++;
     peakSum += r.peak;
   }
@@ -1733,6 +1900,117 @@ if (process.argv.includes("--calibrate")) {
   process.exit(0);
 }
 
+// ---- --build-slam: BUILD + tune L101-115 from the CSV images, sweeping board SIZE (≤25,
+// fast sim) × colours × lanes so each hits its target winrate at bays=5. Writes slam levels.
+if (process.argv.includes("--build-slam")) {
+  const CSVPATH = "C:/CuongPC/Game/Pixel Flow/Manythings/Design winrate/winratedesign1.csv";
+  const SLICED = "C:/CuongPC/Game/Pixel Flow/public/art/level art/sliced";
+  const TRIALS = Number(process.env.TRIALS || 40);
+  const only = process.env.ONLY ? new Set(process.env.ONLY.split(",").map(Number)) : null;
+  const walk = (dir) => { let out = []; for (const e of fs.readdirSync(dir, { withFileTypes: true })) { const p = path.join(dir, e.name); if (e.isDirectory()) out = out.concat(walk(p)); else out.push(p); } return out; };
+  const allImgs = walk(SLICED);
+  const findImg = (name) => allImgs.find((p) => path.basename(p) === name);
+  const rows = fs.readFileSync(CSVPATH, "utf8").split(/\r?\n/).slice(1);
+  const specs = [];
+  for (const line of rows) { const c = line.split(","); const lvl = parseInt(c[0], 10); if (!(lvl >= 1 && lvl <= 15)) continue; specs.push({ lvl, target: Number(c[2]), skill: Number(c[11]), img: c[16] }); }
+  const data = JSON.parse(fs.readFileSync(OUT, "utf8"));
+  const sizes = process.env.SIZES ? process.env.SIZES.split(",").map(Number) : [16, 19, 22, 25];
+  const Ks = process.env.KS ? process.env.KS.split(",").map(Number) : [3, 4, 5, 6, 7];
+  const laneOpts = [4, 3];
+  console.log(`Build-slam — ${TRIALS} trials, sweep size×K×lanes, bays=5\n`);
+  console.log("lvl  target  →win   size  K  lanes  note");
+  for (const sp of specs) {
+    if (only && !only.has(100 + sp.lvl)) continue;
+    const imgName = process.env.IMG || sp.img; // IMG env overrides the CSV image (swap a pathological subject)
+    const imgPath = findImg(imgName);
+    if (!imgPath) { console.log(`L${100 + sp.lvl}: img ${imgName} NOT FOUND`); continue; }
+    const { data: raw, info } = await sharp(imgPath).ensureAlpha().resize(512, 512, { fit: "inside", withoutEnlargement: true }).raw().toBuffer({ resolveWithObject: true });
+    let best = null;
+    for (const size of sizes) {
+      BOARD_SIZE = size;
+      for (const K of Ks) {
+        const board = buildPicture(raw, info.width, info.height, K);
+        if (!board) continue;
+        const cnt = {}; for (const v of board) if (v >= 0) cnt[v] = (cnt[v] || 0) + 1;
+        const chests = []; for (const col of Object.keys(cnt)) { let r = cnt[col]; while (r > 0) { const n = Math.min(r, 10); chests.push({ color: +col, count: n }); r -= n; } }
+        for (const lanes of laneOpts) {
+          const win = Math.round(testerReport(board, size, size, chests, "square", { skill: sp.skill, trials: TRIALS, seed: sp.lvl * 101 + 1, tray: true, bays: 5, perRow: lanes }).winRate * 100);
+          if (win <= 0) continue;
+          const score = Math.abs(win - sp.target);
+          if (!best || score < best.score || (score === best.score && lanes > best.lanes)) best = { size, K, lanes, win, board: board.slice(), chests, score };
+        }
+      }
+    }
+    if (!best) { console.log(`L${100 + sp.lvl}: no winnable build`); continue; }
+    const L = { track: "square", cols: best.size, rows: best.size, board: best.board, chests: best.chests, slam: true };
+    if (best.lanes !== DEFAULT_LANES) L.lanes = best.lanes;
+    data[100 + sp.lvl] = L;
+    const note = best.score <= 8 ? "✓" : (best.win < sp.target ? "⚠ khó hơn" : "⚠ dễ hơn");
+    console.log(`${100 + sp.lvl}   ${String(sp.target).padStart(4)}   ${String(best.win).padStart(4)}   ${String(best.size).padStart(3)}  ${best.K}  ${best.lanes}     ${note}`);
+  }
+  const s = {}; for (const k of Object.keys(data).map(Number).sort((a, b) => a - b)) s[k] = data[k];
+  fs.writeFileSync(OUT, JSON.stringify(s, null, 2));
+  console.log(`\n✔ written → ${path.relative(ROOT, OUT)}`);
+  process.exit(0);
+}
+
+// ---- --tune-slam: tune SLAM levels 100-114 to their per-level target+skill (from the
+// L1-15 design CSV) by re-ordering/burying cars, graded with the SLAM (tray) winrate.
+if (process.argv.includes("--tune-slam")) {
+  const TRIALS = Number(process.env.TRIALS || 100);
+  // Read the design targets+skill STRAIGHT from the user's CSV. L100+i ↔ CSV lvl 1+i.
+  const CSVPATH = "C:/CuongPC/Game/Pixel Flow/Manythings/Design winrate/winratedesign1.csv";
+  const rows = fs.readFileSync(CSVPATH, "utf8").split(/\r?\n/).slice(1);
+  const SPEC = {};
+  for (const line of rows) {
+    const c = line.split(",");
+    const lvl = parseInt(c[0], 10);
+    if (!(lvl >= 1 && lvl <= 15)) continue;
+    SPEC[100 + lvl] = { t: Number(c[2]), s: Number(c[11]) }; // L101↔L1 … L115↔L15; col3=target, col12=skill
+  }
+  const data = JSON.parse(fs.readFileSync(OUT, "utf8"));
+  const biases = [0];           // burial dropped for slam (weak/unreliable + slow); lanes is the lever
+  const bayOpts = [5];          // bays ALWAYS 5 (Add booster → 6). Not a lever.
+  const laneOpts = [4, 3];      // A: tune queue-lanes, minimum 3 (user 2026-07-27)
+  console.log(`Tune-slam — ${TRIALS} trials, targets+skill FROM CSV, bays=5, search lanes{4,3}×burial\n`);
+  console.log("lvl  target  skill  →win  bays lanes bias  note");
+  for (const k of Object.keys(SPEC).map(Number)) {
+    const L = data[k]; if (!L) continue;
+    const track = L.track || "square";
+    // CANONICAL car set (aggregate per colour → deterministic → idempotent tuning)
+    const tot = new Map();
+    for (const c of L.chests) tot.set(c.color, (tot.get(c.color) || 0) + c.count);
+    const cars = [];
+    for (const [color, total] of [...tot].sort((a, b) => a[0] - b[0])) { let r = total; while (r > 0) { const n = Math.min(r, 10); cars.push({ color, count: n }); r -= n; } }
+    const { t: target, s: skill } = SPEC[k];
+    let best = null;
+    for (const lanes of laneOpts) {
+      LANES = lanes;
+      for (const bays of bayOpts) {
+        for (const b of biases) {
+          const order = orderAtBias(cars, L.board, track, b, k * 101 + 7);
+          const win = Math.round(testerReport(L.board, L.cols, L.rows, order, track, { skill, trials: TRIALS, seed: k * 101 + 1, layer2: L.layer2 || null, tray: true, bays, perRow: lanes }).winRate * 100);
+          if (win <= 0) continue;
+          const score = Math.abs(win - target);
+          // closest to target; tie → gentler design (more lanes, less burial)
+          if (!best || score < best.score || (score === best.score && (lanes > best.lanes || (lanes === best.lanes && b < best.b)))) best = { b, bays, lanes, win, order, score };
+        }
+      }
+    }
+    if (!best) { LANES = laneOpts[laneOpts.length - 1]; const order = orderAtBias(cars, L.board, track, 0, k * 101 + 7); best = { b: 0, bays: 5, lanes: LANES, win: -1, order, score: 999 }; }
+    L.chests = best.order.map((c) => ({ color: c.color, count: c.count }));
+    if (best.bays !== 5) L.bays = best.bays; else delete L.bays;
+    if (best.lanes !== DEFAULT_LANES) L.lanes = best.lanes; else delete L.lanes;
+    let note = "";
+    if (best.win < target - 8) note = "⚠ vẫn khó hơn target — cần bớt màu/board";
+    else if (best.win > target + 8) note = "⚠ vẫn dễ hơn target";
+    else note = "✓";
+    console.log(String(k) + "   " + String(target).padStart(4) + "   " + skill.toFixed(1) + "   " + String(best.win).padStart(4) + "  " + String(best.bays).padStart(3) + "  " + String(best.lanes).padStart(4) + "  " + best.b.toFixed(1) + "  " + note);
+  }
+  if (!DRY) { fs.writeFileSync(OUT, JSON.stringify(data, null, 2)); console.log(`\n✔ written → ${path.relative(ROOT, OUT)}`); }
+  process.exit(0);
+}
+
 // ---- --test: grade the CURRENT designed.json with the average tester --------
 if (process.argv.includes("--test")) {
   const SKILL = Number(process.env.SKILL || 0.6);
@@ -1751,6 +2029,862 @@ if (process.argv.includes("--test")) {
   process.exit(0);
 }
 
+// ---- --tune-cars: fit each slam level's CARS (20-30 slimes each + twin count) to hit
+// its target winrate under the choice model (skill 0.75). Board/image stay fixed; the
+// lever is HOW MANY twin-pairs (xe đôi) — more twins = more bay-lock pressure = harder.
+if (process.argv.includes("--tune-cars")) {
+  const data = JSON.parse(fs.readFileSync(OUT, "utf8"));
+  const TARGET = { 101: 100, 102: 100, 103: 81, 104: 95, 105: 70, 106: 98, 107: 90, 108: 90, 109: 90, 110: 65, 111: 100, 112: 85, 113: 95, 114: 85, 115: 50,
+    116: 100, 117: 93, 118: 90, 119: 80, 120: 65, 121: 100, 122: 85, 123: 90, 124: 90, 125: 60, 126: 100, 127: 80, 128: 75, 129: 75, 130: 45 };
+  const SKILL = Number(process.env.SKILL) || 0.75;
+  const TRIALS = Number(process.env.TRIALS) || 24;
+  const ONLY = process.env.ONLY ? process.env.ONLY.split(",").map(Number) : null;
+  const genCars = (board, layer2, seed, cmin, cmax) => {
+    const rng = makeRng(seed); const cnt = new Map();
+    for (const v of board) if (v >= 0 && v < 90) cnt.set(v, (cnt.get(v) || 0) + 1);
+    if (layer2) for (const v of layer2) if (v >= 0) cnt.set(v, (cnt.get(v) || 0) + 1);
+    const cars = [];
+    for (const [color, total] of cnt) {
+      let rem = total;
+      while (rem > 0) {
+        let c = Math.min(rem, cmin + Math.floor(rng() * (cmax - cmin + 1)));
+        if (rem - c > 0 && rem - c < cmin) c = rem; // no tiny leftover car
+        cars.push({ color, count: c }); rem -= c;
+      }
+    }
+    return cars;
+  };
+  // round-robin by colour so the queue mixes colours (and twin pairs get 2 different colours)
+  const interleave = (cars) => {
+    const byCol = new Map(); for (const c of cars) { (byCol.get(c.color) || byCol.set(c.color, []).get(c.color)).push(c); }
+    const lanes = [...byCol.values()]; const out = []; let any = true;
+    while (any) { any = false; for (const l of lanes) if (l.length) { out.push(l.shift()); any = true; } }
+    return out;
+  };
+  const withTwins = (order, t) => {
+    const out = order.map((c) => ({ ...c })); delete out.pairId;
+    for (const c of out) delete c.pairId;
+    let made = 0;
+    for (let i = 0; i + 1 < out.length && made < t; i += 2) { out[i].pairId = made + 1; out[i + 1].pairId = made + 1; made++; }
+    return out;
+  };
+  const grade = (L, order, lanes) => { LANES = lanes; return Math.round(testerReport(L.board, L.cols, L.rows, order, L.track || "square", { skill: SKILL, trials: TRIALS, seed: 12345, layer2: L.layer2 || null, tray: false, autoDrive: true, slam: true, choiceModel: true, perRow: lanes, bays: 5 }).winRate * 100); };
+  console.log(`Tune-cars — choice model, skill ${SKILL}, lever=carSize×twins @ lanes ${DEFAULT_LANES} (preferred 20-30)\n`);
+  console.log("lvl  tgt  →win  car   twins order cars  note");
+  // Difficulty ladder easy→hard: big cars/few twins first (keeps preferred 20-30 for easy
+  // targets), then shrink cars + add twins for harder targets. Lanes stay at default — cutting
+  // them cliffs the board to unwinnable (0%), a useless lever.
+  const SIZES = [[24, 30], [18, 26], [12, 18], [8, 12], [5, 8]];
+  const twinOpts = [0, 2, 4, 6, 8];
+  for (let k = 101; k <= 130; k++) {
+    if (ONLY && !ONLY.includes(k)) continue;
+    const L = data[k]; if (!L) continue;
+    const target = TARGET[k]; delete L.lanes;
+    let best = null, done = false;
+    // Pass 1 = interleaved (colours mixed → easy). Pass 2 = grouped (colours clustered →
+    // forced order → hard). Only reach grouped if interleaved can't get low enough.
+    for (const grouped of [false, true]) {
+      if (best && best.win <= target + 8) break;
+      for (let si = 0; si < SIZES.length && !done; si++) {
+        const [cmin, cmax] = SIZES[si];
+        const raw = genCars(L.board, L.layer2 || null, k * 777 + 3, cmin, cmax);
+        const baseOrder = grouped ? raw : interleave(raw);
+        for (const t of twinOpts) {
+          if (t * 2 > baseOrder.length) break;
+          const order = withTwins(baseOrder, t);
+          const win = grade(L, order, DEFAULT_LANES);
+          const score = Math.abs(win - target);
+          if (!best || score < best.score) best = { grouped, si, t, win, order, score, cmin, cmax };
+          if (win <= target) { done = true; break; }
+        }
+      }
+      if (done) break;
+    }
+    L.chests = best.order;
+    const note = best.score <= 8 ? "OK" : (best.win > target ? "vẫn dễ (nhiều màu)" : "hơi khó");
+    console.log(`${k}  ${String(target).padStart(3)}  ${String(best.win).padStart(4)}  ${(best.cmin + "-" + best.cmax).padStart(5)}  ${String(best.t).padStart(4)}  ${(best.grouped ? "gộp" : "trộn").padStart(4)}  ${String(best.order.length).padStart(4)}  ${note}`);
+  }
+  const sorted = {}; for (const key of Object.keys(data).map(Number).sort((a, b) => a - b)) sorted[key] = data[key];
+  fs.writeFileSync(OUT, JSON.stringify(sorted, null, 2));
+  console.log("\n✔ wrote tuned cars into designed.json");
+  process.exit(0);
+}
+
+// DIRECT winrate model (user 2026-07-29). A perfect-memory player wins almost any SOLVABLE slam
+// level (the mechanic rarely deadlocks with 5 bays), so a mechanical bay-lock sim is bimodal
+// (0% or 100%) and useless for smooth targets. Instead: winrate = CEILING × COGNITIVE FACTOR.
+//   • ceiling  = full-info careful play clears it? (~1 for solvable; <1 flags a logistics bug)
+//   • load     = how much the level makes a HUMAN err: hidden "?" cars + colours + car count
+//   • cog      = logistic(load): a smooth 100%→~0% curve as the board gets more confusing
+// Params (LOAD_A/B/C, LOG_K/LOG_M) are calibrated to real playtests — few, each interpretable.
+// ---- cognitive-load weights read from the user-editable CSV -------------------------
+function parseCsvLine(line) {
+  const out = []; let cur = "", q = false;
+  for (let i = 0; i < line.length; i++) { const ch = line[i];
+    if (q) { if (ch === '"') { if (line[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += ch; }
+    else { if (ch === '"') q = true; else if (ch === ",") { out.push(cur); cur = ""; } else cur += ch; }
+  }
+  out.push(cur); return out;
+}
+let _WCACHE = null;
+function loadWeights() {
+  if (_WCACHE) return _WCACHE;
+  const w = { LOG_M: 2.10, LOG_K: 2.45 };
+  try {
+    const p = path.join(ROOT, "..", "Pixel Flow", "Manythings", "Design winrate", "cognitive-load-weights.csv");
+    const lines = fs.readFileSync(p, "utf8").split(/\r?\n/).slice(1).filter(Boolean);
+    for (const line of lines) { const c = parseCsvLine(line); const key = c[0]; const val = Number(c[3]); const on = c[4];
+      if (key && isFinite(val)) w[key] = (on === "0") ? 0 : val; }
+  } catch { /* keep defaults */ }
+  return (_WCACHE = w);
+}
+// palette (for colour-confusion factor)
+const _PAL = ["#fe4038","#fe8f28","#fed734","#37cb5c","#2ac0cc","#408afa","#9756fd","#fd55a5","#ffffff","#cbcbcb","#4a4a4a","#985828","#262630","#3050a0","#e0b888","#98d0f0","#208038","#f8c0c8","#902030"]
+  .map((h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)]);
+const _d2 = (a, b) => { const x = a[0] - b[0], y = a[1] - b[1], z = a[2] - b[2]; return x * x + y * y + z * z; };
+
+// ---- the ten cognitive-load factors, each normalised to ~[0,1] ----------------------
+function cognitiveLoad(L, W) {
+  const board = L.board, C = L.cols, R = L.rows, chests = L.chests;
+  const track = L.track || "square";
+  const filled = board.reduce((a, v) => a + (v >= 0 && v < 90 ? 1 : 0), 0) || 1;
+  const nCars = chests.length || 1;
+  const lanes = L.lanes || DEFAULT_LANES;
+  const f = {};
+  // ① buried, ② layer2, ③ hidden
+  f.buried = chests.reduce((a, c) => a + (c.buried ? 1 : 0), 0) / nCars;
+  f.layer2 = L.layer2 ? L.layer2.reduce((a, v) => a + (v >= 0 ? 1 : 0), 0) / filled : 0;
+  f.hidden = L.hidden ? L.hidden.reduce((a, v) => a + (v >= 0 ? 1 : 0), 0) / filled : 0;
+  // ④+⑤ frontier colour width — peel the board outside-in, average # distinct colours per layer
+  {
+    const edges = trackEdges(track), occ = board.slice(); let sum = 0, steps = 0, guard = 0;
+    while (guard++ < 3000) {
+      const E = exposedTiles(occ, C, R, edges); if (!E.size) break; // exposedTiles returns a Set
+      const S = new Set(); for (const i of E) if (occ[i] >= 0 && occ[i] < 90) S.add(occ[i]);
+      if (!S.size) break;
+      sum += S.size; steps++;
+      for (const i of E) if (occ[i] >= 0 && occ[i] < 90) occ[i] = -1; // clear this ring
+    }
+    f.roi_mau = Math.min(1, (steps ? sum / steps : 0) / 5); // ~5 colours at the frontier = max load
+  }
+  // ⑨ same colour buried across multiple lanes → "which lane to dig"
+  {
+    const byCol = new Map();
+    chests.forEach((c, i) => { if (c.buried) { const ln = i % lanes; if (!byCol.has(c.color)) byCol.set(c.color, new Set()); byCol.get(c.color).add(ln); } });
+    let s = 0; for (const set of byCol.values()) s += Math.max(0, set.size - 1);
+    f.cung_mau_nhieu_hang = Math.min(1, s / Math.max(1, lanes));
+  }
+  // ② parallel twins sharing a colour → "which twin to pick", WEIGHTED by slime count
+  // (a big-count twin is more painful to mis-choose). Also counts twins whose colours differ
+  // but are all currently needed. Near 0 unless the level actually has ambiguous twins.
+  {
+    const groups = new Map();
+    chests.forEach((c) => { if (c.pairId != null) { if (!groups.has(c.pairId)) groups.set(c.pairId, []); groups.get(c.pairId).push(c); } });
+    const arr = [...groups.values()];
+    let score = 0;
+    for (let i = 0; i < arr.length; i++) for (let j = i + 1; j < arr.length; j++) {
+      const ci = new Set(arr[i].map((c) => c.color));
+      if (arr[j].some((c) => ci.has(c))) { // share a colour → ambiguous choice
+        const cnt = arr[i].concat(arr[j]).reduce((a, c) => a + c.count, 0);
+        score += Math.min(1, cnt / 60); // big counts hurt more when you pick wrong
+      }
+    }
+    f.xe_doi_giao_mau = Math.min(1, score);
+  }
+  // ③ BOARD order trap — "màu bị chôn ở dưới, giữa có màu không cần". Peel outside-in; for each
+  // colour record the range of peel-layers it spans. A colour smeared across many layers means
+  // you keep coming back to it (it re-buries needed colours) → real must-plan difficulty. This is
+  // measured on the BOARD (peel structure), not the queue.
+  {
+    const edges = trackEdges(track), occ = board.slice();
+    const first = new Map(), last = new Map(); let layer = 0, guard = 0;
+    while (guard++ < 3000) {
+      const E = exposedTiles(occ, C, R, edges); if (!E.size) break;
+      const cs = new Set(); for (const i of E) if (occ[i] >= 0 && occ[i] < 90) cs.add(occ[i]);
+      if (!cs.size) break;
+      for (const c of cs) { if (!first.has(c)) first.set(c, layer); last.set(c, layer); }
+      for (const i of E) if (occ[i] >= 0 && occ[i] < 90) occ[i] = -1;
+      layer++;
+    }
+    let spread = 0, n = 0; for (const c of first.keys()) { spread += last.get(c) - first.get(c); n++; }
+    f.bay_thu_tu = layer > 1 ? Math.min(1, (n ? spread / n : 0) / (layer - 1)) : 0;
+  }
+  // ⑥ twins, ⑧ colour confusion, length + raw colours
+  f.xe_doi = chests.reduce((a, c) => a + (c.pairId != null ? 1 : 0), 0) / nCars;
+  {
+    const used = [...new Set(board.filter((v) => v >= 0 && v < 90))];
+    let minD = Infinity;
+    for (let i = 0; i < used.length; i++) for (let j = i + 1; j < used.length; j++) { const d = _d2(_PAL[used[i]], _PAL[used[j]]); if (d < minD) minD = d; }
+    f.mau_nham = used.length < 2 ? 0 : Math.max(0, 1 - minD / 4000); // colours within ~63/chan = confusable
+  }
+  f.do_dai = Math.min(1.5, nCars / 25);
+  f.so_mau_tho = new Set(board.filter((v) => v >= 0 && v < 90)).size / 12;
+  // weighted sum
+  let load = 0; for (const k in f) load += (W[k] || 0) * f[k];
+  return { load, f };
+}
+
+function cogWinrate(L) {
+  const W = loadWeights();
+  LANES = L.lanes || DEFAULT_LANES;
+  // ceiling: skill 0.95, full info (no choice model / no "?" blindness), no bay-lock → ~1 if solvable
+  let ceil = 1;
+  try { ceil = testerReport(L.board, L.cols, L.rows, L.chests, L.track || "square", { skill: 0.95, trials: 16, seed: 777, layer2: L.layer2 || null, tray: false, autoDrive: true, slam: false, choiceModel: false, bays: 5 }).winRate; }
+  catch { ceil = 1; }
+  const { load, f } = cognitiveLoad(L, W);
+  const M = Number(process.env.LOG_M) || W.LOG_M || 2.10, K = Number(process.env.LOG_K) || W.LOG_K || 2.45;
+  const cog = 1 / (1 + Math.exp(K * (load - M)));
+  return { win: Math.round(ceil * cog * 100), ceil, load, cog, f };
+}
+
+// ---- IDEA B (user 2026-07-29) — MONOTONIC by construction --------------------------
+// winrate = solvable × Π over the perfect-player line of (1 − (1−skill)·hazard_turn).
+// We replay the SAME greedy line that solvablePairs() uses to prove a level winnable — it
+// clears every solvable level without ever wedging, so removing player randomness (skill→1)
+// can only HELP: the model is monotonic in skill by construction (the flaw that killed the
+// Monte-Carlo version). Difficulty is entirely "lỡ tay": at each turn the player faces, a
+// hazard rises with the four hard signals (blind "?", twin baggage, big-count-while-busy,
+// buried key colour) and falls for an obvious-safe move — exactly the design we agreed.
+//   hazard = clamp(w? + wđôi + wcount + wchôn − a·easy, 0, 1);  survival ×= 1 − (1−skill)·hazard
+// Knobs (env, calibrated to playtests): IDEAB_EASY/Q/DOI/COUNT/CHON. `knobs` overrides env (for
+// the calibrator); `ceilOverride` supplies a pre-measured ceil so a knob sweep skips the slow
+// Monte-Carlo ceil each iteration (ceil is knob-independent).
+const _CEIL_CACHE = new Map();
+function ideaBCeil(L, key) {
+  if (key != null && _CEIL_CACHE.has(key)) return _CEIL_CACHE.get(key);
+  LANES = L.lanes || DEFAULT_LANES;
+  // Measure ceil FORGIVINGLY (classic auto-drive, NOT slam bay-lock): ceil is meant to be pure
+  // LOGISTICS headroom — "can a careful player collect every tile at all". Measuring under slam
+  // bay-lock would false-negative solvable-but-tight big boards (the mechanical line wedges where a
+  // smarter one wins) and wrongly ZERO a winnable level. Slam's bay pressure is carried by the
+  // hazard model instead (its greedy line respects bays; w_count fires under bay pressure).
+  let ceil = 1;
+  try { ceil = testerReport(L.board, L.cols, L.rows, L.chests, L.track || "square", { skill: 0.92, trials: 20, seed: 777, layer2: L.layer2 || null, tray: false, autoDrive: true, slam: false, choiceModel: false, bays: 5 }).winRate; }
+  catch { ceil = 1; }
+  if (key != null) _CEIL_CACHE.set(key, ceil);
+  return ceil;
+}
+function ideaBWinrate(L, skill, knobs, ceilOverride) {
+  const track = L.track || "square";
+  const cols = L.cols, rows = L.rows, bays = 5;
+  const perRow = L.lanes || DEFAULT_LANES;
+  const edges = trackEdges(track);
+  const singlePass = track === "line" || track === "u" || track === "arch";
+  // pairId groups (twins/triples) as index arrays — same shape solvablePairs expects
+  const byPid = new Map();
+  L.chests.forEach((c, i) => { if (c.pairId != null) { (byPid.get(c.pairId) || byPid.set(c.pairId, []).get(c.pairId)).push(i); } });
+  const groupsIdx = [...byPid.values()].filter((g) => g.length >= 2);
+  // CEIL = logistics headroom, measured softly (a careful, full-info, auto-drive player). Using a
+  // soft Monte-Carlo avoids the greedy solver's FALSE negatives on big boards (it wedges where a
+  // smarter line wins). ceil≈1 = clean logistics; ceil≈0 = the board itself is too tight to clear.
+  const ceil = ceilOverride != null ? ceilOverride : ideaBCeil(L);
+  if (ceil < 0.02) return { win: 0, ceil: 0, survival: 0, hard: 0 }; // logistics-broken → careful play can't clear
+
+  // No W_EASY knob: in the event-based model "easy relief" is IMPLICIT — an obvious safe move simply
+  // produces no hard-event (hz stays 0), so it never erodes survival. Only the 4 hard signals weigh in.
+  const W_Q = knobs?.Q ?? Number(process.env.IDEAB_Q ?? 0.9);
+  const W_DOI = knobs?.DOI ?? Number(process.env.IDEAB_DOI ?? 0.9);
+  const W_COUNT = knobs?.COUNT ?? Number(process.env.IDEAB_COUNT ?? 0.6);
+  const W_CHON = knobs?.CHON ?? Number(process.env.IDEAB_CHON ?? 0.7);
+
+  const occ = L.board.slice();
+  const lay = L.layer2 ? L.layer2.slice() : null;
+  let remaining = occ.reduce((a, v) => a + (isColor(v) ? 1 : 0), 0) + (lay ? lay.reduce((a, v) => a + (v >= 0 ? 1 : 0), 0) : 0);
+  const clearCell = (i) => { if (lay && lay[i] >= 0) { occ[i] = lay[i]; lay[i] = -1; } else occ[i] = -1; remaining--; };
+  const cars = L.chests.map((c) => ({ color: c.color, cap: c.count, grouped: false, buried: !!c.buried }));
+  const groupCars = groupsIdx.map((idxs) => { const g = idxs.map((i) => cars[i]); g.forEach((c) => (c.grouped = true)); return g; });
+  const columns = Array.from({ length: perRow }, () => []);
+  cars.forEach((c, i) => columns[i % perRow].push(c));
+  const parked = [];
+  const gainOf = (color, E) => { let n = 0; for (const i of E) if (occ[i] === color) n++; return n; };
+  const collect = (car) => {
+    if (singlePass) { const E = exposedTiles(occ, cols, rows, edges); for (const i of E) { if (car.cap <= 0) break; if (occ[i] === car.color) { clearCell(i); car.cap--; } } }
+    else { while (car.cap > 0) { const E = exposedTiles(occ, cols, rows, edges); let t = -1; for (const i of E) if (occ[i] === car.color) { t = i; break; } if (t < 0) break; clearCell(t); car.cap--; } }
+  };
+  const removeCar = (c) => { for (const col of columns) { const k = col.indexOf(c); if (k >= 0) { col.splice(k, 1); return; } } const p = parked.indexOf(c); if (p >= 0) parked.splice(p, 1); };
+  const groupReady = (g) => g.every((c) => { if (parked.includes(c)) return true; for (const col of columns) { const k = col.indexOf(c); if (k >= 0) return col.slice(0, k).every((x) => g.includes(x)); } return false; });
+  const unlockOf = (color, E) => { const o2 = occ.slice(); for (const i of E) if (o2[i] === color) o2[i] = -1; const E2 = exposedTiles(o2, cols, rows, edges); let n = 0; for (const i of E2) if (!E.has(i) && isColor(o2[i])) n++; return n; };
+
+  let survival = 1, hardTurns = 0, guard = 0, peakBays = 0, tightTurns = 0;
+  const sig = { q: 0, doi: 0, count: 0, chon: 0 };   // summed hazard contributed by each signal
+  const nsig = { q: 0, doi: 0, count: 0, chon: 0 };  // # events per signal
+  while (remaining > 0 && guard++ < L.chests.length * 6 + 100) {
+    const E = exposedTiles(occ, cols, rows, edges);
+    const S = new Set(); for (const i of E) S.add(occ[i]);
+    const freeBays = bays - parked.length;
+    if (parked.length > peakBays) peakBays = parked.length;   // how tight the bays ever get (perfect line)
+    if (freeBays <= 1) tightTurns++;                          // turns spent at the deadlock edge
+
+    const bayPressure = Math.max(0, Math.min(1, (2 - freeBays) / 2));
+    // ---- CHOOSE the perfect-player greedy MOVE (identical priority to solvablePairs) ----
+    // We first DECIDE the move, then attach a difficulty EVENT to it (counted ONCE), then execute.
+    // Event-based (not per-turn) so a structure that lingers many turns isn't counted many times —
+    // difficulty tracks the NUMBER of hard decisions, never the level's length.
+    let pick = null; // {kind, g?|car?|j?}
+    for (const g of groupCars) {
+      if (g.every((c) => c.cap === 0) || !groupReady(g)) continue;
+      if (!g.some((c) => c.cap > 0 && S.has(c.color))) continue;
+      const own = g.filter((c) => parked.includes(c)).length;
+      if (parked.length - own > bays - g.length) continue;
+      pick = { kind: "group", g }; break;
+    }
+    if (!pick) {
+      const singles = [...parked.filter((c) => !c.grouped), ...columns.map((c) => c[0]).filter((c) => c && !c.grouped)];
+      for (const c of singles) if (c.cap > 0 && S.has(c.color)) { pick = { kind: "solo", car: c }; break; }
+    }
+    let nDigCols = 0;
+    if (!pick) {
+      const np = []; for (let j = 0; j < perRow; j++) { const f = columns[j][0]; if (f && !f.grouped) np.push(j); }
+      nDigCols = np.length;
+      if (np.length && parked.length < bays) { np.sort((a, b) => columns[b].length - columns[a].length); pick = { kind: "dig", j: np[0] }; }
+    }
+    if (!pick) {
+      for (const g of groupCars) {
+        if (g.every((c) => c.cap === 0) || !groupReady(g)) continue;
+        if (parked.length > bays - g.length) continue;
+        pick = { kind: "sendgroup", g }; break;
+      }
+    }
+    if (!pick) break; // greedy line wedged early — use the hazards of the turns it DID play
+
+    // ---- DIFFICULTY EVENT of the chosen move (the chance a HUMAN, not this perfect line, slips) ----
+    // Each signal's contribution is tracked separately so calibration can SEE why a level is hard.
+    let hz = 0;
+    if (pick.kind === "solo") {
+      // (1) w_? — launching a buried "?" car is a memory gamble; harder under bay pressure. Counted
+      // ONCE per car (the first reveal) — relaunching it later isn't a gamble, you know its colour now.
+      if (pick.car.buried && !pick.car._qSeen) { pick.car._qSeen = true; const c = W_Q * (0.5 + 0.5 * bayPressure); hz += c; sig.q += c; nsig.q++; }
+      // (3) w_count — committing a big BLOCKER (won't empty now → locks a bay) at the PINCH point
+      // (only ≤1 free bay left) with ≥3 colours tempting. Big cars are the norm, so this must be a
+      // genuine crisis, not a routine commit — otherwise it re-fires every turn and conflates length.
+      if (freeBays <= 1 && !parked.includes(pick.car) && gainOf(pick.car.color, E) < pick.car.cap) {
+        const c = W_COUNT * Math.max(0, Math.min(1, (pick.car.cap - 18) / 12)) * Math.max(0, Math.min(1, (S.size - 2) / 2));
+        if (c > 0) { hz += c; sig.count += c; nsig.count++; }
+      }
+    } else if (pick.kind === "group") {
+      // (2) w_đôi — a twin forced to carry BAGGAGE: one member useful (∈S), another wasted (∉S) → clogs a bay.
+      const g = pick.g;
+      const useful = g.some((c) => c.cap > 0 && S.has(c.color)), waste = g.some((c) => c.cap > 0 && !S.has(c.color));
+      if (useful && waste) { const c = W_DOI * Math.min(g.reduce((s, c) => s + c.cap, 0) / 60, 1); hz += c; sig.doi += c; nsig.doi++; }
+    } else if (pick.kind === "dig") {
+      // (4) w_chôn — the TRUE "ABC/DEF/XXX" trap: you're forced to dig, the WHOLE exposed frontier
+      // is dead surface (peeling any of it opens nothing), a genuinely big colour sits buried under
+      // it, and there are ≥2 columns to choose between (which row do I dig toward the key?). Routine
+      // digging (some surface still opens things, or nothing valuable buried) is NOT this.
+      let lowSurface = 0; for (const c of S) if (unlockOf(c, E) <= 1) lowSurface++;
+      let buriedBig = 0; const rc = new Map(); for (const v of occ) if (isColor(v)) rc.set(v, (rc.get(v) || 0) + 1);
+      for (const [col, ct] of rc) if (!S.has(col) && ct > buriedBig) buriedBig = ct;
+      if (S.size >= 3 && lowSurface === S.size && buriedBig >= 15 && nDigCols >= 2) {
+        const c = W_CHON * Math.max(0, Math.min(1, (nDigCols - 1) / 2)) * Math.min(1, buriedBig / 25);
+        hz += c; sig.chon += c; nsig.chon++;
+      }
+    }
+    if (hz > 0.05) { survival *= (1 - (1 - skill) * Math.min(1, hz)); hardTurns++; }
+
+    // ---- EXECUTE the chosen move ----
+    if (pick.kind === "group" || pick.kind === "sendgroup") {
+      const g = pick.g; for (const c of g) removeCar(c); for (const c of g) collect(c);
+      if (!g.every((c) => c.cap === 0)) for (const c of g) parked.push(c);
+    } else if (pick.kind === "solo") {
+      const c = pick.car, wasParked = parked.includes(c); collect(c);
+      if (c.cap === 0) removeCar(c); else if (!wasParked) { removeCar(c); if (parked.length < bays) parked.push(c); }
+    } else if (pick.kind === "dig") {
+      parked.push(columns[pick.j].shift());
+    }
+  }
+  // WEDGE: the natural greedy line got STUCK although ceil says the board IS clearable → it's a
+  // tricky reroute puzzle. An average player mostly gets stuck too; only sharper play finds the
+  // non-obvious escape → scale by skill (stays monotonic). Flagged so calibration can spot these.
+  const cleared = remaining === 0;
+  if (!cleared && ceil >= 0.02) survival *= skill;
+  return { win: Math.round(ceil * survival * 100), ceil, survival, hard: hardTurns, cleared, sig, nsig, peakBays, tightTurns };
+}
+
+// ---- --slamgrade: one-process grade of L101-115 under the CORRECT slam model -------
+// (non-tray auto-drive = the same algorithm that grades classic L1-15) + no-juggle
+// (slam can't push extra cars beyond its 5 bays). Grades each at its DESIGN skill vs
+// the L1-15 CSV target. TRIALS env (default 40) trades accuracy for speed on big boards.
+if (process.argv.includes("--slamgrade")) {
+  if (process.env.NOJUGGLE == null) process.env.NOJUGGLE = "1"; // slam: no "extra cars beyond bays" escape hatch (override with NOJUGGLE=0)
+  const data = JSON.parse(fs.readFileSync(OUT, "utf8"));
+  const TRIALS = Number(process.env.TRIALS) || 40;
+  const FIXED_SKILL = process.env.SKILL != null ? Number(process.env.SKILL) : 0.75; // user: average-good player, fixed
+  // targets: L101-115 = classic L1-15; L116-130 = the 50→10% difficulty ramp (user 2026-07-29)
+  const TG = { 101: 100, 102: 100, 103: 81, 104: 95, 105: 70, 106: 98, 107: 90, 108: 90, 109: 90, 110: 65, 111: 100, 112: 85, 113: 95, 114: 85, 115: 50,
+    116: 50, 117: 50, 118: 45, 119: 40, 120: 40, 121: 35, 122: 30, 123: 30, 124: 25, 125: 20, 126: 20, 127: 15, 128: 15, 129: 10, 130: 10 };
+  console.log(`Slam grade — DIRECT model: ceiling × logistic(cognitive load)\n`);
+  console.log("lvl   tgt  →win   ceil  load  note");
+  const only = process.env.ONLY ? process.env.ONLY.split(",").map(Number) : null;
+  for (let k = 101; k <= 130; k++) {
+    if (only && !only.includes(k)) continue;
+    const L = data[k]; if (!L || !L.slam) continue;
+    // MECH=1: grade with the OLD mechanical sim (skill-slip Monte Carlo) instead of cogWinrate,
+    // to test "old algorithm + cap-5". Flags: NOLOCK (non-tray classic), NOJUGGLE (cap 5),
+    // CHOICE (choice model), AUTODRIVE (reliable relaunch), SKILL.
+    let win, ceil = 1, load = 0, f = {};
+    if (process.env.IDEAB === "1") {
+      // IDEA B (user 2026-07-29): monotonic-by-construction — solvable × Π(1−(1−skill)·hazard)
+      // over the perfect-player line. FIXED_SKILL (design player). ceil = solvable (0/1).
+      LANES = L.lanes || DEFAULT_LANES;
+      const r = ideaBWinrate(L, FIXED_SKILL);
+      win = r.win; ceil = r.ceil; load = r.hard; f = {};
+    } else if (process.env.MECH === "1") {
+      LANES = L.lanes || DEFAULT_LANES;
+      const sk = Number(process.env.SKILL) || 0.7;
+      const r = testerReport(L.board, L.cols, L.rows, L.chests, L.track || "square", { skill: sk, trials: 60, seed: k * 101 + 1, layer2: L.layer2 || null, tray: false, autoDrive: process.env.AUTODRIVE === "1", slam: process.env.NOLOCK !== "1", choiceModel: process.env.CHOICE === "1", bays: 5 });
+      win = Math.round(r.winRate * 100);
+    } else {
+      ({ win, ceil, load, f } = cogWinrate(L));
+    }
+    const t = TG[k], gap = win - t;
+    const note = Math.abs(gap) <= 8 ? "OK" : (gap > 0 ? "dễ +" + gap : "khó " + gap);
+    if (process.env.FACTORS === "1") {
+      const parts = Object.entries(f).filter(([, v]) => v >= 0).sort((a, b) => b[1] - a[1]).map(([k2, v]) => `${k2}=${v.toFixed(2)}`).join(" ");
+      console.log(`L${k}  win=${win}  ceil=${Math.round(ceil * 100)}  load=${load.toFixed(2)}  | ${parts}`);
+    } else {
+      console.log(`L${k}  ${String(t).padStart(3)}  ${String(win).padStart(4)}   ${String(Math.round(ceil * 100)).padStart(3)}  ${load.toFixed(2)}  ${note}`);
+    }
+  }
+  process.exit(0);
+}
+
+// ---- --ideacal: auto-CALIBRATE the 5 idea-B knobs (Q/DOI/COUNT/CHON/EASY) to the winrate
+// targets, by coordinate descent. ideaBWinrate is deterministic (one greedy line) so grading is
+// fast; ceil is knob-independent so we measure it ONCE per level and reuse. Run this the moment the
+// remapped maps land: `IDEAB=1 node scripts/build-levels.mjs --ideacal`. Targets come from
+// Manythings/Design winrate/slam-targets.csv (rows "level,target") if present, else the built-ins.
+if (process.argv.includes("--ideacal")) {
+  const data = JSON.parse(fs.readFileSync(OUT, "utf8"));
+  const SKILL = process.env.SKILL != null ? Number(process.env.SKILL) : 0.75;
+  // targets — editable CSV overrides the built-in ramp
+  const TG = { 101: 100, 102: 100, 103: 81, 104: 95, 105: 70, 106: 98, 107: 90, 108: 90, 109: 90, 110: 65, 111: 100, 112: 85, 113: 95, 114: 85, 115: 50,
+    116: 50, 117: 50, 118: 45, 119: 40, 120: 40, 121: 35, 122: 30, 123: 30, 124: 25, 125: 20, 126: 20, 127: 15, 128: 15, 129: 10, 130: 10 };
+  try {
+    const p = path.join(ROOT, "..", "Pixel Flow", "Manythings", "Design winrate", "slam-targets.csv");
+    const lines = fs.readFileSync(p, "utf8").split(/\r?\n/).filter(Boolean);
+    for (const ln of lines) { const [a, b] = ln.split(","); const lv = Number(a), tg = Number(b); if (lv >= 100 && isFinite(tg)) TG[lv] = tg; }
+    console.log(`(targets loaded from slam-targets.csv)`);
+  } catch { /* built-in ramp */ }
+  const only = process.env.ONLY ? process.env.ONLY.split(",").map(Number) : null;
+  // level set + one-time ceil per level (skip logistics-broken ceil≈0 — they can't be calibrated)
+  const levels = [];
+  for (let k = 101; k <= 130; k++) {
+    if (only && !only.includes(k)) continue;
+    const L = data[k]; if (!L || !L.slam || TG[k] == null) continue;
+    const ceil = ideaBCeil(L, k);
+    levels.push({ k, L, tg: TG[k], ceil });
+  }
+  const broken = levels.filter((x) => x.ceil < 0.02).map((x) => x.k);
+  if (broken.length) console.log(`⚠ logistics-broken (ceil≈0, excluded from fit — need map fix): ${broken.join(", ")}`);
+  const fit = levels.filter((x) => x.ceil >= 0.02);
+
+  const KEYS = ["Q", "DOI", "COUNT", "CHON"];
+  const GRID = { Q: [0, .4, .7, .9, 1.2, 1.6, 2, 2.5], DOI: [0, .4, .7, .9, 1.2, 1.6, 2, 2.5], COUNT: [0, .3, .6, .9, 1.2, 1.6, 2], CHON: [0, .3, .6, .9, 1.2, 1.6, 2] };
+  let best = { Q: 0.9, DOI: 0.9, COUNT: 0.6, CHON: 0.7 };
+  const err = (knobs) => {
+    let e = 0;
+    for (const x of fit) { const w = ideaBWinrate(x.L, SKILL, knobs, x.ceil).win; e += Math.abs(w - x.tg); }
+    return e;
+  };
+  let cur = err(best);
+  console.log(`\nCoordinate descent (skill ${SKILL}, ${fit.length} levels), start err=${cur} …`);
+  for (let pass = 0; pass < 4; pass++) {
+    let improved = false;
+    for (const key of KEYS) {
+      let bv = best[key], be = cur;
+      for (const v of GRID[key]) { const trial = { ...best, [key]: v }; const e = err(trial); if (e < be) { be = e; bv = v; } }
+      if (bv !== best[key]) { best[key] = bv; cur = be; improved = true; }
+    }
+    console.log(`  pass ${pass + 1}: err=${cur}  { ${KEYS.map((k) => `${k}:${best[k]}`).join(", ")} }`);
+    if (!improved) break;
+  }
+  console.log(`\nBEST knobs → mean abs error ${(cur / fit.length).toFixed(1)}%/level`);
+  console.log(`  IDEAB_Q=${best.Q} IDEAB_DOI=${best.DOI} IDEAB_COUNT=${best.COUNT} IDEAB_CHON=${best.CHON}\n`);
+  console.log("lvl  tgt win ceil   w_?        w_đôi      w_count    w_chôn    note   (hazardΣ×events)");
+  for (const x of levels) {
+    const r = ideaBWinrate(x.L, SKILL, best, x.ceil);
+    const gap = r.win - x.tg;
+    let note = x.ceil < 0.02 ? "BROKEN(ceil0)" : Math.abs(gap) <= 8 ? "OK" : (gap > 0 ? "dễ +" + gap : "khó " + gap);
+    if (r.cleared === false && x.ceil >= 0.02) note += " ⚠wedge";
+    const S = r.sig || { q: 0, doi: 0, count: 0, chon: 0 }, N = r.nsig || { q: 0, doi: 0, count: 0, chon: 0 };
+    const fmt = (v, n) => (n ? `${v.toFixed(1)}×${n}` : "—").padEnd(10);
+    console.log(`L${x.k} ${String(x.tg).padStart(4)}${String(r.win).padStart(4)}${String(Math.round(x.ceil * 100)).padStart(5)}  peak${r.peakBays}/5 tight${String(r.tightTurns).padStart(2)}  ${fmt(S.q, N.q)} ${fmt(S.doi, N.doi)} ${fmt(S.count, N.count)} ${fmt(S.chon, N.chon)} ${note}`);
+  }
+  process.exit(0);
+}
+
+// Shared analyzer for the twin-decision meter (used by --twincheck and --tunetwins). Pass chestsArg to
+// evaluate a HYPOTHETICAL pairing without mutating the level. Returns {nDec, nTrivial, nMeaningful, ...}.
+function analyzeTwins(L, chestsArg) {
+  const _ch = chestsArg || L.chests;
+  const track = L.track || "square", cols = L.cols, rows = L.rows, bays = 5, perRow = L.lanes || DEFAULT_LANES;
+  const edges = trackEdges(track);
+  const initState = () => {
+    const cars = _ch.map((c) => ({ color: c.color, cap: c.count, pairId: c.pairId ?? null }));
+    const columns = Array.from({ length: perRow }, () => []);
+    cars.forEach((c, i) => columns[i % perRow].push(i));
+    return { occ: L.board.slice(), cars, columns, parked: [] };
+  };
+  const clone = (s) => ({ occ: s.occ.slice(), cars: s.cars.map((c) => ({ ...c })), columns: s.columns.map((col) => col.slice()), parked: s.parked.slice() });
+  const groupsOf = (s) => { const m = new Map(); s.cars.forEach((c, i) => { if (c.pairId != null) (m.get(c.pairId) || m.set(c.pairId, []).get(c.pairId)).push(i); }); return [...m.values()].filter((g) => g.length >= 2); };
+  const remaining = (s) => s.occ.reduce((a, v) => a + (isColor(v) ? 1 : 0), 0);
+  const collect = (s, ci) => { const car = s.cars[ci]; while (car.cap > 0) { const E = exposedTiles(s.occ, cols, rows, edges); let t = -1; for (const i of E) if (s.occ[i] === car.color) { t = i; break; } if (t < 0) break; s.occ[t] = -1; car.cap--; } };
+  const removeCar = (s, ci) => { for (const col of s.columns) { const k = col.indexOf(ci); if (k >= 0) { col.splice(k, 1); return; } } const p = s.parked.indexOf(ci); if (p >= 0) s.parked.splice(p, 1); };
+  const grouped = (s, ci) => s.cars[ci].pairId != null && groupsOf(s).some((g) => g.includes(ci));
+  const groupReady = (s, g) => g.every((ci) => { if (s.parked.includes(ci)) return true; for (const col of s.columns) { const k = col.indexOf(ci); if (k >= 0) return col.slice(0, k).every((x) => g.includes(x)); } return false; });
+  const moves = (s) => {
+    const E = exposedTiles(s.occ, cols, rows, edges); const S = new Set(); for (const i of E) S.add(s.occ[i]);
+    const gs = groupsOf(s), out = [];
+    for (const g of gs) { if (g.every((ci) => s.cars[ci].cap === 0) || !groupReady(s, g)) continue;
+      if (!g.some((ci) => s.cars[ci].cap > 0 && S.has(s.cars[ci].color))) continue;
+      const own = g.filter((ci) => s.parked.includes(ci)).length; if (s.parked.length - own > bays - g.length) continue;
+      out.push({ kind: "group", g }); }
+    const gset = new Set(gs.flat());
+    const singles = [...s.parked.filter((ci) => !gset.has(ci)), ...s.columns.map((c) => c[0]).filter((ci) => ci != null && !gset.has(ci))];
+    for (const ci of singles) if (s.cars[ci].cap > 0 && S.has(s.cars[ci].color)) out.push({ kind: "solo", ci });
+    return out;
+  };
+  const apply = (s, mv) => {
+    if (mv.kind === "group") { for (const ci of mv.g) removeCar(s, ci); for (const ci of mv.g) collect(s, ci); if (!mv.g.every((ci) => s.cars[ci].cap === 0)) for (const ci of mv.g) s.parked.push(ci); }
+    else { const ci = mv.ci, wasP = s.parked.includes(ci); collect(s, ci); if (s.cars[ci].cap === 0) removeCar(s, ci); else if (!wasP) { removeCar(s, ci); if (s.parked.length < bays) s.parked.push(ci); } }
+  };
+  const dig = (s) => { const np = []; for (let j = 0; j < perRow; j++) { const ci = s.columns[j][0]; if (ci != null && !grouped(s, ci)) np.push(j); } if (!np.length || s.parked.length >= bays) return false; np.sort((a, b) => s.columns[b].length - s.columns[a].length); s.parked.push(s.columns[np[0]].shift()); return true; };
+  const finish = (s, guard0 = 0) => {
+    let guard = guard0, peak = s.parked.length;
+    while (remaining(s) > 0 && guard++ < _ch.length * 8 + 200) {
+      if (s.parked.length > peak) peak = s.parked.length;
+      const mv = moves(s); if (mv.length) { apply(s, mv[0]); continue; }
+      if (dig(s)) continue;
+      let sent = false; for (const g of groupsOf(s)) { if (g.every((ci) => s.cars[ci].cap === 0) || !groupReady(s, g)) continue; if (s.parked.length > bays - g.length) continue; for (const ci of g) removeCar(s, ci); for (const ci of g) collect(s, ci); if (!g.every((ci) => s.cars[ci].cap === 0)) for (const ci of g) s.parked.push(ci); sent = true; break; }
+      if (!sent) break;
+    }
+    return { cleared: remaining(s) === 0, peak };
+  };
+  let s = initState(), guard = 0, nDec = 0, nTrivial = 0, meaningful = [];
+  while (remaining(s) > 0 && guard++ < _ch.length * 8 + 200) {
+    const mv = moves(s);
+    if (mv.length) {
+      const twinMoves = mv.filter((m) => m.kind === "group");
+      const alts = mv.filter((m) => m.kind !== "group");
+      if (twinMoves.length && (alts.length || twinMoves.length > 1)) {
+        const choices = [...twinMoves]; if (alts.length) choices.push(alts[0]);
+        const outs = choices.map((c) => { const s2 = clone(s); apply(s2, c); return finish(s2, guard); });
+        nDec++;
+        const allClear = outs.every((o) => o.cleared);
+        const peaks = outs.map((o) => o.peak); const spread = Math.max(...peaks) - Math.min(...peaks);
+        if (allClear && spread <= 1) nTrivial++;
+        else meaningful.push({ turn: guard, allClear, spread });
+      }
+      apply(s, mv[0]); continue;
+    }
+    if (dig(s)) continue;
+    let sent = false; for (const g of groupsOf(s)) { if (g.every((ci) => s.cars[ci].cap === 0) || !groupReady(s, g)) continue; if (s.parked.length > bays - g.length) continue; for (const ci of g) removeCar(s, ci); for (const ci of g) collect(s, ci); if (!g.every((ci) => s.cars[ci].cap === 0)) for (const ci of g) s.parked.push(ci); sent = true; break; }
+    if (!sent) break;
+  }
+  return { nDec, nTrivial, nMeaningful: meaningful.length, meaningful, cleared: remaining(s) === 0 };
+}
+
+// ---- --twincheck (user's idea 2026-07-29): does each TWIN create a REAL decision? At every point the
+// bot can launch a twin AND has an alternative, we fork: try each choice, then finish with perfect play,
+// and compare OUTCOMES. If every choice still clears with the same bay pressure → the twin is TRIVIAL
+// (any choice is fine → no thinking). If a choice leads to deadlock / much worse pressure → MEANINGFUL
+// (choosing wrong hurts). Reports per level how many twin decisions are trivial vs meaningful → an
+// objective gauge of whether the twin design is too easy. Run: node scripts/build-levels.mjs --twincheck
+if (process.argv.includes("--twincheck")) {
+  const data = JSON.parse(fs.readFileSync(OUT, "utf8"));
+  const LEVELS = (process.env.ONLY ? process.env.ONLY.split(",") : []).map(Number);
+  const analyze = (L) => {
+    const track = L.track || "square", cols = L.cols, rows = L.rows, bays = 5, perRow = L.lanes || DEFAULT_LANES;
+    const edges = trackEdges(track);
+    const initState = () => {
+      const cars = L.chests.map((c) => ({ color: c.color, cap: c.count, pairId: c.pairId ?? null }));
+      const columns = Array.from({ length: perRow }, () => []);
+      cars.forEach((c, i) => columns[i % perRow].push(i));
+      return { occ: L.board.slice(), cars, columns, parked: [] };
+    };
+    const clone = (s) => ({ occ: s.occ.slice(), cars: s.cars.map((c) => ({ ...c })), columns: s.columns.map((col) => col.slice()), parked: s.parked.slice() });
+    const groupsOf = (s) => { const m = new Map(); s.cars.forEach((c, i) => { if (c.pairId != null) (m.get(c.pairId) || m.set(c.pairId, []).get(c.pairId)).push(i); }); return [...m.values()].filter((g) => g.length >= 2); };
+    const remaining = (s) => s.occ.reduce((a, v) => a + (isColor(v) ? 1 : 0), 0);
+    const collect = (s, ci) => { const car = s.cars[ci]; while (car.cap > 0) { const E = exposedTiles(s.occ, cols, rows, edges); let t = -1; for (const i of E) if (s.occ[i] === car.color) { t = i; break; } if (t < 0) break; s.occ[t] = -1; car.cap--; } };
+    const removeCar = (s, ci) => { for (const col of s.columns) { const k = col.indexOf(ci); if (k >= 0) { col.splice(k, 1); return; } } const p = s.parked.indexOf(ci); if (p >= 0) s.parked.splice(p, 1); };
+    const grouped = (s, ci) => s.cars[ci].pairId != null && groupsOf(s).some((g) => g.includes(ci));
+    const groupReady = (s, g) => g.every((ci) => { if (s.parked.includes(ci)) return true; for (const col of s.columns) { const k = col.indexOf(ci); if (k >= 0) return col.slice(0, k).every((x) => g.includes(x)); } return false; });
+    // list the greedy candidate MOVES at a state, in perfect-player priority order
+    const moves = (s) => {
+      const E = exposedTiles(s.occ, cols, rows, edges); const S = new Set(); for (const i of E) S.add(s.occ[i]);
+      const gs = groupsOf(s), out = [];
+      for (const g of gs) { if (g.every((ci) => s.cars[ci].cap === 0) || !groupReady(s, g)) continue;
+        if (!g.some((ci) => s.cars[ci].cap > 0 && S.has(s.cars[ci].color))) continue;
+        const own = g.filter((ci) => s.parked.includes(ci)).length; if (s.parked.length - own > bays - g.length) continue;
+        out.push({ kind: "group", g }); }
+      const gset = new Set(gs.flat());
+      const singles = [...s.parked.filter((ci) => !gset.has(ci)), ...s.columns.map((c) => c[0]).filter((ci) => ci != null && !gset.has(ci))];
+      for (const ci of singles) if (s.cars[ci].cap > 0 && S.has(s.cars[ci].color)) out.push({ kind: "solo", ci });
+      return out;
+    };
+    const apply = (s, mv) => {
+      if (mv.kind === "group") { for (const ci of mv.g) removeCar(s, ci); for (const ci of mv.g) collect(s, ci); if (!mv.g.every((ci) => s.cars[ci].cap === 0)) for (const ci of mv.g) s.parked.push(ci); }
+      else { const ci = mv.ci, wasP = s.parked.includes(ci); collect(s, ci); if (s.cars[ci].cap === 0) removeCar(s, ci); else if (!wasP) { removeCar(s, ci); if (s.parked.length < bays) s.parked.push(ci); } }
+    };
+    const dig = (s) => { const np = []; for (let j = 0; j < perRow; j++) { const ci = s.columns[j][0]; if (ci != null && !grouped(s, ci)) np.push(j); } if (!np.length || s.parked.length >= bays) return false; np.sort((a, b) => s.columns[b].length - s.columns[a].length); s.parked.push(s.columns[np[0]].shift()); return true; };
+    // finish greedily (perfect line) from a state → {cleared, peak}
+    const finish = (s, guard0 = 0) => {
+      let guard = guard0, peak = s.parked.length;
+      while (remaining(s) > 0 && guard++ < L.chests.length * 8 + 200) {
+        if (s.parked.length > peak) peak = s.parked.length;
+        const mv = moves(s); if (mv.length) { apply(s, mv[0]); continue; }
+        if (dig(s)) continue;
+        // sendgroup last resort
+        let sent = false; for (const g of groupsOf(s)) { if (g.every((ci) => s.cars[ci].cap === 0) || !groupReady(s, g)) continue; if (s.parked.length > bays - g.length) continue; for (const ci of g) removeCar(s, ci); for (const ci of g) collect(s, ci); if (!g.every((ci) => s.cars[ci].cap === 0)) for (const ci of g) s.parked.push(ci); sent = true; break; }
+        if (!sent) break;
+      }
+      return { cleared: remaining(s) === 0, peak };
+    };
+    // walk the main greedy line; at each twin decision, fork every choice and compare outcomes
+    let s = initState(), guard = 0, nDec = 0, nTrivial = 0, meaningful = [];
+    while (remaining(s) > 0 && guard++ < L.chests.length * 8 + 200) {
+      const mv = moves(s);
+      if (mv.length) {
+        const twinMoves = mv.filter((m) => m.kind === "group");
+        const alts = mv.filter((m) => m.kind !== "group");
+        if (twinMoves.length && (alts.length || twinMoves.length > 1)) {
+          // choices to compare: each launchable twin, plus the best alternative (defer the twin)
+          const choices = [...twinMoves]; if (alts.length) choices.push(alts[0]);
+          const outs = choices.map((c) => { const s2 = clone(s); apply(s2, c); return finish(s2, guard); });
+          nDec++;
+          const allClear = outs.every((o) => o.cleared);
+          const peaks = outs.map((o) => o.peak); const spread = Math.max(...peaks) - Math.min(...peaks);
+          if (allClear && spread <= 1) nTrivial++;
+          else meaningful.push({ turn: guard, allClear, spread, why: !allClear ? "có lựa chọn THUA" : `ép ô lệch ${spread}` });
+        }
+        apply(s, mv[0]); continue;
+      }
+      if (dig(s)) continue;
+      let sent = false; for (const g of groupsOf(s)) { if (g.every((ci) => s.cars[ci].cap === 0) || !groupReady(s, g)) continue; if (s.parked.length > bays - g.length) continue; for (const ci of g) removeCar(s, ci); for (const ci of g) collect(s, ci); if (!g.every((ci) => s.cars[ci].cap === 0)) for (const ci of g) s.parked.push(ci); sent = true; break; }
+      if (!sent) break;
+    }
+    return { nDec, nTrivial, nMeaningful: meaningful.length, meaningful };
+  };
+  const list = LEVELS.length ? LEVELS : Object.keys(data).map(Number).filter((k) => data[k] && data[k].slam).sort((a, b) => a - b);
+  console.log("Twin-decision check — mỗi chỗ gặp xe đôi, thử từng lựa chọn rồi so kết quả:\n");
+  console.log("lvl  #quyết-định  trivial(dễ)  có-ý-nghĩa  verdict");
+  for (const k of list) {
+    const L = data[k]; if (!L || !L.slam) continue;
+    const r = analyze(L);
+    const verdict = r.nDec === 0 ? "không có ngã rẽ xe đôi" : r.nMeaningful === 0 ? "❌ TẤT CẢ xe đôi trivial (chọn sao cũng thắng)" : `✔ ${r.nMeaningful}/${r.nDec} quyết định có hậu quả`;
+    console.log(`L${k}  ${String(r.nDec).padStart(6)}  ${String(r.nTrivial).padStart(9)}  ${String(r.nMeaningful).padStart(9)}   ${verdict}`);
+  }
+  process.exit(0);
+}
+
+// ---- --tunetwins: DIRECTED twin redesign — re-pair cars to MAXIMISE meaningful twin decisions
+// (the --twincheck meter), keeping the level clearable. For each level: strip pairIds, score every
+// adjacent same-row pair by how many meaningful decisions it creates ALONE, then greedily combine the
+// pairs that keep raising the meaningful count without breaking clearability. This is the blind
+// --repairtwins done RIGHT — optimising the real objective (does the choice matter?) not a proxy.
+// Run: node scripts/build-levels.mjs --tunetwins  (ONLY=… to target levels)
+if (process.argv.includes("--tunetwins")) {
+  const data = JSON.parse(fs.readFileSync(OUT, "utf8"));
+  const LEVELS = (process.env.ONLY ? process.env.ONLY.split(",") : ["120", "124", "125", "129", "130"]).map(Number);
+  for (const k of LEVELS) {
+    const L = data[k]; if (!L || !L.slam) { console.log(`L${k} skip`); continue; }
+    const lanes = L.lanes || DEFAULT_LANES;
+    const base = L.chests.map((c) => { const x = { ...c }; delete x.pairId; return x; });
+    const evalSet = (pairs) => { const ch = base.map((c) => ({ ...c })); pairs.forEach((p, idx) => { ch[p.a].pairId = idx; ch[p.b].pairId = idx; }); return { ch, r: analyzeTwins(L, ch) }; };
+    // score each adjacent same-row diff-colour pair by meaningful decisions it makes on its own
+    const cands = [];
+    for (let i = 0; i < base.length - 1; i++) { if (i % lanes === lanes - 1) continue; if (base[i].color === base[i + 1].color) continue;
+      const { r } = evalSet([{ a: i, b: i + 1 }]);
+      if (r.cleared && r.nMeaningful >= 1) cands.push({ a: i, b: i + 1, m: r.nMeaningful });
+    }
+    cands.sort((x, y) => y.m - x.m);
+    // greedily combine non-overlapping pairs, keep only additions that RAISE meaningful & stay clearable
+    const used = new Set(); let chosen = [], curM = 0;
+    for (const g of cands) {
+      if (used.has(g.a) || used.has(g.b)) continue;
+      const { r } = evalSet([...chosen, g]);
+      if (r.cleared && r.nMeaningful > curM) { chosen.push(g); curM = r.nMeaningful; used.add(g.a); used.add(g.b); }
+      if (chosen.length >= 6) break;
+    }
+    if (chosen.length) {
+      const { ch, r } = evalSet(chosen);
+      // final safety: perfect-solver clearance
+      const byp = {}; ch.forEach((c, i) => { if (c.pairId != null) (byp[c.pairId] = byp[c.pairId] || []).push(i); });
+      LANES = lanes;
+      const ok = solvablePairs(L.board, L.cols, L.rows, ch, L.track || "square", Object.values(byp), 5, lanes, L.layer2 || null);
+      if (ok) {
+        L.chests = ch;
+        const pairs = Object.values(byp).map((g) => g.map((i) => ch[i].color).join("+"));
+        console.log(`L${k}: ${chosen.length} twins → ${r.nMeaningful}/${r.nDec} MEANINGFUL, solvable ✓   [${pairs.join(" ")}]`);
+      } else console.log(`L${k}: best set failed solvablePairs (kept as-is)`);
+    } else console.log(`L${k}: no meaningful+clearable pairing found (kept as-is)`);
+  }
+  const sorted = {}; for (const key of Object.keys(data).map(Number).sort((a, b) => a - b)) sorted[key] = data[key];
+  fs.writeFileSync(OUT, JSON.stringify(sorted, null, 2));
+  console.log(`\n✔ wrote directed twins into designed.json — verify with --twincheck`);
+  process.exit(0);
+}
+
+// ---- --repairtwins: REDESIGN twin pairs into real BAGGAGE twins (user 2026-07-29). The remap paired
+// two abundant/co-exposed colours (both needed always) → zero decision. A twin bites only when one
+// member is a SHALLOW colour (reachable early) and the other a DEEP colour (surfaces late): launching
+// it grabs the shallow half but the deep half CLOGS a bay until its colour peels down to it → real bay
+// pressure + a genuine "is it worth committing?" choice. This keeps every car's colour/count (so board
+// needs are untouched) and only re-assigns pairId to the ADJACENT car-pairs with the biggest peel-depth
+// gap, backing off the count until solvablePairs() confirms it still clears. ONLY=… TWINS=… to override.
+if (process.argv.includes("--repairtwins")) {
+  const data = JSON.parse(fs.readFileSync(OUT, "utf8"));
+  const LEVELS = (process.env.ONLY ? process.env.ONLY.split(",") : ["120", "124", "125", "129", "130"]).map(Number);
+  // mean outside-in peel depth per colour (square boards): low = edge/early, high = core/late
+  const depthOf = (L) => {
+    const { cols, rows } = L, occ = L.board.slice(), idx = (r, c) => r * cols + c, isC = (v) => v >= 0 && v < 90;
+    const sum = {}, cnt = {}; let layer = 0, alive = occ.filter(isC).length;
+    while (alive > 0 && layer < 500) {
+      const exp = [];
+      for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) { const i = idx(r, c); if (!isC(occ[i])) continue;
+        if (r === 0 || c === 0 || r === rows - 1 || c === cols - 1 || !isC(occ[idx(r - 1, c)]) || !isC(occ[idx(r + 1, c)]) || !isC(occ[idx(r, c - 1)]) || !isC(occ[idx(r, c + 1)])) exp.push(i); }
+      if (!exp.length) break;
+      for (const i of exp) { const col = occ[i]; sum[col] = (sum[col] || 0) + layer; cnt[col] = (cnt[col] || 0) + 1; occ[i] = -1; alive--; }
+      layer++;
+    }
+    const res = {}; for (const k in cnt) res[k] = sum[k] / cnt[k]; return res;
+  };
+  for (const k of LEVELS) {
+    const L = data[k]; if (!L || !L.slam) { console.log(`L${k} MISSING/not slam`); continue; }
+    const lanes = L.lanes || DEFAULT_LANES, dep = depthOf(L);
+    const tiles = {}; for (const v of L.board) if (v >= 0 && v < 90) tiles[v] = (tiles[v] || 0) + 1;
+    const before = new Set(L.chests.filter((c) => c.pairId != null).map((c) => c.pairId)).size;
+    // adjacent same-row car pairs. A GOOD baggage pair = a MODERATE depth gap (deep half surfaces a
+    // few layers later, not never) with BOTH colours abundant (≥15 tiles → the deep half isn't a rare
+    // centre dot that squats a bay forever and deadlocks). Score peaks near a gap of ~4 and decays.
+    const scored = [];
+    for (let i = 0; i < L.chests.length - 1; i++) { if (i % lanes === lanes - 1) continue;
+      const ca = L.chests[i].color, cb = L.chests[i + 1].color; if (ca === cb) continue;
+      if ((tiles[ca] || 0) < 15 || (tiles[cb] || 0) < 15) continue; // skip rare colours (permanent block)
+      const gap = Math.abs((dep[ca] || 0) - (dep[cb] || 0));
+      if (gap < 2) continue;
+      const score = gap - Math.max(0, gap - 5) * 1.5; // reward gap up to ~5, penalise beyond
+      scored.push({ a: i, b: i + 1, gap, score });
+    }
+    scored.sort((x, y) => y.score - x.score);
+    const build = (cnt) => {
+      const clone = JSON.parse(JSON.stringify(L.chests)); for (const c of clone) delete c.pairId;
+      const used = new Set(); let pid = 0, made = 0, sumGap = 0;
+      for (const s of scored) { if (made >= cnt) break; if (used.has(s.a) || used.has(s.b)) continue;
+        clone[s.a].pairId = pid; clone[s.b].pairId = pid; pid++; used.add(s.a); used.add(s.b); made++; sumGap += s.gap; }
+      return { clone, made, sumGap };
+    };
+    const TARGET = Number(process.env.TWINS) || before || 3;
+    let best = null;
+    for (let cnt = TARGET; cnt >= 0; cnt--) {
+      const b = build(cnt);
+      const byp = {}; b.clone.forEach((c, i) => { if (c.pairId != null) (byp[c.pairId] = byp[c.pairId] || []).push(i); });
+      const groups = Object.values(byp).filter((g) => g.length >= 2);
+      LANES = lanes;
+      if (solvablePairs(L.board, L.cols, L.rows, b.clone, L.track || "square", groups, 5, lanes, L.layer2 || null)) { best = b; break; }
+    }
+    if (best && best.made > 0) {
+      L.chests = best.clone;
+      const pairs = []; const byp = {}; best.clone.forEach((c) => { if (c.pairId != null) (byp[c.pairId] = byp[c.pairId] || []).push(c); });
+      for (const g of Object.values(byp)) pairs.push(g.map((c) => `${c.color}(d${(dep[c.color] || 0).toFixed(0)}):${c.count}`).join("+"));
+      console.log(`L${k}: ${before}→${best.made} baggage twins, avgGap ${(best.sumGap / best.made).toFixed(1)}, solvable ✓`);
+      console.log(`   ${pairs.join("   ")}`);
+    } else console.log(`L${k}: no solvable baggage pairing found (kept as-is)`);
+  }
+  const sorted = {}; for (const key of Object.keys(data).map(Number).sort((a, b) => a - b)) sorted[key] = data[key];
+  fs.writeFileSync(OUT, JSON.stringify(sorted, null, 2));
+  console.log(`\n✔ wrote redesigned twins into designed.json`);
+  process.exit(0);
+}
+
+// ---- --smoothramp: SMOOTH the difficulty curve of the 12 slam target levels to a clean descending
+// ramp by tuning each level's buried "?" COUNT (the main active lever) to hit its ramp target. Buried
+// doesn't affect solvability/ceil, only the memory hazard — so this is a safe, reversible tune. Writes
+// designed.json + slam-targets.csv. Run: IDEAB=1 node scripts/build-levels.mjs --smoothramp
+if (process.argv.includes("--smoothramp")) {
+  const data = JSON.parse(fs.readFileSync(OUT, "utf8"));
+  const KNOBS = { Q: 0.9, DOI: 0.9, COUNT: 0.6, CHON: 0.7 };
+  const SKILL = 0.75, VIS_ROWS = 2, LANES_DEF = 4;
+  // clean descending ramp (easy → hard) for the 12 designed target levels
+  const RAMP = { 104: 90, 105: 84, 109: 78, 110: 72, 114: 66, 115: 58, 119: 50, 120: 42, 124: 34, 125: 26, 129: 18, 130: 10 };
+  // place the first k eligible (past the first VIS_ROWS rows, non-paired) cars as buried, spread
+  // deterministically — identical policy to add-buried.mjs so the "learn 2 rows then confusion" feel holds.
+  const setBuried = (L, k) => {
+    for (const c of L.chests) delete c.buried;
+    const lanes = L.lanes || LANES_DEF, start = VIS_ROWS * lanes, cand = [];
+    for (let i = start; i < L.chests.length; i++) if (L.chests[i].pairId == null) cand.push(i);
+    let s = ((L._n || 0) * 131 + 7) >>> 0 || 1;
+    for (let i = cand.length - 1; i > 0; i--) { s = (s * 1664525 + 1013904223) >>> 0; const j = s % (i + 1); [cand[i], cand[j]] = [cand[j], cand[i]]; }
+    for (let m = 0; m < k && m < cand.length; m++) L.chests[cand[m]].buried = true;
+    return cand.length;
+  };
+  console.log("Smooth ramp — tune buried '?' count per level to a clean descending curve:\n");
+  console.log("lvl  tgt  buried  →win  note");
+  const newTargets = [];
+  for (const k of Object.keys(RAMP).map(Number)) {
+    const L = data[k]; if (!L || !L.slam) { console.log(`L${k} MISSING`); continue; }
+    L._n = k;
+    const tg = RAMP[k], ceil = ideaBCeil(L, k);
+    const maxB = setBuried(L, 0); // returns # eligible cars
+    const cap = Math.floor(maxB * 0.6); // don't over-bury (>60% → luck, not skill)
+    let best = 0, bestErr = 1e9, bestWin = 0;
+    for (let b = 0; b <= cap; b++) {
+      setBuried(L, b);
+      const win = ideaBWinrate(L, SKILL, KNOBS, ceil).win;
+      const e = Math.abs(win - tg);
+      if (e < bestErr) { bestErr = e; best = b; bestWin = win; }
+    }
+    setBuried(L, best); delete L._n;
+    const note = bestErr <= 6 ? "OK" : best >= cap ? `khó tối đa vẫn +${bestWin - tg}` : `±${bestWin - tg}`;
+    console.log(`L${k}  ${String(tg).padStart(3)}  ${String(best).padStart(4)}/${maxB}  ${String(bestWin).padStart(4)}  ${note}`);
+    newTargets.push(`${k},${bestWin}`);
+  }
+  const sorted = {}; for (const key of Object.keys(data).map(Number).sort((a, b) => a - b)) sorted[key] = data[key];
+  for (const v of Object.values(sorted)) delete v._n;
+  fs.writeFileSync(OUT, JSON.stringify(sorted, null, 2));
+  try { fs.writeFileSync(path.join(ROOT, "..", "Pixel Flow", "Manythings", "Design winrate", "slam-targets.csv"), newTargets.join("\n") + "\n"); } catch { /* ignore */ }
+  console.log(`\n✔ wrote buried counts into designed.json + updated slam-targets.csv`);
+  process.exit(0);
+}
+
+// ---- --ideatest: SELF-CONTAINED validation of the idea-B model on hand-built mini levels, so we
+// can prove it reacts correctly + stays monotonic WITHOUT touching the (possibly in-flux) real maps.
+if (process.argv.includes("--ideatest")) {
+  // 5×5 concentric board: ring 0 (perimeter, 16) → ring 1 (8) → ring 2 (centre, 1). Peels outer→in.
+  const ring5 = () => { const B = new Array(25); for (let r = 0; r < 5; r++) for (let c = 0; c < 5; c++) B[r * 5 + c] = Math.min(r, c, 4 - r, 4 - c); return B; };
+  const mk = (chests) => ({ track: "square", cols: 5, rows: 5, board: ring5(), chests, slam: true, lanes: 4 });
+  const base = () => [{ color: 0, count: 8 }, { color: 0, count: 8 }, { color: 1, count: 8 }, { color: 2, count: 4 }];
+  const SKS = [0.55, 0.70, 0.85, 0.95];
+  const grade = (L) => SKS.map((sk) => String(ideaBWinrate(L, sk).win).padStart(3)).join(" ");
+  const mono = (L) => { const v = SKS.map((sk) => ideaBWinrate(L, sk).win); let ok = true; for (let i = 1; i < v.length; i++) if (v[i] < v[i - 1] - 1) ok = false; return ok; };
+  console.log("Idea-B self-test — 5×5 concentric board, cars clear outer→in.\n");
+  console.log(`skills:                         ${SKS.map((s) => String(s).padStart(3)).join(" ")}`);
+
+  // (baseline) no signals → near ceil, flat-high
+  const L0 = mk(base());
+  console.log(`baseline (no traps)           : ${grade(L0)}   mono=${mono(L0)}   [expect ~100, flat]`);
+
+  // (w_?) mark the LAST n launched cars buried → winrate should DROP as buried rises, RISE with skill
+  for (const nb of [1, 2, 3]) {
+    const L = mk(base().map((c, i) => (i >= 4 - nb ? { ...c, buried: true } : c)));
+    console.log(`w_? buried=${nb}                   : ${grade(L)}   mono=${mono(L)}   [expect lower as buried↑, rising L→R]`);
+  }
+
+  // (w_đôi) twin baggage: pair the ring-1 car (color 1, needed after outer peel) with a color-2 car
+  // (not on the frontier while 0/1 are exposed) → launching drags the wasted colour into a bay.
+  const twin = base(); twin[2] = { ...twin[2], pairId: 7 }; twin[3] = { ...twin[3], pairId: 7 };
+  const Lt = mk(twin);
+  console.log(`w_đôi twin baggage            : ${grade(Lt)}   mono=${mono(Lt)}   [expect < baseline]`);
+
+  // isolate each knob: turn everything off but one, confirm ONLY that signal moves the number
+  console.log("\nknob isolation (buried=2 board):");
+  const Lb = mk(base().map((c, i) => (i >= 2 ? { ...c, buried: true } : c)));
+  const off = { Q: 0, DOI: 0, COUNT: 0, CHON: 0 };
+  console.log(`  all-off    : ${SKS.map((sk) => String(ideaBWinrate(Lb, sk, off).win).padStart(3)).join(" ")}   [~100: no signal weighted]`);
+  console.log(`  only Q=1.5 : ${SKS.map((sk) => String(ideaBWinrate(Lb, sk, { ...off, Q: 1.5 }).win).padStart(3)).join(" ")}   [drops: w_? active]`);
+  process.exit(0);
+}
+
 // ---- --test1 n: fast single-level grade (40 trials at the level's own skill) ------
 if (process.argv.includes("--test1")) {
   const k = parseInt(process.argv[process.argv.indexOf("--test1") + 1], 10);
@@ -1763,8 +2897,14 @@ if (process.argv.includes("--test1")) {
   const c = (cfgm && cfgm.get(k)) || {};
   const skill = process.env.SKILL != null ? Number(process.env.SKILL) : (c.skill != null ? c.skill : 0.6);
   LANES = L.lanes || DEFAULT_LANES; // grade at the level's own queue-line count
-  const r = testerReport(L.board, L.cols, L.rows, L.chests, L.track || "square", { skill, trials: 100, seed: k * 101 + 1, layer2: L.layer2 || null, tray: !!L.tray });
+  const bays = Number(process.env.BAYS) || (L.bays || 5);
+  const TR = Number(process.env.TRIALS) || 100;
+  const r = testerReport(L.board, L.cols, L.rows, L.chests, L.track || "square", { skill, trials: TR, seed: k * 101 + 1, layer2: L.layer2 || null, tray: !!L.tray || !!L.slam, bays });
   console.log("WIN=" + Math.round(r.winRate * 100));
+  if (L.slam) {
+    const ad = testerReport(L.board, L.cols, L.rows, L.chests, L.track || "square", { skill, trials: 100, seed: k * 101 + 1, layer2: L.layer2 || null, tray: false, autoDrive: true, bays });
+    console.log("WIN_AUTODRIVE=" + Math.round(ad.winRate * 100) + "  (skill=" + skill + " bays=" + bays + ")");
+  }
   process.exit(0);
 }
 

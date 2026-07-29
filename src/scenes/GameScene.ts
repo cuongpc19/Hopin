@@ -132,17 +132,17 @@ const BATCH_END_GRACE = 1600;
 // this long (a visible "get ready, I'm about to jump out" tell) before it launches,
 // so the auto-relaunch never surprises the player. Set small to make it snappier.
 const AUTO_RELAUNCH_TELEGRAPH_MS = 520;
-const SPEED = 15.6; // track nodes per second (car travel speed — +20% more, user 2026-07-24)
+const SPEED = 15.6; // track nodes per second (car travel speed — slam: reverted to pre-bump slower speed, user 2026-07-28)
 const MIN_GAP = 5; // min spacing between cars, in nodes (bigger cars need more room)
 const TWIN_SPAWN_GAP = 5; // nodes between a twin pair on the ray (snug but the rope still shows)
 const TWIN_INTRO_LEVEL = 8; // the ONE level that introduces twin cars (skip if you're past it)
 const BELT_SPEED = 6; // Line belt cleats: nodes per second
-const SHOT_COOLDOWN = 80; // ms between pickups — fast, even "electric" munch stream (user 2026-07-23)
+const SHOT_COOLDOWN = 10; // ms between pickups — slam: near frame-rate cap (~1 slime/frame @60fps)
 // Critter "run to the car" animation: sets off, accelerates to catch the moving
 // car. RUN_MAX must comfortably exceed car speed (SPEED * TRACK_STEP px/s).
-const RUN_START = 220;
-const RUN_ACCEL = 850;
-const RUN_MAX = 700;
+const RUN_START = 320;   // snappier: critters set off faster (user 2026-07-29 — quicker "see + grab")
+const RUN_ACCEL = 1100;
+const RUN_MAX = 950;
 // Direction the car sprite art faces, in radians (0 = right/East). Tune if the
 // car points the wrong way as it drives: right=0, up=-PI/2, left=PI, down=PI/2.
 const CAR_ART_FACING = Math.PI / 2; // car art faces UP (face at top); +90° so the face leads travel
@@ -250,6 +250,12 @@ export class GameScene extends Phaser.Scene {
   // empty bay (never straight to the ray), and bay cars AUTO-launch when their colour is
   // reachable (no manual relaunch / juggle). Set per level in create().
   private trayMode = false;
+  // SLAM (lock) mode (level.slam): built ON TOP of the tray bay system. Bays AUTO-FILL from
+  // the queue; the player TAPS a bay car to send it onto the ray, which LOCKS (reserves) its
+  // bay (traySlot) — the car keeps its progress and returns to that bay if it can't fill, or
+  // frees the bay when it fills and leaves. Multiple cars run at once. No auto-launch, no GO
+  // batch. Lose = deadlock (no bay car can collect + no fresh car can enter).
+  private slamMode = false;
   // TRAY_BATCH: a batch (the whole set of bay cars) is currently out circling the ray.
   // While true the bays are locked (no staging) and the GO button is disabled; flips back
   // to false once every batch car has left the ray (leaving or returning to its bay).
@@ -263,6 +269,7 @@ export class GameScene extends Phaser.Scene {
   private slotY = 0;
   private slotCount = SLOT_COUNT; // grows when the "Add" booster is used
   private slotTiles: Phaser.GameObjects.Image[] = []; // the bay sprites (re-laid on Add)
+  private slotLocks: Phaser.GameObjects.Image[] = []; // SLAM: dimmed "reserved car" shown on a bay whose car is out
   private slotWarnActive = false; // waiting bays all full → flashing a warning
   private slotWarnG: Phaser.GameObjects.GameObject[] = []; // the pulsing warning rings
   private handMode = false; // "Hand" booster armed: next tap picks a queued car
@@ -430,6 +437,7 @@ export class GameScene extends Phaser.Scene {
     this.slotCount = SLOT_COUNT;
     this.slots = new Array(this.slotCount).fill(null);
     this.slotTiles = [];
+    this.slotLocks = []; // children.removeAll() already destroyed old lock icons
     this.slotWarnActive = false; // children.removeAll() already destroyed old rings
     this.slotWarnG = [];
     this.handMode = false;
@@ -455,7 +463,9 @@ export class GameScene extends Phaser.Scene {
     this.twinLinkG = this.add.graphics().setDepth(DEPTH_TWINLINK);
 
     this.level = makeLevel(levelNum);
-    this.trayMode = this.level.tray === true; // one-way bay mode for this level
+    this.slamMode = this.level.slam === true; // lock mode (tap bay cars; slot locks while out)
+    this.trayMode = this.level.tray === true || this.slamMode; // slam reuses the tray bay system
+    // SLAM: ALWAYS 5 waiting slots (the "Add" booster grows it to 6). No per-level bays.
     // Win when all REMOVABLE cells are gone (slimes + wood + soft rock). Hard rocks
     // stay forever and are not counted. A 2-layer cell counts TWICE (top + hidden bottom).
     this.keysRemaining =
@@ -1389,7 +1399,7 @@ export class GameScene extends Phaser.Scene {
   private buildSlots(topY: number) {
     this.slotY = topY + SLOT_SIZE / 2;
     this.layoutSlots();
-    if (this.trayMode && TRAY_BATCH) this.buildGoButton();
+    if (this.trayMode && TRAY_BATCH && !this.slamMode) this.buildGoButton(); // slam: tap bays, no GO
   }
 
   // TRAY_BATCH: the GO button. Placeholder styling (user: "cần/button design sau"). The
@@ -1481,6 +1491,30 @@ export class GameScene extends Phaser.Scene {
   // Flash the waiting bays red when they're ALL full — a warning that the next car
   // forced to park will overflow the queue and lose the level. Call after any change
   // to which bays are occupied.
+  // SLAM: a bay whose reserved car is OUT on the ray shows a DIMMED "parked car" (its own
+  // colour) so the slot reads as taken/busy. A bay holding a real PARKED (returned) car
+  // shows nothing extra (the real car is there).
+  private updateSlotLocks() {
+    if (!this.slamMode) return;
+    for (let i = 0; i < this.slots.length; i++) {
+      const v = this.slots[i];
+      const out = !!v && (this.pending.includes(v) || this.active.some((a) => a.view === v));
+      let ghost = this.slotLocks[i];
+      if (out && v) {
+        const key = `car-${v.chest.color}`;
+        const tex = this.textures.exists(key) ? key : "car-0";
+        if (!ghost) {
+          ghost = this.add.image(this.slotXs[i] ?? 0, this.slotY, tex).setOrigin(0.5).setDepth(DEPTH_RUNNER + 6).setAlpha(0.4);
+          ghost.setDisplaySize(SLOT_SIZE - 12, SLOT_SIZE - 12);
+          this.slotLocks[i] = ghost;
+        }
+        ghost.setTexture(tex).setPosition(this.slotXs[i] ?? ghost.x, this.slotY).setVisible(true);
+      } else if (ghost) {
+        ghost.setVisible(false);
+      }
+    }
+  }
+
   private updateSlotWarning() {
     // TRAY_BATCH: bays stay RESERVED (occupied) while the squad is out, but they LOOK empty
     // — don't flash the "full" warning during a run, only once cars have settled back.
@@ -3085,6 +3119,36 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
+    // SLAM: a queue tap plays a TWO-HOP launch — the car hops up into a free waiting slot
+    // (claiming it), then springs from the slot onto the ray. The slot stays RESERVED
+    // (shown as "a car parked there") until the car fills & leaves; it returns there if it
+    // can't fill. Needs a free slot AND room on the ray.
+    if (this.slamMode) {
+      const need = group.length;
+      const freeSlots = this.slots.reduce((n, s) => n + (s ? 0 : 1), 0);
+      if (freeSlots < need) { this.smallNotice("All waiting slots are locked!"); return; }
+      if (this.active.length + this.pending.length + need > MAX_ON_TRACK) { this.trackFullNotice(); return; }
+      this.playPop();
+      for (const v of group) {
+        const p = this.findInInventory(v)!;
+        p.col.splice(p.r, 1);
+        (v.container.getData("hit") as Phaser.GameObjects.Rectangle).disableInteractive();
+        v.container.clearMask();
+        this.revealBuried(v);
+        const si = this.slots.findIndex((s) => s === null);
+        this.parkIntoSlot(v, si); // HOP 1: queue → waiting slot (claims slots[si] = v)
+        // HOP 2: once it's up in the slot, spring it onto the ray (slot stays reserved/locked).
+        this.time.delayedCall(340, () => {
+          if (this.won || this.lost) return;
+          const parked = this.slots[si] === v && !this.pending.includes(v) && !this.active.some((a) => a.view === v);
+          if (parked) this.relaunchFromSlot(si);
+        });
+      }
+      this.layoutInventory(true);
+      this.updateSlotWarning();
+      return;
+    }
+
     // TRAY mode: a queue tap STAGES the car(s) into the waiting bays (fill 1→5), never
     // straight to the ray — the bay then auto-launches them when their colour is reachable
     // (see autoRelaunchBays). Needs a free bay per member; a group needs that many.
@@ -3139,7 +3203,7 @@ export class GameScene extends Phaser.Scene {
 
   private relaunchFromSlot(slotIndex: number, auto = false) {
     if (this.won || this.handMode || this.magnetMode) return; // a booster claims this tap
-    if (this.trayMode && !auto) return; // one-way bays: no manual relaunch (auto-fire only)
+    if (this.trayMode && !auto && !this.slamMode) return; // one-way bays: no manual relaunch (auto-fire only). SLAM: tapping a bay IS the launch.
     const view = this.slots[slotIndex];
     if (!view) return;
     this.disarmBay(view); // clear any "about to hop" bob before it actually launches
@@ -3253,6 +3317,10 @@ export class GameScene extends Phaser.Scene {
     const head = this.pending[0];
     if (head.launchAt && this.time.now < head.launchAt) return; // still doing its launch hop
     const N = this.track.length;
+    // SLAM: a car enters the ray at the node in line with the BAY it came from (directly
+    // above its slot), not at the fixed Start — so it "rises straight up" from its slot.
+    const start = (this.slamMode && !head.group && head.traySlot != null && this.slotXs[head.traySlot] != null)
+      ? this.bayEntryNode(this.slotXs[head.traySlot]) : this.startIndex;
 
     // Linked cars roll onto the ray TOGETHER, spaced a few nodes apart, co-spawned in
     // one go (same glide duration) so none drifts ahead while a partner is still
@@ -3270,7 +3338,7 @@ export class GameScene extends Phaser.Scene {
     // Target node for each member: member 0 leads (furthest along); the rest trail by
     // TWIN_SPAWN_GAP each. So a group occupies startIndex .. startIndex+(count-1)*GAP.
     const posFor = (k: number) => {
-      const raw = this.startIndex + (count - 1 - k) * TWIN_SPAWN_GAP;
+      const raw = start + (count - 1 - k) * TWIN_SPAWN_GAP;
       return this.openTrack ? Math.min(raw, N - 1) : raw % N;
     };
 
@@ -3297,8 +3365,21 @@ export class GameScene extends Phaser.Scene {
       const dur = Phaser.Math.Clamp(maxD * 0.8, 140, 260); // snappier group roll-on (user 2026-07-25: lên ray hơi chậm)
       members.forEach((m, k) => this.spawnCar(m, posFor(k), dur));
     } else {
-      this.spawnCar(members[0], this.startIndex);
+      this.spawnCar(members[0], start);
     }
+  }
+
+  // SLAM: the track node closest to a bay's x-position, on the BOTTOM rail — a car
+  // launched from that bay rises straight onto the ray here (and returns here).
+  private bayEntryNode(slotX: number): number {
+    let best = this.startIndex, bd = Infinity;
+    for (let i = 0; i < this.track.length; i++) {
+      const dx = this.track[i].x - slotX;
+      const dy = this.track[i].y - this.beltBottom;
+      const d = dx * dx + dy * dy * 4; // weight y so a bottom-edge node wins
+      if (d < bd) { bd = d; best = i; }
+    }
+    return best;
   }
 
   // Push one car onto the ray at `pos`, gliding it there from wherever it sits (a
@@ -3347,11 +3428,12 @@ export class GameScene extends Phaser.Scene {
     const N = this.track.length;
     if (N === 0) return;
 
-    if (AUTO_CIRCLE || this.trayMode) this.computeReachableColors(); // which colours can be shot right now
+    if (AUTO_CIRCLE || this.trayMode || this.slamMode) this.computeReachableColors(); // which colours can be shot right now
     this.trySpawn();
     this.autoRelaunchBays(); // parked cars self-relaunch when their colour is reachable again
     if (this.trayMode && TRAY_BATCH) { this.endBatchStaleCheck(time); this.endBatchIfDone(); this.updateGoButton(); }
     if (this.trayMode) this.checkTrayStuck(); // one-way bays: all 5 blocked & idle → lose
+    if (this.slamMode) this.updateSlotLocks(); // show 🔒 on bays whose car is out on the ray
 
     // Live "cars on the ray" count on the start signal.
     if (this.signalCount) this.signalCount.setText(`${this.active.length}/${this.onTrackCap()}`);
@@ -3501,10 +3583,10 @@ export class GameScene extends Phaser.Scene {
     if (time - a.lastShot < cooldown) return;
     let openSeats = a.view.chest.count - a.view.inFlight;
     if (openSeats <= 0) return;
-    // Normal: grab the single nearest slime in sight. Boosted (queue empty): grab
-    // EVERY matching slime in the car's 3 lines of sight this tick.
+    // Normal: grab up to TWO nearest slimes in sight per tick (snappier collecting, user
+    // 2026-07-29). Boosted (queue empty): grab EVERY matching slime in the 3 lines of sight.
     const targets = this.findLosTargets(a);
-    const take = boost ? targets.length : Math.min(1, targets.length);
+    const take = boost ? targets.length : Math.min(2, targets.length);
     let fired = false;
     for (let k = 0; k < take && openSeats > 0; k++) {
       const idx = targets[k];
@@ -3618,6 +3700,10 @@ export class GameScene extends Phaser.Scene {
     // batch is genuinely stale (no collection by ANY member for a grace window) and then
     // ALL members park together (endBatchStaleCheck). So here: keep circling while running.
     if (this.trayMode && TRAY_BATCH) return this.batchRunning;
+    // SLAM (user 2026-07-29): a car out on the ray KEEPS circling while it can still collect its
+    // colour, instead of returning to its bay after one lap — only retires to the bay when nothing
+    // is left to grab. Its bay stays reserved throughout (slam never auto-relaunches from bays).
+    if (this.slamMode) return this.liveGroup(a.view).some((m) => this.carCanCollect(m));
     if (!AUTO_CIRCLE) return false;
     return this.liveGroup(a.view).some((m) => this.carCanCollect(m));
   }
@@ -3640,6 +3726,7 @@ export class GameScene extends Phaser.Scene {
   // The car doesn't jump out instantly: it first BOBS in place for a beat (armBay) so
   // the player can SEE it's about to relaunch, then it launches (see the telegraph const).
   private autoRelaunchBays() {
+    if (this.slamMode) return; // SLAM: bay cars launch ONLY when the player taps them, never auto
     if (this.trayMode && TRAY_BATCH) return; // batch tray: cars fire only via the GO button, never auto
     if (!AUTO_CIRCLE && !this.trayMode) return;
     if (this.tutStep > 0 || this.handMode || this.magnetMode) {
@@ -3720,6 +3807,17 @@ export class GameScene extends Phaser.Scene {
   private checkTrayStuck() {
     if (this.won || this.lost || this.tutPaused) return;
     if (this.active.length > 0 || this.pending.length > 0) return; // cars still in motion
+    if (this.slamMode) {
+      // DEADLOCK: nothing is out on the ray, and no bay car can collect any slime. If a
+      // fresh car can still auto-fill a bay (free bay + queue not empty), give it a chance;
+      // otherwise the player is stuck → lose.
+      for (const v of this.slots) { if (v && this.carCanCollect(v)) return; } // a tappable move exists
+      const freeBay = this.slots.some((s) => s === null);
+      if (freeBay && !this.queueEmpty()) return; // a new car can still enter and might help
+      if (this.slots.every((s) => s === null) && this.queueEmpty()) return; // no cars at all (pre-win frame)
+      this.lose();
+      return;
+    }
     if (this.trayMode && TRAY_BATCH) {
       if (this.batchRunning) return; // squad still working
       // The player can still change the board by staging a fresh queue car (needs both a

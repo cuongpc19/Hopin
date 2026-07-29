@@ -74,6 +74,13 @@ export interface Level {
   // BOARD THEME: default is the dark navy mat (bright tiles pop). Set true to use the
   // old light sand mat instead (per-level override, e.g. for a design comparison).
   lightBoard?: boolean;
+  // SLAM prototype (hop-in-slam): small board with BIG slimes (cell sized to the actual
+  // board, not the 25× standard) + slower cars, so the "slime runs to the car" pickup
+  // reads strongly. Later carries the waiting-slot lock + deadlock mechanic.
+  slam?: boolean;
+  // Number of waiting slots (bays). Default 5. Fewer = tighter = harder (a slam difficulty
+  // lever — the tuner sets this per level to hit the target winrate).
+  bays?: number;
 }
 
 // Difficulty tiers: every 5th level is HARD, every 15th is SUPER-HARD.
@@ -195,6 +202,8 @@ export function makeLevel(levelNum = 1): Level {
       lanes: designed.lanes,
       tray: designed.tray,
       lightBoard: designed.lightBoard,
+      slam: designed.slam,
+      bays: designed.bays,
     };
   }
 
