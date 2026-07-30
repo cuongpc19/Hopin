@@ -9,7 +9,7 @@ import fs from "fs";
 import path from "path";
 import {
   ROOT, isC, readD, writeD, measure, colorDepth, reCar, makeOrder,
-  addLayer2Clusters, addBaggageTwins, addBuried, buildBoard,
+  addLayer2Clusters, addBaggageTwins, addBuried, buildBoard, canonName,
 } from "./genlib.mjs";
 
 const LOG = path.join(ROOT, "scripts/_stubborn4-log.txt");
@@ -32,10 +32,11 @@ function candidates() {
   walk(path.join(ROOT, "../Pixel Flow/public/art/level art/hard"));
   return out;
 }
-const usedNames = new Set(["3_penguin_animals1.png", "2_elephant_animals2.png"]);
+// sổ cái theo KHOÁ CHUẨN (canonName — cùng artwork 2 tên file, bug L146 lấy artist của L4)
+const usedNames = new Set([canonName("3_penguin_animals1.png"), canonName("2_elephant_animals2.png")]);
 {
   const d0 = readD();
-  for (const k of Object.keys(d0)) if (d0[k] && d0[k].img) usedNames.add(d0[k].img);
+  for (const k of Object.keys(d0)) if (d0[k] && d0[k].img) usedNames.add(canonName(d0[k].img));
 }
 
 fs.writeFileSync(LOG, "");
@@ -50,7 +51,7 @@ for (const lvlS of Object.keys(TARGET)) {
   let global = null; // best trên MỌI ảnh: {dist, full, base, img, bgColor, pct, chests, layer2}
   let tried = 0;
   for (const img of candidates()) {
-    if (usedNames.has(path.basename(img))) continue;
+    if (usedNames.has(canonName(img))) continue;
     if (tried >= 6) break;
     const res = buildBoard(img, lvl, 12, 25);
     if (!res.ok) continue;
@@ -145,7 +146,7 @@ for (const lvlS of Object.keys(TARGET)) {
   if (global.layer2) L.layer2 = global.layer2; else delete L.layer2;
   if (kind === "mixed") addBuried(L, 0.33, lvl * 131 + 7, L.lanes || 4);
   writeD(d);
-  usedNames.add(L.img);
+  usedNames.add(canonName(L.img));
   const tw = new Set(L.chests.filter((c) => c.pairId != null).map((c) => c.pairId)).size;
   const l2 = L.layer2 ? L.layer2.filter((v) => v >= 0).length : 0;
   log(`L${lvl}: ✓ CHỐT ${L.img} viền ${global.pct}% | ${L.chests.length} xe ${tw} twin ${l2}chôn | trip-sim ${global.full}%${global.twinNote || ""} gánh ${global.gánh} (target ${target}) [${Math.round((Date.now() - t0) / 1000)}s]`);

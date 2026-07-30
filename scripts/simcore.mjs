@@ -151,6 +151,56 @@ export function tripCollect(s, car, entryIdx, pessim = false) {
   return ate;
 }
 
+// MỘT CHUYẾN CHUNG cho NHÓM xe đôi/ba (fix 2026-07-31, ván L10 thật): nhóm là KHỐI CỨNG —
+// cùng đi qua từng lane (mỗi thành viên ăn màu MÌNH ≤14/lượt-lane NGAY TẠI lane đó), cuối vòng
+// đi tiếp khi BẤT KỲ thành viên còn cap>0 && màu nó reachable (canKeepCircling liveGroup.some),
+// và DỪNG CÙNG NHAU. Mô hình cũ (từng xe một hành trình riêng tuần tự) chia sai số ăn giữa 2
+// thành viên → guide khuyên phóng cặp tưởng sạch mà thật ra 1 xe kẹt ô (sim=26/20, thật=20/26).
+export function tripCollectGroup(s, members, entryIdx, pessim = false) {
+  const seq = laneSeq(s);
+  const N = seq.length;
+  const st = new Map();
+  for (const m of members) {
+    let pc = Infinity;
+    if (pessim) {
+      let total = 0;
+      for (const v of s.occ) if (v === m.color) total++;
+      if (s.lay) for (const v of s.lay) if (v === m.color) total++;
+      if (total === m.cap && m.cap >= 2) pc = m.cap - 1;
+    }
+    st.set(m, { ate: 0, pessimCap: pc });
+  }
+  const canEat = (m) => m.cap > 0 && st.get(m).ate < st.get(m).pessimCap;
+  let pos = entryIdx % N, steps = 0, laps = 0;
+  while (members.some(canEat) && laps < 60) {
+    const { e, l } = seq[pos];
+    // ăn XEN KẼ từng con một (A,B,A,B…): xe sau hưởng ngay ô xe trước vừa mở tại cùng lane
+    // (đúng vật lý 2 xe bám nhau; ăn tuần tự cả 14 con một xe làm lệch chia phần — L10 thật)
+    const per = new Map(members.map((m) => [m, 0]));
+    let progress = true;
+    while (progress) {
+      progress = false;
+      for (const m of members) {
+        if (!canEat(m) || per.get(m) >= 14) continue;
+        const h = nearestTarget(s, e, l, m.color);
+        if (!h) continue;
+        clearCell(s, h.idx);
+        m.cap--; st.get(m).ate++; per.set(m, per.get(m) + 1);
+        progress = true;
+      }
+    }
+    pos = (pos + 1) % N; steps++;
+    if (steps >= N) {
+      laps++;
+      if (!members.some(canEat)) break;
+      const S = reachableColors(s);
+      if (!members.some((m) => canEat(m) && S.has(m.color))) break;
+      steps = 0;
+    }
+  }
+  return members.reduce((a, m) => a + st.get(m).ate, 0);
+}
+
 export function remaining(s) {
   return s.occ.reduce((a, v) => a + (isC(v) ? 1 : 0), 0) + (s.lay ? s.lay.reduce((a, v) => a + (v >= 0 ? 1 : 0), 0) : 0);
 }
@@ -181,11 +231,17 @@ export function launchQueue(s, j) {
   if (freeSlots(s) < group.length) return false;
   for (const m of group) { for (const col of s.queue) { const k = col.indexOf(m); if (k >= 0) { col.splice(k, 1); break; } } }
   const pess = freeSlots(s) - group.length <= 1; // sắp cạn ô → đánh giá bi quan
-  const isGroup = group.length > 1;
-  for (const m of group) {
+  if (group.length > 1) {
+    // NHÓM: chiếm slot từng thành viên rồi đi MỘT chuyến chung (khối cứng, vào lane 0)
+    const taken = [];
+    for (const m of group) { const sl = s.slots.indexOf(null); s.slots[sl] = m; taken.push([m, sl]); }
+    tripCollectGroup(s, group, 0, pess);
+    for (const [m, sl] of taken) if (m.cap === 0) s.slots[sl] = null;
+  } else {
+    const m = group[0];
     const sl = s.slots.indexOf(null);
     s.slots[sl] = m; // chiếm ngay (2-hop)
-    tripCollect(s, m, isGroup ? 0 : slotEntryLaneIndex(s, sl), pess);
+    tripCollect(s, m, slotEntryLaneIndex(s, sl), pess);
     if (m.cap === 0) s.slots[sl] = null;
   }
   return true;
@@ -194,6 +250,17 @@ export function tapBay(s, i) {
   const p = s.slots[i];
   if (!p) return false;
   const pess = freeSlots(s) <= 1;
+  // bấm 1 thành viên NHÓM đang đỗ → CẢ NHÓM (các thành viên còn trong bay) phóng lại cùng
+  // nhau, đi chung một chuyến từ lane 0 (relaunchFromSlot groupOf + spawnGroup startIndex).
+  if (p.pid != null) {
+    const members = [], at = [];
+    s.slots.forEach((m, k) => { if (m && m.pid === p.pid) { members.push(m); at.push(k); } });
+    if (members.length > 1) {
+      tripCollectGroup(s, members, 0, pess);
+      for (const k of at) if (s.slots[k] && s.slots[k].cap === 0) s.slots[k] = null;
+      return true;
+    }
+  }
   tripCollect(s, p, slotEntryLaneIndex(s, i), pess);
   if (p.cap === 0) s.slots[i] = null;
   return true;
@@ -205,12 +272,13 @@ function estimate(s, group) {
   const c2 = cloneState(s);
   const g2 = group.map((m) => ({ ...m }));
   let eaten = 0;
-  for (const m of g2) {
+  if (g2.length > 1) {
+    for (const m of g2) { const sl = c2.slots.indexOf(null); if (sl >= 0) c2.slots[sl] = m; }
+    eaten = tripCollectGroup(c2, g2, 0);
+  } else {
+    const m = g2[0];
     const sl = c2.slots.indexOf(null);
-    if (sl < 0) break;
-    c2.slots[sl] = m;
-    eaten += tripCollect(c2, m, slotEntryLaneIndex(c2, sl));
-    if (m.cap === 0) c2.slots[sl] = null;
+    if (sl >= 0) { c2.slots[sl] = m; eaten = tripCollect(c2, m, slotEntryLaneIndex(c2, sl)); }
   }
   const leftover = g2.reduce((a, m) => a + m.cap, 0);
   return { eaten, leftover };

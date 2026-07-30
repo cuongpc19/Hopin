@@ -3926,17 +3926,18 @@ export class GameScene extends Phaser.Scene {
     const slots: ({ color: number; cap: number; pid: number | null } | null)[] = s.parked.map((p) => (p ? { ...p } : null));
     const isC = (v: number) => v >= 0 && v < 90;
     // slime "?" ẨN: chặn tia + không target được tới khi 1 ô kề 4-hướng bị ăn (hiddenSet thật).
-    const hid = new Set<number>(s.hid ?? []);
+    // `h` nằm TRONG Cell state (không phải closure chung) — các ước lượng trên CLONE không được
+    // làm lộ "?" của dòng chính (bug 2026-07-31).
     let remaining = occ.reduce((a, v) => a + (isC(v) ? 1 : 0), 0) + (lay ? lay.reduce((a, v) => a + (v >= 0 ? 1 : 0), 0) : 0);
-    type Cell = { o: number[]; l: number[] | null };
+    type Cell = { o: number[]; l: number[] | null; h: Set<number> };
     const clearCell = (st: Cell, i: number) => {
       if (st.l && st.l[i] >= 0) { st.o[i] = st.l[i]; st.l[i] = -1; } else st.o[i] = -1;
-      if (hid.size) { // lộ "?" ở 4 ô kề (revealHiddenAround)
+      if (st.h.size) { // lộ "?" ở 4 ô kề (revealHiddenAround)
         const r = (i / cols) | 0, c = i % cols;
-        if (r > 0) hid.delete(i - cols);
-        if (r < rows - 1) hid.delete(i + cols);
-        if (c > 0) hid.delete(i - 1);
-        if (c < cols - 1) hid.delete(i + 1);
+        if (r > 0) st.h.delete(i - cols);
+        if (r < rows - 1) st.h.delete(i + cols);
+        if (c > 0) st.h.delete(i - 1);
+        if (c < cols - 1) st.h.delete(i + 1);
       }
     };
     const rayHit = (o: number[], sr: number, sc: number, dr: number, dc: number): { idx: number; steps: number } | null => {
@@ -3966,21 +3967,21 @@ export class GameScene extends Phaser.Scene {
       if (e === "l") return [[l, 0, 0, 1], [l - 1, 0, -1, 1], [l + 1, 0, 1, 1]];
       return [[l, cols - 1, 0, -1], [l - 1, cols - 1, -1, -1], [l + 1, cols - 1, 1, -1]];
     };
-    const nearestTarget = (o: number[], e: string, l: number, color: number): { idx: number; steps: number } | null => {
+    const nearestTarget = (st: Cell, e: string, l: number, color: number): { idx: number; steps: number } | null => {
       let best: { idx: number; steps: number } | null = null;
       for (const [r0, c0, dr, dc] of lanRays(e, l)) {
-        const h = rayHit(o, r0, c0, dr, dc);
+        const h = rayHit(st.o, r0, c0, dr, dc);
         // "?" ẩn: tia dừng ở đó nhưng không target được (findLosTargets lọc hiddenSet)
-        if (h && !hid.has(h.idx) && o[h.idx] === color && (!best || h.steps < best.steps)) best = h;
+        if (h && !st.h.has(h.idx) && st.o[h.idx] === color && (!best || h.steps < best.steps)) best = h;
       }
       return best;
     };
-    const reachColors = (o: number[]): Set<number> => {
+    const reachColors = (st: Cell): Set<number> => {
       const S = new Set<number>();
       for (const { e, l } of seq) {
         for (const [r0, c0, dr, dc] of lanRays(e, l)) {
-          const h = rayHit(o, r0, c0, dr, dc);
-          if (h && !hid.has(h.idx)) S.add(o[h.idx]);
+          const h = rayHit(st.o, r0, c0, dr, dc);
+          if (h && !st.h.has(h.idx)) S.add(st.o[h.idx]);
         }
       }
       return S;
@@ -4003,7 +4004,7 @@ export class GameScene extends Phaser.Scene {
         const { e, l } = seq[pos];
         let per = 0;
         while (car.cap > 0 && per < 14) {
-          const h = nearestTarget(st.o, e, l, car.color);
+          const h = nearestTarget(st, e, l, car.color);
           if (!h) break;
           clearCell(st, h.idx);
           car.cap--; ate++; per++;
@@ -4012,13 +4013,59 @@ export class GameScene extends Phaser.Scene {
         if (steps >= NL) {
           laps++;
           if (car.cap <= 0) break;
-          if (!reachColors(st.o).has(car.color)) break;
+          if (!reachColors(st).has(car.color)) break;
           steps = 0;
         }
       }
       return ate;
     };
-    const live: Cell = { o: occ, l: lay };
+    // MỘT CHUYẾN CHUNG cho NHÓM xe đôi/ba (fix 2026-07-31, ván L10 thật): khối cứng — mỗi lane
+    // mọi thành viên ăn XEN KẼ màu MÌNH (≤14/lane mỗi xe); cuối vòng đi tiếp khi BẤT KỲ ai còn
+    // cap>0 && màu nó reachable (canKeepCircling liveGroup.some); DỪNG CÙNG NHAU. Model cũ (từng
+    // xe một hành trình riêng) chia sai số ăn → guide khuyên phóng cặp tưởng sạch mà 1 xe kẹt ô.
+    const tripGroup = (st: Cell, cars: { color: number; cap: number }[], entryIdx: number, pessim = false): number => {
+      const meta = new Map<{ color: number; cap: number }, { ate: number; pessimCap: number }>();
+      for (const m of cars) {
+        let pc = Infinity;
+        if (pessim) {
+          let total = 0;
+          for (const v of st.o) if (v === m.color) total++;
+          if (st.l) for (const v of st.l) if (v === m.color) total++;
+          if (total === m.cap && m.cap >= 2) pc = m.cap - 1;
+        }
+        meta.set(m, { ate: 0, pessimCap: pc });
+      }
+      const canEat = (m: { color: number; cap: number }) => m.cap > 0 && meta.get(m)!.ate < meta.get(m)!.pessimCap;
+      let pos = entryIdx % NL, steps = 0, laps = 0;
+      while (cars.some(canEat) && laps < 60) {
+        const { e, l } = seq[pos];
+        const per = new Map<{ color: number; cap: number }, number>(cars.map((m) => [m, 0]));
+        let progress = true;
+        while (progress) {
+          progress = false;
+          for (const m of cars) {
+            if (!canEat(m) || per.get(m)! >= 14) continue;
+            const h = nearestTarget(st, e, l, m.color);
+            if (!h) continue;
+            clearCell(st, h.idx);
+            m.cap--; meta.get(m)!.ate++; per.set(m, per.get(m)! + 1);
+            progress = true;
+          }
+        }
+        pos = (pos + 1) % NL; steps++;
+        if (steps >= NL) {
+          laps++;
+          if (!cars.some(canEat)) break;
+          const S = reachColors(st);
+          if (!cars.some((m) => canEat(m) && S.has(m.color))) break;
+          steps = 0;
+        }
+      }
+      let total = 0;
+      for (const m of cars) total += meta.get(m)!.ate;
+      return total;
+    };
+    const live: Cell = { o: occ, l: lay, h: new Set<number>(s.hid ?? []) };
     const headGroup = (j: number): { color: number; cap: number; pid: number | null }[] | null => {
       const f = queue[j][0];
       if (!f) return null;
@@ -4039,12 +4086,18 @@ export class GameScene extends Phaser.Scene {
       const grp = headGroup(j);
       if (!grp || slots.filter((p) => p === null).length < grp.length) return false;
       for (const m of grp) { for (const col of queue) { const k = col.indexOf(m); if (k >= 0) { col.splice(k, 1); break; } } }
-      const isGroup = grp.length > 1;
       const pess = slots.filter((p) => p === null).length - grp.length <= 1; // sắp cạn ô → bi quan
-      for (const m of grp) {
+      if (grp.length > 1) {
+        // NHÓM: chiếm slot từng thành viên, đi MỘT chuyến chung từ lane 0 (startIndex)
+        const taken: number[] = [];
+        for (const m of grp) { const sl = slots.indexOf(null); slots[sl] = m; taken.push(sl); }
+        remaining -= tripGroup(live, grp, 0, pess);
+        for (const sl of taken) if (slots[sl] && slots[sl]!.cap === 0) slots[sl] = null;
+      } else {
+        const m = grp[0];
         const sl = slots.indexOf(null);
         slots[sl] = m;
-        remaining -= trip(live, m, isGroup ? 0 : entryLane(sl), pess); // nhóm vào ray tại startIndex (lane 0)
+        remaining -= trip(live, m, entryLane(sl), pess);
         if (m.cap === 0) slots[sl] = null;
       }
       return true;
@@ -4053,6 +4106,17 @@ export class GameScene extends Phaser.Scene {
       const p = slots[i];
       if (!p) return false;
       const pess = slots.filter((q) => q === null).length <= 1;
+      // bấm 1 thành viên NHÓM đang đỗ → CẢ NHÓM phóng lại cùng nhau (relaunchFromSlot groupOf)
+      if (p.pid != null) {
+        const members: { color: number; cap: number; pid: number | null }[] = [];
+        const at: number[] = [];
+        slots.forEach((m, k) => { if (m && m.pid === p.pid) { members.push(m); at.push(k); } });
+        if (members.length > 1) {
+          remaining -= tripGroup(live, members, 0, pess);
+          for (const k of at) if (slots[k] && slots[k]!.cap === 0) slots[k] = null;
+          return true;
+        }
+      }
       remaining -= trip(live, p, entryLane(i), pess);
       if (p.cap === 0) slots[i] = null;
       return true;
@@ -4074,7 +4138,7 @@ export class GameScene extends Phaser.Scene {
       let any = true;
       while (any && remaining > 0) {
         any = false;
-        const S = reachColors(occ);
+        const S = reachColors(live);
         for (let i = 0; i < slots.length; i++) {
           const p = slots[i];
           if (p && p.cap > 0 && S.has(p.color)) {
@@ -4098,19 +4162,19 @@ export class GameScene extends Phaser.Scene {
         cands.push({ j, grp });
       }
       if (!cands.length) break;
-      // ước ăn/thừa trên CLONE (đúng trip-sim, entry theo slot sẽ chiếm)
+      // ước ăn/thừa trên CLONE (đúng trip-sim; clone cả hid — không làm lộ "?" dòng chính)
       const meta = cands.map((c) => {
-        const st2: Cell = { o: occ.slice(), l: lay ? lay.slice() : null };
-        const sl2 = slots.map((p) => (p ? { ...p } : null));
+        const st2: Cell = { o: occ.slice(), l: lay ? lay.slice() : null, h: new Set(live.h) };
         let eaten = 0, leftover = 0;
-        for (const m of c.grp) {
-          const m2 = { color: m.color, cap: m.cap };
-          const sl = sl2.indexOf(null);
-          if (sl < 0) { leftover += m2.cap; continue; }
-          sl2[sl] = m as unknown as { color: number; cap: number; pid: number | null };
-          eaten += trip(st2, m2, entryLane(sl));
-          if (m2.cap === 0) sl2[sl] = null;
-          leftover += m2.cap;
+        if (c.grp.length > 1) {
+          const g2 = c.grp.map((m) => ({ color: m.color, cap: m.cap }));
+          eaten = tripGroup(st2, g2, 0);
+          leftover = g2.reduce((a, m) => a + m.cap, 0);
+        } else {
+          const m2 = { color: c.grp[0].color, cap: c.grp[0].cap };
+          const sl = slots.indexOf(null);
+          if (sl >= 0) eaten = trip(st2, m2, entryLane(sl));
+          leftover = m2.cap;
         }
         return { ...c, eaten, leftover };
       });

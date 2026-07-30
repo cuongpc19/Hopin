@@ -29,7 +29,9 @@ const DESIGN = [
   { lvl: 7, target: 90, size: 25, K: 6, minxe: 12, maxxe: 80, twins: 0, img: "2_pinetree_flashcard.png" },
   { lvl: 8, target: 90, size: 25, K: 5, minxe: 7, maxxe: 80, twins: 1, twinFront: true, img: "2_star_flashcard.png" },
   { lvl: 9, target: 90, size: 25, K: 11, minxe: 12, maxxe: 80, twins: 1, img: "11_parakeet_animals.png" },
-  { lvl: 10, target: 65, size: 25, K: 10, minxe: 16, maxxe: 16, twins: 4, buried: 0.3, img: "11_robot_heroes.png" },
+  // target 65→72 (playtest 2026-07-31: user thua 5/5 — CSV 65 quá gắt cho L10 đầu game;
+  // đo trip-sim 72 ≈ cảm giác ~65 thật). Ảnh cũ candycane dồn 5 xe cùng màu đỏ → swing lớn.
+  { lvl: 10, target: 72, size: 25, K: 10, minxe: 16, maxxe: 16, twins: 4, buried: 0.3, img: "11_robot_heroes.png" },
   { lvl: 11, target: 100, size: 31, K: 6, minxe: 16, maxxe: 80, twins: 0, img: "3_cactus_objects.png" },
   { lvl: 12, target: 85, size: 31, K: 5, minxe: 16, maxxe: 80, twins: 1, img: "11_turtle_sea.png" },
   { lvl: 13, target: 95, size: 31, K: 11, minxe: 16, maxxe: 80, twins: 0, img: "7_dino_animals1.png" },
