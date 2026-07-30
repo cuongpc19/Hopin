@@ -4124,7 +4124,7 @@ export class GameScene extends Phaser.Scene {
     // — phát lại từng bước, mỗi bước vẫn validate với trạng thái thật; lệch là re-plan ngay.
     this.guidePlan = best.winPlan ? best.winPlan.slice() : [best.key];
     this.guidePlanWinning = best.wins > 0;
-    this.postLog({ ev: "plan", wins: best.wins + "/" + M, steps: this.guidePlan.length, plan: this.guidePlan.slice(0, 40).join(",") });
+    this.postLog({ ev: "plan", wins: String(best.wins), steps: this.guidePlan.length, plan: this.guidePlan.slice(0, 40).join(",") });
     const t0 = this.guideStepTarget(best.key);
     if (!t0) { this.guidePlan = null; return null; }
     return t0;
