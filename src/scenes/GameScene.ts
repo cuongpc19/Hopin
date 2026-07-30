@@ -4007,12 +4007,27 @@ export class GameScene extends Phaser.Scene {
       }
       return s2;
     };
-    let winner: Cand | null = null;
+    // STICKY: if the previous suggestion is still a candidate AND still opens a winning line,
+    // keep pointing at it — a fresh recompute every 350ms flip-flopping between equally-good
+    // moves reads as "chỉ dẫn lung tung" (user 2026-07-30).
+    const prevKey = this.guideKey.replace(/^[WF]/, "");
+    const prev = cands.find((c) => c.key === prevKey);
+    if (prev && this.simPlayout(applyFirst(base, prev.key))) return { key: "W" + prev.key, x: prev.x, y: prev.y };
+    const winners: Cand[] = [];
     for (const c of cands) {
       const st = applyFirst(base, c.key);
-      if (this.simPlayout(st)) { winner = c; break; }
+      if (this.simPlayout(st)) winners.push(c);
     }
-    const pick = winner ?? cands[0]; // no simulated win → best-effort first candidate
+    // among winning moves prefer a PRODUCTIVE one (bay car, or a queue car whose colour is
+    // reachable now) over a dig — advising a "useless-looking" launch reads as nonsense.
+    const productive = (c: Cand) => {
+      if (c.key.startsWith("bay")) return true;
+      const j = parseInt(c.key.slice(1), 10);
+      const head = this.invColumns[j] && this.invColumns[j][0];
+      return !!head && this.reachableColors.has(head.chest.color);
+    };
+    const winner = winners.find(productive) ?? winners[0] ?? null;
+    const pick = winner ?? cands.find(productive) ?? cands[0];
     return { key: (winner ? "W" : "F") + pick.key, x: pick.x, y: pick.y };
   }
 
@@ -4066,6 +4081,7 @@ export class GameScene extends Phaser.Scene {
     }
     this.clearGuidePointer();
     this.guideKey = t.key;
+    this.postLog({ ev: "guide", key: t.key }); // telemetry: which move was advised (W=winning line, F=fallback)
     const D = 130; // above cars/ropes, below modals
     this.guideRing = this.add.circle(t.x, t.y, this.chestSize * 0.62).setStrokeStyle(4, 0xffe14a, 1).setDepth(D);
     this.tweens.add({ targets: this.guideRing, scale: 1.18, alpha: 0.45, duration: 620, yoyo: true, repeat: -1 });
