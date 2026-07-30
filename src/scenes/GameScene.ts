@@ -4053,19 +4053,23 @@ export class GameScene extends Phaser.Scene {
     // chọn nước winrate cao nhất — "tối ưu theo xác suất thắng", tránh nước-bẫy kiểu phóng twin
     // nhỏ sớm rồi khoá 2 ô suốt ván (bài học ván L148 user thua dù theo guide 100%).
     const M = 9;
-    let best: { key: string; wins: number; left: number } | null = null;
+    let best: { key: string; wins: number; left: number; winPlan: string[] | null } | null = null;
     for (const key of cands) {
       let wins = 0, leftSum = 0;
+      let winPlan: string[] | null = null; // chuỗi nước ĐẦY ĐỦ của ván thắng NGẮN nhất mở bằng key này
       for (let t = 0; t < M; t++) {
         const r = this.simRollout(base, (this.levelNum * 7919 + this.guidePlanNonce * 104729 + t * 137 + key.length * 31 + key.charCodeAt(key.length - 1) * 7 + 11) >>> 0, key);
-        if (r.win) wins++;
+        if (r.win) { wins++; if (!winPlan || r.plan.length < winPlan.length) winPlan = r.plan; }
         leftSum += r.left;
       }
-      if (!best || wins > best.wins || (wins === best.wins && leftSum < best.left)) best = { key, wins, left: leftSum };
+      if (!best || wins > best.wins || (wins === best.wins && leftSum < best.left)) best = { key, wins, left: leftSum, winPlan };
     }
     if (!best) return null;
-    this.guidePlan = [best.key];
+    // LƯU trọn chuỗi thắng (user 2026-07-30: "hệ thống đã lưu thứ tự đi xe thế nào thì thắng k?")
+    // — phát lại từng bước, mỗi bước vẫn validate với trạng thái thật; lệch là re-plan ngay.
+    this.guidePlan = best.winPlan ? best.winPlan.slice() : [best.key];
     this.guidePlanWinning = best.wins > 0;
+    this.postLog({ ev: "plan", wins: best.wins + "/" + M, steps: this.guidePlan.length, plan: this.guidePlan.slice(0, 40).join(",") });
     const t0 = this.guideStepTarget(best.key);
     if (!t0) { this.guidePlan = null; return null; }
     return t0;
@@ -4092,9 +4096,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   // Called from the tap handlers: advance the plan when the player follows it, drop it otherwise.
-  private onGuideAction(_action: string) {
-    // one-move advice: ANY player action invalidates it — recompute from the fresh live state
-    this.guidePlan = null;
+  private onGuideAction(action: string) {
+    if (!this.guidePlan || !this.guidePlan.length) return;
+    if (this.guidePlan[0] === action) this.guidePlan.shift(); // đi đúng kế hoạch → bước kế
+    else this.guidePlan = null; // đi chệch → lập kế hoạch mới từ trạng thái thật
   }
   private clearGuidePointer() {
     if (this.guideHand) { this.tweens.killTweensOf(this.guideHand); this.guideHand.destroy(); this.guideHand = undefined; }
