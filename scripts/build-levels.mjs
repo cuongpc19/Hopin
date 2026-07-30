@@ -2524,12 +2524,15 @@ function analyzeTwins(L, chestsArg, opts = {}) {
     const cars = _ch.map((c) => ({ color: c.color, cap: c.count, pairId: c.pairId ?? null }));
     const columns = Array.from({ length: perRow }, () => []);
     cars.forEach((c, i) => columns[i % perRow].push(i));
-    return { occ: L.board.slice(), cars, columns, parked: [] };
+    // LAYER2-aware (2026-07-30): clearing a top cell REVEALS the buried colour under it — without
+    // this the meter simulates the wrong game on layer2 levels (missing ~100 slimes + no under-reveal).
+    return { occ: L.board.slice(), lay: L.layer2 ? L.layer2.slice() : null, cars, columns, parked: [] };
   };
-  const clone = (s) => ({ occ: s.occ.slice(), cars: s.cars.map((c) => ({ ...c })), columns: s.columns.map((col) => col.slice()), parked: s.parked.slice() });
+  const clone = (s) => ({ occ: s.occ.slice(), lay: s.lay ? s.lay.slice() : null, cars: s.cars.map((c) => ({ ...c })), columns: s.columns.map((col) => col.slice()), parked: s.parked.slice() });
   const groupsOf = (s) => { const m = new Map(); s.cars.forEach((c, i) => { if (c.pairId != null) (m.get(c.pairId) || m.set(c.pairId, []).get(c.pairId)).push(i); }); return [...m.values()].filter((g) => g.length >= 2); };
-  const remaining = (s) => s.occ.reduce((a, v) => a + (isColor(v) ? 1 : 0), 0);
-  const collect = (s, ci) => { const car = s.cars[ci]; while (car.cap > 0) { const E = exposedTiles(s.occ, cols, rows, edges); let t = -1; for (const i of E) if (s.occ[i] === car.color) { t = i; break; } if (t < 0) break; s.occ[t] = -1; car.cap--; } };
+  const remaining = (s) => s.occ.reduce((a, v) => a + (isColor(v) ? 1 : 0), 0) + (s.lay ? s.lay.reduce((a, v) => a + (v >= 0 ? 1 : 0), 0) : 0);
+  const clearCell = (s, i) => { if (s.lay && s.lay[i] >= 0) { s.occ[i] = s.lay[i]; s.lay[i] = -1; } else s.occ[i] = -1; };
+  const collect = (s, ci) => { const car = s.cars[ci]; while (car.cap > 0) { const E = exposedTiles(s.occ, cols, rows, edges); let t = -1; for (const i of E) if (s.occ[i] === car.color) { t = i; break; } if (t < 0) break; clearCell(s, t); car.cap--; } };
   const removeCar = (s, ci) => { for (const col of s.columns) { const k = col.indexOf(ci); if (k >= 0) { col.splice(k, 1); return; } } const p = s.parked.indexOf(ci); if (p >= 0) s.parked.splice(p, 1); };
   const grouped = (s, ci) => s.cars[ci].pairId != null && groupsOf(s).some((g) => g.includes(ci));
   const groupReady = (s, g) => g.every((ci) => { if (s.parked.includes(ci)) return true; for (const col of s.columns) { const k = col.indexOf(ci); if (k >= 0) return col.slice(0, k).every((x) => g.includes(x)); } return false; });
