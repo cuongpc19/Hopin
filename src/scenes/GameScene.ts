@@ -303,6 +303,14 @@ export class GameScene extends Phaser.Scene {
   private tutPaused = false; // a tutorial is up → freeze the game until the player acts
   private tutHand?: Phaser.GameObjects.Text; // the bobbing 👆 (re-animated on a mis-tap)
   private tutHandY = 0; // the hand's resting Y (bob baseline)
+  // STEP GUIDE (user 2026-07-30): optional setting (default OFF, localStorage "hopin_guide").
+  // When ON, the game points at the recommended next move — tap this bay car / launch this queue
+  // car — recomputed after every action until the level is won. Uses the greedy solver priority.
+  private guideMode = false;
+  private guideHand?: Phaser.GameObjects.Text;
+  private guideRing?: Phaser.GameObjects.Arc;
+  private guideKey = ""; // identity of the current suggestion (avoid re-tweening every frame)
+  private guideAt = 0;   // last recompute time (throttle)
   private tutBooster?: { list: BoosterDef[]; idx: number; key: string }; // active booster tutorial
 
   private signalCount?: Phaser.GameObjects.Text; // "N/5" on the start-signal's green light
@@ -431,6 +439,8 @@ export class GameScene extends Phaser.Scene {
   private startLevel(levelNum: number) {
     this.levelNum = levelNum;
     this.playLog = []; this.playStart = (typeof performance !== "undefined" ? performance.now() : 0); this.peakUsed = 0;
+    try { this.guideMode = localStorage.getItem("hopin_guide") === "1"; } catch { this.guideMode = false; }
+    this.guideKey = ""; this.guideHand = undefined; this.guideRing = undefined;
     if (typeof window !== "undefined") { (window as any).hopLog = () => console.log(localStorage.getItem("hopin_playlog") || "[]"); (window as any).hopLogClear = () => localStorage.removeItem("hopin_playlog"); }
     // "start" streams AFTER makeLevel below (needs this.level); see the postLog("start") call there.
     this.children.removeAll();
@@ -2685,7 +2695,7 @@ export class GameScene extends Phaser.Scene {
   private openSettings() {
     const D = 200;
     const pw = 300;
-    const ph = 252;
+    const ph = 300;
     const x0 = GAME_W / 2 - pw / 2;
     const y0 = GAME_H / 2 - ph / 2;
     const dim = this.add
@@ -2733,10 +2743,16 @@ export class GameScene extends Phaser.Scene {
     };
     Audio.unlock(); // opening settings is a user gesture — safe to init audio
     const sfxBtn = mkToggle(y0 + 90, "🔊 Sound FX", () => Audio.isSfxOn, (v) => Audio.setSfx(v));
+    // Step guide (user 2026-07-30): default OFF; when ON the game points at the next move.
+    const guideBtn = mkToggle(y0 + 132, "🧭 Chỉ dẫn từng bước", () => this.guideMode, (v) => {
+      this.guideMode = v;
+      try { localStorage.setItem("hopin_guide", v ? "1" : "0"); } catch { /* ignore */ }
+      if (!v) this.clearGuidePointer();
+    });
 
     // Jump back to the level picker.
     const select = this.add
-      .text(GAME_W / 2, y0 + 156, "🗺  Levels", {
+      .text(GAME_W / 2, y0 + 198, "🗺  Levels", {
         fontFamily: "Arial, sans-serif",
         fontStyle: "bold",
         fontSize: "16px",
@@ -2764,6 +2780,7 @@ export class GameScene extends Phaser.Scene {
       panel.destroy();
       title.destroy();
       sfxBtn.destroy();
+      guideBtn.destroy();
       select.destroy();
       close.destroy();
     };
@@ -3445,6 +3462,7 @@ export class GameScene extends Phaser.Scene {
     if (N === 0) return;
 
     if (AUTO_CIRCLE || this.trayMode || this.slamMode) this.computeReachableColors(); // which colours can be shot right now
+    this.updateGuide(); // step-guide pointer (no-op unless the setting is ON)
     this.trySpawn();
     this.autoRelaunchBays(); // parked cars self-relaunch when their colour is reachable again
     if (this.trayMode && TRAY_BATCH) { this.endBatchStaleCheck(time); this.endBatchIfDone(); this.updateGoButton(); }
@@ -3816,6 +3834,80 @@ export class GameScene extends Phaser.Scene {
     this.batchRunning = false;
     this.updateSlotWarning();
     this.updateGoButton();
+  }
+
+  // ---- STEP GUIDE (user 2026-07-30) --------------------------------------------------
+  // Recommend the next move with the greedy-solver priority: (1) a parked bay car that can
+  // collect right now, (2) a launchable queue car/group whose colour is reachable, (3) dig —
+  // launch the front of the LONGEST column to reveal deeper cars. Points a bobbing 👇 at it.
+  private computeGuideTarget(): { key: string; x: number; y: number } | null {
+    if (!this.slamMode) return null;
+    const freeSlots = this.slots.reduce((n, s) => n + (s ? 0 : 1), 0);
+    // (1) bay car that can collect
+    for (let i = 0; i < this.slots.length; i++) {
+      const v = this.slots[i];
+      if (v && this.carCanCollect(v)) return { key: "bay" + i, x: v.container.x, y: v.container.y };
+    }
+    // launchable queue heads (front-prefix + fits bays + ray room)
+    const heads: { view: ChestView; group: ChestView[]; col: ChestView[] }[] = [];
+    const seen = new Set<ChestView>();
+    for (const col of this.invColumns) {
+      const head = col[0];
+      if (!head || !head.container.scene || seen.has(head)) continue;
+      const group = this.groupOf(head);
+      group.forEach((m) => seen.add(m));
+      let ok = true;
+      for (const m of group) {
+        const p = this.findInInventory(m);
+        if (!p || !p.col.slice(0, p.r).every((c) => group.includes(c))) { ok = false; break; }
+      }
+      if (!ok) continue;
+      if (freeSlots < group.length || this.active.length + this.pending.length + group.length > MAX_ON_TRACK) continue;
+      heads.push({ view: head, group, col });
+    }
+    // (2) productive queue launch (some member's colour reachable)
+    const prod = heads.filter((h) => h.group.some((m) => (m.chest.kind ?? "color") === "color" && this.reachableColors.has(m.chest.color)));
+    if (prod.length) { const t = prod[0].view; return { key: "q" + t.chest.color + ":" + t.container.x, x: t.container.x, y: t.container.y }; }
+    // (3) dig: the longest column's front (reveals the most)
+    if (heads.length) {
+      heads.sort((a, b) => b.col.length - a.col.length);
+      const t = heads[0].view;
+      return { key: "dig" + t.chest.color + ":" + t.container.x, x: t.container.x, y: t.container.y };
+    }
+    return null;
+  }
+
+  private clearGuidePointer() {
+    if (this.guideHand) { this.tweens.killTweensOf(this.guideHand); this.guideHand.destroy(); this.guideHand = undefined; }
+    if (this.guideRing) { this.tweens.killTweensOf(this.guideRing); this.guideRing.destroy(); this.guideRing = undefined; }
+    this.guideKey = "";
+  }
+
+  private updateGuide() {
+    if (!this.guideMode || !this.slamMode || this.won || this.lost || this.tutStep > 0 || this.handMode || this.magnetMode) {
+      if (this.guideKey) this.clearGuidePointer();
+      return;
+    }
+    if (this.time.now - this.guideAt < 350) return; // throttle
+    this.guideAt = this.time.now;
+    const t = this.computeGuideTarget();
+    if (!t) { if (this.guideKey) this.clearGuidePointer(); return; }
+    if (t.key === this.guideKey && this.guideHand) {
+      // same suggestion — just track the target's position (cars slide as the queue shifts)
+      this.guideHand.setPosition(t.x, this.guideHand.y);
+      if (this.guideRing) this.guideRing.setPosition(t.x, t.y);
+      return;
+    }
+    this.clearGuidePointer();
+    this.guideKey = t.key;
+    const D = 130; // above cars/ropes, below modals
+    this.guideRing = this.add.circle(t.x, t.y, this.chestSize * 0.62).setStrokeStyle(4, 0xffe14a, 1).setDepth(D);
+    this.tweens.add({ targets: this.guideRing, scale: 1.18, alpha: 0.45, duration: 620, yoyo: true, repeat: -1 });
+    this.guideHand = this.add
+      .text(t.x, t.y - this.chestSize * 0.95, "👇", { fontFamily: "Arial, sans-serif", fontSize: "30px" })
+      .setOrigin(0.5, 1)
+      .setDepth(D + 1);
+    this.tweens.add({ targets: this.guideHand, y: t.y - this.chestSize * 0.7, duration: 430, yoyo: true, repeat: -1, ease: "sine.inout" });
   }
 
   // A queue car (or its whole linked group) that could REALLY launch right now: every member
