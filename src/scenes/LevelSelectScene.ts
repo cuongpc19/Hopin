@@ -12,7 +12,7 @@ import {
   type EventReward,
 } from "../game/cloverEvent";
 
-const LEVEL_COUNT = 330; // kid pack L200-300 + rock-wall L301-315 + no-wall logic L316-330
+const LEVEL_COUNT = 185; // L1-185 (kid pack L200-300 + rock-wall/logic L301-330 removed 2026-07-30)
 const SPACING = 104; // vertical gap between level nodes
 const BASE_R = 34; // base hex radius (harder tiers are bigger)
 
