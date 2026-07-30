@@ -3981,10 +3981,11 @@ export class GameScene extends Phaser.Scene {
       const grp = headGroup(j);
       if (!grp || slots.filter((p) => p === null).length < grp.length) return false;
       for (const m of grp) { for (const col of queue) { const k = col.indexOf(m); if (k >= 0) { col.splice(k, 1); break; } } }
+      const isGroup = grp.length > 1;
       for (const m of grp) {
         const sl = slots.indexOf(null);
         slots[sl] = m;
-        remaining -= trip(live, m, entryLane(sl));
+        remaining -= trip(live, m, isGroup ? 0 : entryLane(sl)); // nhóm vào ray tại startIndex (lane 0)
         if (m.cap === 0) slots[sl] = null;
       }
       return true;
@@ -4070,8 +4071,16 @@ export class GameScene extends Phaser.Scene {
     if (this.active.length > 0 || this.pending.length > 0) return null; // chỉ mách khi board yên
     // advice hiện tại còn hợp lệ → giữ nguyên (không tính lại, không nhấp nháy)
     if (this.guidePlan && this.guidePlan.length) {
-      const t = this.guideStepTarget(this.guidePlan[0]);
-      if (t) return t;
+      // BÁM ĐƯỜNG ĐÃ LƯU (user 2026-07-30): bước đầu tạm kẹt (lệch nhịp vài con ở màu hiếm) thì
+      // KHÔNG vứt kế hoạch — thử hoán 1 trong 3 bước kế đang khả dụng lên làm trước; chỉ khi cả
+      // mấy bước đầu đều kẹt mới chịu lập kế hoạch mới.
+      for (let k = 0; k < Math.min(3, this.guidePlan.length); k++) {
+        const t = this.guideStepTarget(this.guidePlan[k]);
+        if (t) {
+          if (k > 0) { const [step] = this.guidePlan.splice(k, 1); this.guidePlan.unshift(step); }
+          return t;
+        }
+      }
       this.guidePlan = null;
     }
     const base = this.captureSimState();
@@ -4117,7 +4126,20 @@ export class GameScene extends Phaser.Scene {
     let best: { key: string; wins: number; left: number; winPlan: string[] | null } | null = null;
     for (const key of cands) {
       const a = acc.get(key)!;
-      if (!best || a.wins > best.wins || (a.wins === best.wins && a.left < best.left)) best = { key, wins: a.wins, left: a.left, winPlan: a.winPlan };
+      // màu hiếm (<12 viên cả 2 lớp) là vùng sim kém tin — nước phóng NHÓM chứa màu hiếm bị trừ
+      // 2 điểm wins để chỉ được chọn khi thật sự vượt trội (bài học twin 3&2 L148).
+      let adj = a.wins;
+      if (key.startsWith("q")) {
+        const j2 = parseInt(key.slice(1), 10);
+        const head2 = this.invColumns[j2] && this.invColumns[j2][0];
+        if (head2 && this.groupOf(head2).length > 1) {
+          const cnt = new Map<number, number>();
+          for (const v of base.occ) if (v >= 0 && v < 90) cnt.set(v, (cnt.get(v) || 0) + 1);
+          if (base.lay) for (const v of base.lay) if (v >= 0) cnt.set(v, (cnt.get(v) || 0) + 1);
+          if (this.groupOf(head2).some((m) => (cnt.get(m.chest.color) || 0) < 12)) adj = Math.max(0, adj - 2);
+        }
+      }
+      if (!best || adj > best.wins || (adj === best.wins && a.left < best.left)) best = { key, wins: adj, left: a.left, winPlan: a.winPlan };
     }
     if (!best) return null;
     // LƯU trọn chuỗi thắng (user 2026-07-30: "hệ thống đã lưu thứ tự đi xe thế nào thì thắng k?")
