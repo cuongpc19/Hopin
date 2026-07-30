@@ -49,3 +49,5 @@ Desktop.ini
 .env.*
 !.env.example
 playlog.jsonl
+scripts/_*.txt
+public/art/tmp/
