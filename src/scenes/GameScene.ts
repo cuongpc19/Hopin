@@ -4098,17 +4098,26 @@ export class GameScene extends Phaser.Scene {
     // 1-ply Monte-Carlo: mỗi ứng viên chạy M ván bot BẮT ĐẦU bằng đúng nước đó → winrate;
     // chọn nước winrate cao nhất — "tối ưu theo xác suất thắng", tránh nước-bẫy kiểu phóng twin
     // nhỏ sớm rồi khoá 2 ô suốt ván (bài học ván L148 user thua dù theo guide 100%).
-    const M = 9;
+    // QUÉT THÍCH ỨNG: vòng nông M=9/ứng viên; level gắt (không thấy đường thắng) → quét sâu
+    // thêm 21 seed/ứng viên trước khi chịu F — bám được cả level chỉ ~7% đường thắng như L148.
+    const runPass = (from: number, to: number, acc: Map<string, { wins: number; left: number; winPlan: string[] | null }>) => {
+      for (const key of cands) {
+        const a = acc.get(key) || { wins: 0, left: 0, winPlan: null };
+        for (let t = from; t < to; t++) {
+          const r = this.simRollout(base, (this.levelNum * 7919 + this.guidePlanNonce * 104729 + t * 137 + key.length * 31 + key.charCodeAt(key.length - 1) * 7 + 11) >>> 0, key);
+          if (r.win) { a.wins++; if (!a.winPlan || r.plan.length < a.winPlan.length) a.winPlan = r.plan; }
+          a.left += r.left;
+        }
+        acc.set(key, a);
+      }
+    };
+    const acc = new Map<string, { wins: number; left: number; winPlan: string[] | null }>();
+    runPass(0, 9, acc);
+    if (![...acc.values()].some((a) => a.wins > 0)) runPass(9, 30, acc); // level gắt → quét sâu
     let best: { key: string; wins: number; left: number; winPlan: string[] | null } | null = null;
     for (const key of cands) {
-      let wins = 0, leftSum = 0;
-      let winPlan: string[] | null = null; // chuỗi nước ĐẦY ĐỦ của ván thắng NGẮN nhất mở bằng key này
-      for (let t = 0; t < M; t++) {
-        const r = this.simRollout(base, (this.levelNum * 7919 + this.guidePlanNonce * 104729 + t * 137 + key.length * 31 + key.charCodeAt(key.length - 1) * 7 + 11) >>> 0, key);
-        if (r.win) { wins++; if (!winPlan || r.plan.length < winPlan.length) winPlan = r.plan; }
-        leftSum += r.left;
-      }
-      if (!best || wins > best.wins || (wins === best.wins && leftSum < best.left)) best = { key, wins, left: leftSum, winPlan };
+      const a = acc.get(key)!;
+      if (!best || a.wins > best.wins || (a.wins === best.wins && a.left < best.left)) best = { key, wins: a.wins, left: a.left, winPlan: a.winPlan };
     }
     if (!best) return null;
     // LƯU trọn chuỗi thắng (user 2026-07-30: "hệ thống đã lưu thứ tự đi xe thế nào thì thắng k?")
