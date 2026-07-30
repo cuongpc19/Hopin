@@ -94,14 +94,24 @@ export function slotEntryLaneIndex(s, slotI) {
 
 // MỘT CHUYẾN ra ray từ entry lane: đi CCW, ăn nearest-first per lane (tia bắn lại sau mỗi con,
 // tối đa 14/lượt-qua); cuối vòng còn cap && màu reachable → vòng nữa; trả số đã ăn.
-export function tripCollect(s, car, entryIdx) {
+export function tripCollect(s, car, entryIdx, pessim = false) {
   const seq = laneSeq(s);
   const N = seq.length;
+  // pessim vét-sạch CÓ ĐIỀU KIỆN (chỉ bật khi ô chờ căng — caller quyết): tổng viên màu == cap
+  // → coi như hụt 1 con. KHÔNG áp mù mọi trip: cuối ván ai cũng phải vét con cuối, áp mù làm mọi
+  // ván bất khả thi + vòng lặp tap-mãi-không-tiến (bug treo 2026-07-30).
+  let pessimCap = Infinity;
+  if (pessim) {
+    let total = 0;
+    for (const v of s.occ) if (v === car.color) total++;
+    if (s.lay) for (const v of s.lay) if (v === car.color) total++;
+    if (total === car.cap && car.cap >= 2) pessimCap = car.cap - 1;
+  }
   let ate = 0;
   let pos = entryIdx % N;
   let steps = 0;
   let guardLaps = 0;
-  while (car.cap > 0 && guardLaps < 60) {
+  while (car.cap > 0 && ate < pessimCap && guardLaps < 60) {
     const { e, l } = seq[pos];
     let perLane = 0;
     while (car.cap > 0 && perLane < 14) {
@@ -152,10 +162,12 @@ export function launchQueue(s, j) {
   if (!group) return false;
   if (freeSlots(s) < group.length) return false;
   for (const m of group) { for (const col of s.queue) { const k = col.indexOf(m); if (k >= 0) { col.splice(k, 1); break; } } }
+  const pess = freeSlots(s) - group.length <= 1; // sắp cạn ô → đánh giá bi quan
+  const isGroup = group.length > 1;
   for (const m of group) {
     const sl = s.slots.indexOf(null);
     s.slots[sl] = m; // chiếm ngay (2-hop)
-    tripCollect(s, m, slotEntryLaneIndex(s, sl));
+    tripCollect(s, m, isGroup ? 0 : slotEntryLaneIndex(s, sl), pess);
     if (m.cap === 0) s.slots[sl] = null;
   }
   return true;
@@ -163,7 +175,8 @@ export function launchQueue(s, j) {
 export function tapBay(s, i) {
   const p = s.slots[i];
   if (!p) return false;
-  tripCollect(s, p, slotEntryLaneIndex(s, i));
+  const pess = freeSlots(s) <= 1;
+  tripCollect(s, p, slotEntryLaneIndex(s, i), pess);
   if (p.cap === 0) s.slots[i] = null;
   return true;
 }
@@ -209,7 +222,7 @@ export function rollout(state, seed, forceFirst) {
       const S = reachableColors(s);
       for (let i = 0; i < s.slots.length; i++) {
         const p = s.slots[i];
-        if (p && p.cap > 0 && S.has(p.color)) { plan.push("bay" + i); tapBay(s, i); any = true; break; }
+        if (p && p.cap > 0 && S.has(p.color)) { const b = p.cap; plan.push("bay" + i); tapBay(s, i); if (s.slots[i] === null || s.slots[i].cap < b) any = true; else plan.pop(); break; }
       }
     }
     if (remaining(s) === 0) break;

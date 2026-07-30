@@ -3939,15 +3939,17 @@ export class GameScene extends Phaser.Scene {
     };
     const entryLane = (slotI: number) => Math.min(cols - 1, Math.floor(((slotI + 0.5) / 5) * cols));
     // một CHUYẾN từ entry lane — trả số đã ăn (mutate st)
-    const trip = (st: Cell, car: { color: number; cap: number }, entryIdx: number): number => {
-      // BI QUAN vét-sạch: 3 ván thua đều chết vì sim lệch ±1 con ở nước "ăn-vừa-khít" (xe cap 35
-      // vs đúng 35 viên → thật hụt 1 → chiếm Ô CUỐI → sập). Nếu tổng viên màu xe trên board ĐÚNG
-      // BẰNG cap (vét sạch không biên), sim coi như hụt 1 con → xe chiếm ô. Kế hoạch chỉ được
-      // chọn khi thắng cả trong kịch bản hụt → đường bền, không cược biên 0.
-      let total = 0;
-      for (const v of st.o) if (v === car.color) total++;
-      if (st.l) for (const v of st.l) if (v === car.color) total++;
-      const pessimCap = total === car.cap ? car.cap - 1 : Infinity;
+    const trip = (st: Cell, car: { color: number; cap: number }, entryIdx: number, pessim = false): number => {
+      // BI QUAN vét-sạch CÓ ĐIỀU KIỆN (chỉ khi ô chờ căng — caller quyết): xe định vét một màu
+      // ĐÚNG BẰNG cap bị coi hụt 1 con → chiếm ô. KHÔNG áp mù: cuối ván ai cũng phải vét con
+      // cuối — áp mù làm mọi ván bất khả thi + vòng tap-mãi-không-tiến (bug treo 2026-07-30).
+      let pessimCap = Infinity;
+      if (pessim) {
+        let total = 0;
+        for (const v of st.o) if (v === car.color) total++;
+        if (st.l) for (const v of st.l) if (v === car.color) total++;
+        if (total === car.cap && car.cap >= 2) pessimCap = car.cap - 1;
+      }
       let ate = 0, pos = entryIdx % NL, steps = 0, laps = 0;
       while (car.cap > 0 && ate < pessimCap && laps < 60) {
         const { e, l } = seq[pos];
@@ -3990,10 +3992,11 @@ export class GameScene extends Phaser.Scene {
       if (!grp || slots.filter((p) => p === null).length < grp.length) return false;
       for (const m of grp) { for (const col of queue) { const k = col.indexOf(m); if (k >= 0) { col.splice(k, 1); break; } } }
       const isGroup = grp.length > 1;
+      const pess = slots.filter((p) => p === null).length - grp.length <= 1; // sắp cạn ô → bi quan
       for (const m of grp) {
         const sl = slots.indexOf(null);
         slots[sl] = m;
-        remaining -= trip(live, m, isGroup ? 0 : entryLane(sl)); // nhóm vào ray tại startIndex (lane 0)
+        remaining -= trip(live, m, isGroup ? 0 : entryLane(sl), pess); // nhóm vào ray tại startIndex (lane 0)
         if (m.cap === 0) slots[sl] = null;
       }
       return true;
@@ -4001,7 +4004,8 @@ export class GameScene extends Phaser.Scene {
     const doTap = (i: number): boolean => {
       const p = slots[i];
       if (!p) return false;
-      remaining -= trip(live, p, entryLane(i));
+      const pess = slots.filter((q) => q === null).length <= 1;
+      remaining -= trip(live, p, entryLane(i), pess);
       if (p.cap === 0) slots[i] = null;
       return true;
     };
@@ -4025,7 +4029,12 @@ export class GameScene extends Phaser.Scene {
         const S = reachColors(occ);
         for (let i = 0; i < slots.length; i++) {
           const p = slots[i];
-          if (p && p.cap > 0 && S.has(p.color)) { plan.push("bay" + i); doTap(i); any = true; break; }
+          if (p && p.cap > 0 && S.has(p.color)) {
+            const before = remaining;
+            plan.push("bay" + i); doTap(i);
+            if (remaining < before) any = true; else plan.pop(); // ăn 0 (pessim chặn) → đừng lặp vô hạn
+            break;
+          }
         }
       }
       if (remaining === 0) break;
