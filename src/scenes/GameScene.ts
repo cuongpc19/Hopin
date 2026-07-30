@@ -3862,12 +3862,21 @@ export class GameScene extends Phaser.Scene {
   // Greedy playout from a solver-form state; returns true if it clears the board. Mirrors the
   // Node-side solvable() priority: productive bay car → productive queue front (groups whole) →
   // dig longest column → stuck=lose. Layer2-aware. Bounded steps.
-  private simPlayout(s: { cols: number; rows: number; occ: number[]; lay: number[] | null; queue: { color: number; cap: number; pid: number | null }[][]; parked: ({ color: number; cap: number; pid: number | null } | null)[] }): boolean {
+  // Randomised bay-aware ROLLOUT from a solver-form state ("lấy kết quả của con bot thắng"):
+  // play to the end with light random tie-breaking; return whether it WON and the FIRST move
+  // it made. computeGuideTarget runs many seeds and advises the first move of a winning line.
+  private simRollout(
+    s: { cols: number; rows: number; occ: number[]; lay: number[] | null; queue: { color: number; cap: number; pid: number | null }[][]; parked: ({ color: number; cap: number; pid: number | null } | null)[] },
+    seed: number,
+    forceFirst?: string,
+  ): { win: boolean; first: string | null } {
     const { cols, rows } = s;
+    let x = (seed >>> 0) || 1;
+    const rng = () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 0xffffffff; };
     const occ = s.occ.slice();
     const lay = s.lay ? s.lay.slice() : null;
-    const queue = s.queue.map((c) => c.map((x) => ({ ...x })));
-    const parked: ({ color: number; cap: number; pid: number | null } | null)[] = s.parked.map((x) => (x ? { ...x } : null));
+    const queue = s.queue.map((c) => c.map((m) => ({ ...m })));
+    const parked: ({ color: number; cap: number; pid: number | null } | null)[] = s.parked.map((p) => (p ? { ...p } : null));
     const isC = (v: number) => v >= 0 && v < 90;
     let remaining = occ.reduce((a, v) => a + (isC(v) ? 1 : 0), 0) + (lay ? lay.reduce((a, v) => a + (v >= 0 ? 1 : 0), 0) : 0);
     const clearCell = (i: number) => { if (lay && lay[i] >= 0) { occ[i] = lay[i]; lay[i] = -1; } else occ[i] = -1; remaining--; };
@@ -3893,69 +3902,66 @@ export class GameScene extends Phaser.Scene {
         clearCell(t); car.cap--;
       }
     };
-    const bays = parked.length;
+    let first: string | null = null;
     let guard = 0;
-    while (remaining > 0 && guard++ < 400) {
-      const E = exposed();
-      const S = new Set<number>(); for (const i of E) S.add(occ[i]);
-      let acted = false;
-      // (1) productive bay car
-      for (let i = 0; i < bays; i++) {
-        const p = parked[i];
-        if (p && p.cap > 0 && S.has(p.color)) { collect(p); if (p.cap === 0) parked[i] = null; acted = true; break; }
+    while (remaining > 0 && guard++ < 500) {
+      // every productive BAY car eats (loop — one reveal can open another)
+      let any = true;
+      while (any) {
+        any = false;
+        const E = exposed(); const S = new Set<number>(); for (const i of E) S.add(occ[i]);
+        for (let i = 0; i < parked.length; i++) {
+          const p = parked[i];
+          if (p && p.cap > 0 && S.has(p.color)) {
+            if (!first) first = "bay" + i;
+            collect(p); if (p.cap === 0) parked[i] = null;
+            any = true; break;
+          }
+        }
+        if (forceFirst && !first) break; // a forced first move must be the queue move below
       }
-      if (acted) continue;
-      const freeBays = parked.filter((x) => x === null).length;
-      // (2) productive queue front (a pid group launches whole and needs a bay per member)
+      if (remaining === 0) break;
+      const E = exposed(); const S = new Set<number>(); for (const i of E) S.add(occ[i]);
+      const freeBays = parked.filter((p) => p === null).length;
+      // queue candidates (groups whole, front-prefix)
       const fronts: { j: number; group: { color: number; cap: number; pid: number | null }[] }[] = [];
       for (let j = 0; j < queue.length; j++) {
         const f = queue[j][0]; if (!f) continue;
         if (f.pid == null) { fronts.push({ j, group: [f] }); continue; }
-        // group: gather members across fronts/own column prefix
         const members: { color: number; cap: number; pid: number | null }[] = [];
         let okG = true;
-        for (let jj = 0; jj < queue.length; jj++) {
-          for (let r = 0; r < queue[jj].length; r++) {
-            const c = queue[jj][r];
-            if (c.pid === f.pid) { if (queue[jj].slice(0, r).some((x) => x.pid !== f.pid)) okG = false; members.push(c); }
-          }
-        }
+        for (let jj = 0; jj < queue.length; jj++) for (let r = 0; r < queue[jj].length; r++) { const c = queue[jj][r]; if (c.pid === f.pid) { if (queue[jj].slice(0, r).some((m) => m.pid !== f.pid)) okG = false; members.push(c); } }
         if (okG && members.length >= 2) fronts.push({ j, group: members });
       }
       const seenPid = new Set<number>();
       const uniq = fronts.filter((f) => { const pid = f.group[0].pid; if (pid == null) return true; if (seenPid.has(pid)) return false; seenPid.add(pid); return true; });
-      const prod = uniq.filter((f) => f.group.some((m) => m.cap > 0 && S.has(m.color)) && freeBays >= f.group.length);
-      if (prod.length) {
-        const pick = prod[0];
-        for (const m of pick.group) { // remove from queue
-          for (const col of queue) { const k = col.indexOf(m); if (k >= 0) { col.splice(k, 1); break; } }
-        }
-        for (const m of pick.group) collect(m);
-        for (const m of pick.group) if (m.cap > 0) { const slot = parked.indexOf(null); if (slot >= 0) parked[slot] = m; else return false; }
-        continue;
-      }
-      // (3) dig: longest column's solo front into a free bay
-      if (freeBays > 0) {
-        let bj = -1, bl = -1;
-        for (let j = 0; j < queue.length; j++) { const f = queue[j][0]; if (f && f.pid == null && queue[j].length > bl) { bl = queue[j].length; bj = j; } }
-        if (bj >= 0) {
-          const car = queue[bj].shift()!;
-          collect(car);
-          if (car.cap > 0) { const slot = parked.indexOf(null); if (slot >= 0) parked[slot] = car; }
-          continue;
-        }
-        // only groups left: send one whole if it fits
-        const g = uniq.find((f) => f.group[0].pid != null && freeBays >= f.group.length);
-        if (g) {
-          for (const m of g.group) { for (const col of queue) { const k = col.indexOf(m); if (k >= 0) { col.splice(k, 1); break; } } }
-          for (const m of g.group) collect(m);
-          for (const m of g.group) if (m.cap > 0) { const slot = parked.indexOf(null); if (slot >= 0) parked[slot] = m; else return false; }
-          continue;
+      const fit = uniq.filter((f) => freeBays >= f.group.length);
+      if (!fit.length) return { win: false, first };
+      let pick: { j: number; group: { color: number; cap: number; pid: number | null }[] } | undefined;
+      if (forceFirst && !first) {
+        // honour the forced first move (either a bay tap handled by caller-prepared state, or q<j>)
+        if (forceFirst.startsWith("q")) {
+          const j = parseInt(forceFirst.slice(1), 10);
+          pick = fit.find((f) => f.j === j);
+          if (!pick) return { win: false, first: null }; // forced move not available
         }
       }
-      return false; // no move
+      if (!pick) {
+        const prods = fit.filter((f) => f.group.some((m) => m.cap > 0 && S.has(m.color)));
+        const digs = fit.filter((f) => !f.group.some((m) => m.cap > 0 && S.has(m.color)));
+        const opts: { f: typeof fit[number]; w: number }[] = [];
+        for (const f of prods) opts.push({ f, w: freeBays >= 2 ? 8 : 3 });
+        for (const f of digs) opts.push({ f, w: (freeBays >= 2 ? 2 : 0.5) + (f.group.length === 1 ? queue[f.j].length / 10 : 0) });
+        let sum = 0; for (const o of opts) sum += o.w;
+        let r = rng() * sum; pick = opts[0].f;
+        for (const o of opts) { r -= o.w; if (r <= 0) { pick = o.f; break; } }
+      }
+      if (!first) first = "q" + pick.j + ":" + pick.group[0].color;
+      for (const m of pick.group) { for (const col of queue) { const k = col.indexOf(m); if (k >= 0) { col.splice(k, 1); break; } } }
+      for (const m of pick.group) collect(m);
+      for (const m of pick.group) if (m.cap > 0) { const slot = parked.indexOf(null); if (slot >= 0) parked[slot] = m; }
     }
-    return remaining === 0;
+    return { win: remaining === 0, first };
   }
 
   private computeGuideTarget(): { key: string; x: number; y: number } | null {
@@ -3966,13 +3972,11 @@ export class GameScene extends Phaser.Scene {
     const base = this.captureSimState();
     type Cand = { key: string; x: number; y: number };
     const cands: Cand[] = [];
-    // bay taps
     for (let i = 0; i < this.slots.length; i++) {
       const v = this.slots[i];
       if (!v || !this.carCanCollect(v)) continue;
       cands.push({ key: "bay" + i, x: v.container.x, y: v.container.y });
     }
-    // queue heads (launchable)
     const seen = new Set<ChestView>();
     for (let j = 0; j < this.invColumns.length; j++) {
       const head = this.invColumns[j][0];
@@ -3988,76 +3992,65 @@ export class GameScene extends Phaser.Scene {
       cands.push({ key: "q" + j + ":" + head.chest.color, x: head.container.x, y: head.container.y });
     }
     if (!cands.length) return null;
-    // FORK: for each candidate, apply its first move on a copy then greedy-playout; prefer a WINNER.
-    const applyFirst = (st: ReturnType<GameScene["captureSimState"]>, key: string): typeof st => {
-      const s2 = { ...st, occ: st.occ.slice(), lay: st.lay ? st.lay.slice() : null, queue: st.queue.map((c) => c.map((x) => ({ ...x }))), parked: st.parked.map((x) => (x ? { ...x } : null)) };
-      if (key.startsWith("bay")) {
-        const i = parseInt(key.slice(3), 10);
-        const p = s2.parked[i];
-        if (p) { this.simCollectInto(s2, p); if (p.cap === 0) s2.parked[i] = null; }
-      } else {
-        const j = parseInt(key.slice(1), 10);
-        const f = s2.queue[j] && s2.queue[j][0];
-        if (f) {
-          const members = f.pid == null ? [f] : s2.queue.flat().filter((c) => c.pid === f.pid);
-          for (const m of members) { for (const col of s2.queue) { const k = col.indexOf(m); if (k >= 0) { col.splice(k, 1); break; } } }
-          for (const m of members) this.simCollectInto(s2, m);
-          for (const m of members) if (m.cap > 0) { const slot = s2.parked.indexOf(null); if (slot >= 0) s2.parked[slot] = m; }
-        }
-      }
-      return s2;
-    };
-    // STICKY: if the previous suggestion is still a candidate AND still opens a winning line,
-    // keep pointing at it — a fresh recompute every 350ms flip-flopping between equally-good
-    // moves reads as "chỉ dẫn lung tung" (user 2026-07-30).
+    // A bay tap is always "productive by definition" here (carCanCollect gated) — any winning
+    // rollout that STARTS by eating from a bay will report first="bay<i>". Strategy:
+    //  1. STICKY: if the previous advice is still a candidate, try a few rollouts honouring it.
+    //  2. Run up to ~24 free rollouts; the first WINNING line's first move becomes the advice.
+    //  3. No winner → fallback: previous advice if still valid, else first candidate.
     const prevKey = this.guideKey.replace(/^[WF]/, "");
     const prev = cands.find((c) => c.key === prevKey);
-    if (prev && this.simPlayout(applyFirst(base, prev.key))) return { key: "W" + prev.key, x: prev.x, y: prev.y };
-    const winners: Cand[] = [];
-    for (const c of cands) {
-      const st = applyFirst(base, c.key);
-      if (this.simPlayout(st)) winners.push(c);
+    const baySeed = (this.time.now | 0) ^ 0x9e3779b9;
+    if (prev) {
+      for (let t = 0; t < 6; t++) {
+        const force = prev.key.startsWith("q") ? "q" + parseInt(prev.key.slice(1), 10) : undefined;
+        const st = prev.key.startsWith("bay") ? this.applyBayFirst(base, parseInt(prev.key.slice(3), 10)) : base;
+        const r = this.simRollout(st, baySeed + t * 101, force);
+        if (r.win) return { key: "W" + prev.key, x: prev.x, y: prev.y };
+      }
     }
-    // among winning moves prefer a PRODUCTIVE one (bay car, or a queue car whose colour is
-    // reachable now) over a dig — advising a "useless-looking" launch reads as nonsense.
-    const productive = (c: Cand) => {
-      if (c.key.startsWith("bay")) return true;
-      const j = parseInt(c.key.slice(1), 10);
-      const head = this.invColumns[j] && this.invColumns[j][0];
-      return !!head && this.reachableColors.has(head.chest.color);
-    };
-    const winner = winners.find(productive) ?? winners[0] ?? null;
-    const pick = winner ?? cands.find(productive) ?? cands[0];
-    return { key: (winner ? "W" : "F") + pick.key, x: pick.x, y: pick.y };
+    for (let t = 0; t < 24; t++) {
+      const r = this.simRollout(base, baySeed + 7919 + t * 137);
+      if (r.win && r.first) {
+        const c = cands.find((cc) => cc.key === r.first || (r.first!.startsWith("q") && cc.key.startsWith("q" + r.first!.slice(1).split(":")[0] + ":")));
+        if (c) return { key: "W" + c.key, x: c.x, y: c.y };
+      }
+    }
+    if (prev) return { key: "F" + prev.key, x: prev.x, y: prev.y };
+    const pick = cands[0];
+    return { key: "F" + pick.key, x: pick.x, y: pick.y };
   }
 
-  // Collect helper on solver-form state (mirrors simPlayout's collect + layer2 reveal).
-  private simCollectInto(st: { cols: number; rows: number; occ: number[]; lay: number[] | null }, car: { color: number; cap: number }) {
-    const { cols, rows } = st;
+  // Clone the state with bay car <i> having eaten everything it currently can (a forced bay-tap
+  // first move for the sticky check).
+  private applyBayFirst(st: ReturnType<GameScene["captureSimState"]>, i: number): ReturnType<GameScene["captureSimState"]> {
+    const s2 = { ...st, occ: st.occ.slice(), lay: st.lay ? st.lay.slice() : null, queue: st.queue.map((c) => c.map((m) => ({ ...m }))), parked: st.parked.map((p) => (p ? { ...p } : null)) };
+    const p = s2.parked[i];
+    if (!p) return s2;
     const isC = (v: number) => v >= 0 && v < 90;
     const exposed = (): Set<number> => {
       const E = new Set<number>();
-      for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) { const i = r * cols + c; if (isC(st.occ[i])) { E.add(i); break; } }
-        for (let c = cols - 1; c >= 0; c--) { const i = r * cols + c; if (isC(st.occ[i])) { E.add(i); break; } }
+      for (let r = 0; r < s2.rows; r++) {
+        for (let c = 0; c < s2.cols; c++) { const k = r * s2.cols + c; if (isC(s2.occ[k])) { E.add(k); break; } }
+        for (let c = s2.cols - 1; c >= 0; c--) { const k = r * s2.cols + c; if (isC(s2.occ[k])) { E.add(k); break; } }
       }
-      for (let c = 0; c < cols; c++) {
-        for (let r = 0; r < rows; r++) { const i = r * cols + c; if (isC(st.occ[i])) { E.add(i); break; } }
-        for (let r = rows - 1; r >= 0; r--) { const i = r * cols + c; if (isC(st.occ[i])) { E.add(i); break; } }
+      for (let c = 0; c < s2.cols; c++) {
+        for (let r = 0; r < s2.rows; r++) { const k = r * s2.cols + c; if (isC(s2.occ[k])) { E.add(k); break; } }
+        for (let r = s2.rows - 1; r >= 0; r--) { const k = r * s2.cols + c; if (isC(s2.occ[k])) { E.add(k); break; } }
       }
       return E;
     };
     for (;;) {
-      if (car.cap <= 0) return;
+      if (p.cap <= 0) break;
       const E = exposed();
       let t = -1;
-      for (const i of E) if (st.occ[i] === car.color) { t = i; break; }
-      if (t < 0) return;
-      if (st.lay && st.lay[t] >= 0) { st.occ[t] = st.lay[t]; st.lay[t] = -1; } else st.occ[t] = -1;
-      car.cap--;
+      for (const k of E) if (s2.occ[k] === p.color) { t = k; break; }
+      if (t < 0) break;
+      if (s2.lay && s2.lay[t] >= 0) { s2.occ[t] = s2.lay[t]; s2.lay[t] = -1; } else s2.occ[t] = -1;
+      p.cap--;
     }
+    if (p.cap === 0) s2.parked[i] = null;
+    return s2;
   }
-
   private clearGuidePointer() {
     if (this.guideHand) { this.tweens.killTweensOf(this.guideHand); this.guideHand.destroy(); this.guideHand = undefined; }
     if (this.guideRing) { this.tweens.killTweensOf(this.guideRing); this.guideRing.destroy(); this.guideRing = undefined; }
@@ -4069,7 +4062,7 @@ export class GameScene extends Phaser.Scene {
       if (this.guideKey) this.clearGuidePointer();
       return;
     }
-    if (this.time.now - this.guideAt < 350) return; // throttle
+    if (this.time.now - this.guideAt < 600) return; // throttle (rollouts cost ~100-300ms worst-case)
     this.guideAt = this.time.now;
     const t = this.computeGuideTarget();
     if (!t) { if (this.guideKey) this.clearGuidePointer(); return; }
