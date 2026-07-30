@@ -3996,37 +3996,44 @@ export class GameScene extends Phaser.Scene {
   // taps); with no winner, the rollout that left the least uneaten. The plan is computed ONCE and
   // replayed step by step; it re-plans only when the player deviates (onGuideAction clears it) or
   // the current step is no longer valid. Deterministic seeds → no flicker.
+  // ONE-MOVE advice, recomputed from the LIVE state after every player action (v4.2). A long
+  // replayed plan accumulated sim-vs-game drift until it collapsed mid-run (user log: W plan →
+  // bays choked → F). Now each advice carries at most ONE move of sim error, and the pick is the
+  // first move most FREQUENT among winning rollouts — maximise win probability, not plan length.
   private computeGuideTarget(): { key: string; x: number; y: number } | null {
     if (!this.slamMode) return null;
     if (this.active.length > 0 || this.pending.length > 0) return null; // advise on a quiet board only
-    // current step still valid? → keep pointing at it
-    const step = this.guidePlan && this.guidePlan.length ? this.guidePlan[0] : null;
-    if (step) {
-      const t = this.guideStepTarget(step);
+    // current advice still valid? keep it (no recompute — zero flicker until the player acts)
+    if (this.guidePlan && this.guidePlan.length) {
+      const t = this.guideStepTarget(this.guidePlan[0]);
       if (t) return t;
-      this.guidePlan = null; // stale step → re-plan
+      this.guidePlan = null;
     }
-    // (re)plan from the live state
     const base = this.captureSimState();
     this.guidePlanNonce++;
-    const K = 40;
-    let bestWin: string[] | null = null;
-    let bestEffort: { plan: string[]; left: number } | null = null;
+    const K = 32;
+    const winFirst = new Map<string, number>();
+    let bestEffort: { first: string; left: number } | null = null;
     for (let t = 0; t < K; t++) {
       const r = this.simRollout(base, (this.levelNum * 7919 + this.guidePlanNonce * 104729 + t * 137 + 11) >>> 0);
-      if (r.win) { if (!bestWin || r.plan.length < bestWin.length) bestWin = r.plan; }
-      else if (!bestEffort || r.left < bestEffort.left) bestEffort = { plan: r.plan, left: r.left };
+      const first = r.plan[0];
+      if (!first) continue;
+      if (r.win) winFirst.set(first, (winFirst.get(first) || 0) + 1);
+      else if (!bestEffort || r.left < bestEffort.left) bestEffort = { first, left: r.left };
     }
-    const chosen = bestWin ?? (bestEffort ? bestEffort.plan : null);
-    if (!chosen || !chosen.length) return null;
-    this.guidePlan = chosen.slice();
-    this.guidePlanWinning = !!bestWin;
-    const t0 = this.guideStepTarget(this.guidePlan[0]);
+    let advice: string | null = null;
+    let winning = false;
+    if (winFirst.size) {
+      advice = [...winFirst.entries()].sort((a, b) => b[1] - a[1])[0][0];
+      winning = true;
+    } else if (bestEffort) advice = bestEffort.first;
+    if (!advice) return null;
+    this.guidePlan = [advice];
+    this.guidePlanWinning = winning;
+    const t0 = this.guideStepTarget(advice);
     if (!t0) { this.guidePlan = null; return null; }
     return t0;
   }
-
-  // Map a plan step to its on-screen target; null when the step no longer matches the live state.
   private guideStepTarget(step: string): { key: string; x: number; y: number } | null {
     const tag = this.guidePlanWinning ? "W" : "F";
     if (step.startsWith("bay")) {
@@ -4049,10 +4056,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   // Called from the tap handlers: advance the plan when the player follows it, drop it otherwise.
-  private onGuideAction(action: string) {
-    if (!this.guidePlan || !this.guidePlan.length) return;
-    if (this.guidePlan[0] === action) this.guidePlan.shift();
-    else this.guidePlan = null; // deviated → re-plan on the next quiet frame
+  private onGuideAction(_action: string) {
+    // one-move advice: ANY player action invalidates it — recompute from the fresh live state
+    this.guidePlan = null;
   }
   private clearGuidePointer() {
     if (this.guideHand) { this.tweens.killTweensOf(this.guideHand); this.guideHand.destroy(); this.guideHand = undefined; }
