@@ -3940,8 +3940,16 @@ export class GameScene extends Phaser.Scene {
     const entryLane = (slotI: number) => Math.min(cols - 1, Math.floor(((slotI + 0.5) / 5) * cols));
     // một CHUYẾN từ entry lane — trả số đã ăn (mutate st)
     const trip = (st: Cell, car: { color: number; cap: number }, entryIdx: number): number => {
+      // BI QUAN vét-sạch: 3 ván thua đều chết vì sim lệch ±1 con ở nước "ăn-vừa-khít" (xe cap 35
+      // vs đúng 35 viên → thật hụt 1 → chiếm Ô CUỐI → sập). Nếu tổng viên màu xe trên board ĐÚNG
+      // BẰNG cap (vét sạch không biên), sim coi như hụt 1 con → xe chiếm ô. Kế hoạch chỉ được
+      // chọn khi thắng cả trong kịch bản hụt → đường bền, không cược biên 0.
+      let total = 0;
+      for (const v of st.o) if (v === car.color) total++;
+      if (st.l) for (const v of st.l) if (v === car.color) total++;
+      const pessimCap = total === car.cap ? car.cap - 1 : Infinity;
       let ate = 0, pos = entryIdx % NL, steps = 0, laps = 0;
-      while (car.cap > 0 && laps < 60) {
+      while (car.cap > 0 && ate < pessimCap && laps < 60) {
         const { e, l } = seq[pos];
         let per = 0;
         while (car.cap > 0 && per < 14) {
