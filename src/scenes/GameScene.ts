@@ -3715,11 +3715,13 @@ export class GameScene extends Phaser.Scene {
     // mid-travel or a colour not yet peeled to the edge). The squad keeps looping until the
     // batch is genuinely stale (no collection by ANY member for a grace window) and then
     // ALL members park together (endBatchStaleCheck). So here: keep circling while running.
-    if (this.trayMode && TRAY_BATCH) return this.batchRunning;
-    // SLAM (user 2026-07-29): a car out on the ray KEEPS circling while it can still collect its
+    // SLAM (user 2026-07-29/30): a car out on the ray KEEPS circling while it can still collect its
     // colour, instead of returning to its bay after one lap — only retires to the bay when nothing
     // is left to grab. Its bay stays reserved throughout (slam never auto-relaunches from bays).
+    // ⚠ MUST be checked BEFORE the tray-batch branch: slam sets trayMode=true, so the old order
+    // short-circuited to `batchRunning` (always false in slam) and cars never kept circling.
     if (this.slamMode) return this.liveGroup(a.view).some((m) => this.carCanCollect(m));
+    if (this.trayMode && TRAY_BATCH) return this.batchRunning;
     if (!AUTO_CIRCLE) return false;
     return this.liveGroup(a.view).some((m) => this.carCanCollect(m));
   }
@@ -3816,6 +3818,27 @@ export class GameScene extends Phaser.Scene {
     this.updateGoButton();
   }
 
+  // A queue car (or its whole linked group) that could REALLY launch right now: every member
+  // sits at the front of its column (only fellow members ahead) AND the group fits in the free
+  // bays AND the ray has room. Mirrors the tap handler's own checks — used by deadlock detection.
+  private queueHasLaunchableMove(freeSlots: number): boolean {
+    const seen = new Set<ChestView>();
+    for (const col of this.invColumns) {
+      const head = col[0];
+      if (!head || !head.container.scene || seen.has(head)) continue;
+      const group = this.groupOf(head);
+      group.forEach((m) => seen.add(m));
+      let ok = true;
+      for (const m of group) {
+        const p = this.findInInventory(m);
+        if (!p || !p.col.slice(0, p.r).every((c) => group.includes(c))) { ok = false; break; }
+      }
+      if (!ok) continue;
+      if (freeSlots >= group.length && this.active.length + this.pending.length + group.length <= MAX_ON_TRACK) return true;
+    }
+    return false;
+  }
+
   // TRAY-mode lose. Batch mode: the bays are full of blocked cars, nothing is out on the
   // ray, there's nothing new to stage (no free bay / empty queue) and pressing GO would
   // collect nothing (no bay car's colour is reachable) → deadlock. Auto mode: original
@@ -3824,12 +3847,13 @@ export class GameScene extends Phaser.Scene {
     if (this.won || this.lost || this.tutPaused) return;
     if (this.active.length > 0 || this.pending.length > 0) return; // cars still in motion
     if (this.slamMode) {
-      // DEADLOCK: nothing is out on the ray, and no bay car can collect any slime. If a
-      // fresh car can still auto-fill a bay (free bay + queue not empty), give it a chance;
-      // otherwise the player is stuck → lose.
+      // DEADLOCK: nothing is out on the ray, and no bay car can collect any slime. A queue move
+      // must ACTUALLY be launchable — "free bay + queue not empty" isn't enough: with 1 free bay
+      // and only twin/triple groups left (need 2-3 bays), the player is stuck but the old check
+      // kept the game hanging forever (user 2026-07-30) → now that counts as a loss too.
       for (const v of this.slots) { if (v && this.carCanCollect(v)) return; } // a tappable move exists
-      const freeBay = this.slots.some((s) => s === null);
-      if (freeBay && !this.queueEmpty()) return; // a new car can still enter and might help
+      const freeSlots = this.slots.reduce((n, s) => n + (s ? 0 : 1), 0);
+      if (freeSlots > 0 && this.queueHasLaunchableMove(freeSlots)) return; // a queue car/group fits
       if (this.slots.every((s) => s === null) && this.queueEmpty()) return; // no cars at all (pre-win frame)
       this.lose();
       return;
@@ -4413,12 +4437,13 @@ export class GameScene extends Phaser.Scene {
       const a = group[seg];
       const b = group[seg + 1];
       if (a.left || b.left || !a.container.scene || !b.container.scene) continue;
-      // Don't rope to a partner that's CLIPPED below the inventory viewport (a deep back
-      // queue row, invisible behind the mask) — that's what made the rope stretch as a long
-      // chord to an off-screen car (user 2026-07-26, L303: a front twin roped 400px down to
-      // its partner in row 6). The rope reappears once that partner scrolls into view / moves
-      // up. Both-visible twins still show it at any on-screen distance.
-      if (this.invMaskBottom > 0 && (a.container.y > this.invMaskBottom || b.container.y > this.invMaskBottom)) continue;
+      // Don't rope to a partner that's FULLY hidden below the inventory viewport (a deep back
+      // queue row) — that's what made the rope stretch as a long chord to an off-screen car
+      // (user 2026-07-26, L303). But a car in the PEEK row (half-visible, dimmed) must still
+      // show its rope — the old centre-based check hid ropes on peeking twins, so the player
+      // saw two linked cars with no rope (user 2026-07-30, L131). Clip on the car's TOP edge.
+      const ropeClipY = this.invMaskBottom + this.chestSize / 2;
+      if (this.invMaskBottom > 0 && (a.container.y > ropeClipY || b.container.y > ropeClipY)) continue;
       const ax = a.container.x, ay = a.container.y;
       const bx = b.container.x, by = b.container.y;
       const dist = Phaser.Math.Distance.Between(ax, ay, bx, by);
