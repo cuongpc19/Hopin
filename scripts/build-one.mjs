@@ -16,6 +16,7 @@
 import sharp from "sharp";
 import fs from "fs";
 import path from "path";
+import { applyBoxBorder, PREFER_DARK, PREFER_LIGHT } from "./border.mjs";
 
 const ROOT = process.cwd();
 const OUT = path.join(ROOT, "src/levels/designed.json");
@@ -270,16 +271,17 @@ if (FILL_BG) {
       console.log(`dark outline detected (${Math.round(100 * dark / perim)}% perimeter) → light bg id ${bgId} + lightBoard`);
     }
   }
-  // bg = fill the WHOLE inner square (SAFE_MARGIN border kept empty) so the picture
-  // fills the frame like the reference games — a portrait character gets bg on both
-  // sides instead of leaving big gaps. Character cells keep their colour.
-  const r0 = SAFE_MARGIN, r1 = BOARD_SIZE - 1 - SAFE_MARGIN;
-  const c0 = SAFE_MARGIN, c1 = BOARD_SIZE - 1 - SAFE_MARGIN;
-  let bgCells = 0;
-  for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
-    const i = r * BOARD_SIZE + c; if (board[i] === EMPTY) { board[i] = bgId; bgCells++; }
+  // RULE VIỀN CHỐT (border.mjs): viền = CHỮ NHẬT bbox+1 đổ đầy (không halo, không thu
+  // nhỏ chủ thể); tổng viền ≤30% board — vượt = ảnh KHÔNG ĐẠT (exit 2, caller đổi ảnh
+  // gọn hơn); màu viền cấm trùng màu chủ thể SÁT ranh (8 hướng). bgId ở trên chỉ còn là
+  // màu ƯU TIÊN đầu — adjacency ban vẫn thắng.
+  const prefer = [bgId, ...(levelLightBoard ? PREFER_LIGHT : PREFER_DARK).filter((c) => c !== bgId)];
+  const bres = applyBoxBorder(board, BOARD_SIZE, BOARD_SIZE, { margin: SAFE_MARGIN, prefer });
+  if (!bres.ok) {
+    console.error(`✗ viền ${bres.cells} ô = ${bres.pct}% board > 30% — ảnh KHÔNG ĐẠT rule viền (chọn ảnh chủ thể đặc/gọn hơn; KHÔNG thu nhỏ chủ thể)`);
+    process.exit(2);
   }
-  console.log(`bg fill id ${bgId}, square ${c1 - c0 + 1}x${r1 - r0 + 1}, +${bgCells} bg cells`);
+  console.log(`viền chữ nhật id ${bres.fillColor}, ${bres.cells} ô = ${bres.pct}% board`);
 }
 
 const chests = generateChests(board, levelNum * 977 + 13);

@@ -853,6 +853,34 @@ CHỌN ART CHO LEVEL TRANH (để hợp board tối):
   L6/L9 (easy-tier, hơi dễ nhưng chấp nhận được). Muốn khó hơn: board to hơn, hoặc
   art CHI TIẾT (nhiều mảng nhỏ xen kẽ, không phải mảng to). Đòn bẩy chắc = tường đá.
 
+23) SLAM = GAME CHÍNH: 25 LEVEL ĐẦU MỚI + RULE VIỀN CHỮ NHẬT + TUTORIAL SLAM (2026-07-30)
+────────────────────────────────────────────────────────────────────────────
+• L1-25 (branch hop-in-slam) = bộ level ĐẦU GAME chính thức, TẤT CẢ slam:true.
+  L1/L2 copy nguyên bản mới nhất từ repo chính (+slam). L3-25 build lại toàn bộ,
+  target winrate THEO CSV CŨ (winratedesign1.csv: 81/95/70/98/90/… đo bằng trip-sim
+  15% nhiễu), gate tính năng như cũ: twin theo cột xedoi (L8 = twin tutorial), xe "?"
+  L5/L10 + L15+, slime 2 lớp L15+ (target thấp), slime "?" ẩn L21+, ĐÁ CỨNG L23-25
+  (walls T/TL/T, code 90). L131-152 rebuild cùng đợt, cân dải 10-40% (ramp 40→12,
+  146-147 twin-heavy ~25, 148-152 mixed 30→14).
+• RULE VIỀN CHỐT (user): viền = HÌNH CHỮ NHẬT bbox chủ thể +1 ô đệm, đổ đầy; tổng
+  viền ≤30%% board; KHÔNG halo bám hình, KHÔNG thu nhỏ chủ thể — ảnh vượt = LOẠI,
+  thay ảnh chủ thể đặc/gọn. Màu viền được trùng màu chủ thể nhưng CẤM trùng màu ô
+  sát ranh (8 hướng). Code: scripts/border.mjs (applyBoxBorder) — build-one.mjs exit 2
+  khi vượt. Hệ quả: board NHẸ hơn kiểu phủ-kín cũ → cần chỉnh độ khó chính = TỔNG Ô
+  LAYER2 (cụm 14-30 ô MỘT MÀU, dốc ~1-2 điểm/ô) — tuner BISECTION.
+• PIPELINE MỚI (thước đo duy nhất = trip-sim simcore.mjs): scripts/genlib.mjs (helpers)
+  + scripts/gen25.mjs (L1-25 theo CSV; ONLY= / WIDE=1 / SEEDS= / DEBUG=1) +
+  scripts/rebuild-band.mjs (L131-152; bisection layer2) + scripts/measure.mjs +
+  scripts/preview-all.mjs (render final board + đá + chấm chôn/ẩn). Mỗi level chốt
+  ghi field `img` vào designed.json (sổ cái mỗi-ảnh-một-level; game không đọc field
+  này). simcore đã mô phỏng ĐÁ (chặn tia) + slime "?" ẩn + lanes/level.
+• TUTORIAL SLAM (L1, chạy mỗi lần vào L1 như tutorial cũ): bước 1 bấm xe queue
+  ("grabs a waiting slot & rolls out"), bước 2 spotlight GHOST Ô CHỜ BỊ KHOÁ khi xe
+  đang chạy (bấm đâu cũng được để tiếp — sentinel 11-12), bước 3 xe KHÔNG đầy quay
+  VỀ ô → bấm nó chạy tiếp, nhắc "kẹt hết ô = thua" (sentinel 13-14, hoàn thành ở
+  relaunchFromSlot). Twin intro L8, booster L6/11/16/21, intro đá cứng L23 giữ nguyên
+  (số level không đổi). Guide-sim (chỉ dẫn từng bước) cũng đã vá đá + "?" ẩn.
+
 ────────────────────────────────────────────────────────────────────────────
 GHI CHÚ CHUNG
 ────────────────────────────────────────────────────────────────────────────

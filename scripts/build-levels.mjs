@@ -2847,7 +2847,7 @@ if (process.argv.includes("--tunetwins")) {
       if (used.has(g.a) || used.has(g.b)) continue;
       const { r } = evalSet([...chosen, g]);
       if (r.cleared && r.nMeaningful > curM) { chosen.push(g); curM = r.nMeaningful; used.add(g.a); used.add(g.b); }
-      if (chosen.length >= 6) break;
+      if (chosen.length >= (process.env.TWINCAP ? +process.env.TWINCAP : 6)) break; // TWINCAP: số cặp theo design CSV
     }
     if (chosen.length) {
       const { ch, r } = evalSet(chosen);

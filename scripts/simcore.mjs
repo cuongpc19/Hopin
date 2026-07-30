@@ -15,28 +15,45 @@ export function makeState(L) {
   const lanes = L.lanes || 4;
   const queue = Array.from({ length: lanes }, () => []);
   L.chests.forEach((c, i) => queue[i % lanes].push({ color: c.color, cap: c.count, pid: c.pairId ?? null }));
+  // slime "?" ẩn (level.hidden): CHẶN TIA + không target được tới khi 1 ô KỀ (4 hướng) bị ăn
+  // (port từ GameScene hiddenSet + revealHiddenAround — cơ chế THẬT, không phải chỉ che mắt).
+  const hid = new Set();
+  if (L.hidden) L.hidden.forEach((v, i) => { if (v >= 0) hid.add(i); });
   return {
     cols: L.cols, rows: L.rows,
     occ: L.board.slice(),
     lay: L.layer2 ? L.layer2.slice() : null,
+    hid,
     queue,
     slots: [null, null, null, null, null],
   };
 }
 export function cloneState(s) {
-  return { cols: s.cols, rows: s.rows, occ: s.occ.slice(), lay: s.lay ? s.lay.slice() : null, queue: s.queue.map((c) => c.map((m) => ({ ...m }))), slots: s.slots.map((p) => (p ? { ...p } : null)) };
+  return { cols: s.cols, rows: s.rows, occ: s.occ.slice(), lay: s.lay ? s.lay.slice() : null, hid: new Set(s.hid), queue: s.queue.map((c) => c.map((m) => ({ ...m }))), slots: s.slots.map((p) => (p ? { ...p } : null)) };
 }
-const clearCell = (s, i) => { if (s.lay && s.lay[i] >= 0) { s.occ[i] = s.lay[i]; s.lay[i] = -1; } else s.occ[i] = -1; };
+const clearCell = (s, i) => {
+  if (s.lay && s.lay[i] >= 0) { s.occ[i] = s.lay[i]; s.lay[i] = -1; } else s.occ[i] = -1;
+  if (s.hid.size) { // ô vừa ăn → lộ "?" ở 4 ô kề (revealHiddenAround)
+    const r = (i / s.cols) | 0, c = i % s.cols;
+    if (r > 0) s.hid.delete(i - s.cols);
+    if (r < s.rows - 1) s.hid.delete(i + s.cols);
+    if (c > 0) s.hid.delete(i - 1);
+    if (c < s.cols - 1) s.hid.delete(i + 1);
+  }
+};
 
 function rayHit(s, startR, startC, dr, dc) {
   const { cols, rows, occ } = s;
-  const occAt = (r, c) => r >= 0 && r < rows && c >= 0 && c < cols && isC(occ[r * cols + c]);
+  // ĐÁ CỨNG (code ≥90): chặn tia như slime (GameScene rayHit dừng ở MỌI ô có tile, kể cả đá)
+  // nhưng không bao giờ là target. Ô "?" ẩn cũng chặn tia (tile thật) — caller lọc target.
+  const blockAt = (r, c) => { if (r < 0 || r >= rows || c < 0 || c >= cols) return false; const v = occ[r * cols + c]; return isC(v) || v >= 90; };
   const diagonal = dr !== 0 && dc !== 0;
   let r = startR, c = startC, steps = 0;
   while (r >= 0 && r < rows && c >= 0 && c < cols) {
     const idx = r * cols + c;
+    if (occ[idx] >= 90) return null; // đá: tia dừng, không có target
     if (isC(occ[idx])) return { idx, steps };
-    if (diagonal && occAt(r, c + dc) && occAt(r + dr, c)) return null;
+    if (diagonal && blockAt(r, c + dc) && blockAt(r + dr, c)) return null;
     r += dr; c += dc; steps++;
   }
   return null;
@@ -65,7 +82,8 @@ function nearestTarget(s, e, l, color) {
   let best = null;
   for (const [r0, c0, dr, dc] of lanRays(s, e, l)) {
     const h = rayHit(s, r0, c0, dr, dc);
-    if (h && s.occ[h.idx] === color && (!best || h.steps < best.steps)) best = h;
+    // ô "?" ẩn: tia DỪNG ở đó nhưng không target được (GameScene findLosTargets lọc hiddenSet)
+    if (h && !s.hid.has(h.idx) && s.occ[h.idx] === color && (!best || h.steps < best.steps)) best = h;
   }
   return best;
 }
@@ -75,7 +93,7 @@ export function reachableSet(s) {
   for (const { e, l } of laneSeq(s)) {
     for (const [r0, c0, dr, dc] of lanRays(s, e, l)) {
       const h = rayHit(s, r0, c0, dr, dc);
-      if (h) hits.add(h.idx);
+      if (h && !s.hid.has(h.idx)) hits.add(h.idx); // "?" ẩn chưa collect được (computeReachable)
     }
   }
   return hits;

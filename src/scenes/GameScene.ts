@@ -303,6 +303,9 @@ export class GameScene extends Phaser.Scene {
   private tutPaused = false; // a tutorial is up → freeze the game until the player acts
   private tutHand?: Phaser.GameObjects.Text; // the bobbing 👆 (re-animated on a mis-tap)
   private tutHandY = 0; // the hand's resting Y (bob baseline)
+  // Tutorial slam (sentinel 11-14): bước "bấm đâu cũng được để tiếp tục" — mats gọi hàm này
+  // thay vì nudge (xem showTutHint). Reset trong clearTutHint.
+  private tutDismissTap?: () => void;
   // STEP GUIDE (user 2026-07-30): optional setting (default OFF, localStorage "hopin_guide").
   // When ON, the game points at the recommended next move — tap this bay car / launch this queue
   // car — recomputed after every action until the level is won. Uses the greedy solver priority.
@@ -635,7 +638,12 @@ export class GameScene extends Phaser.Scene {
     this.tutStep = 1;
     const front = this.invColumns.find((col) => col.length > 0)?.[0];
     if (!front) return;
-    this.showTutHint(front.container.x, front.container.y, "Tap the car to\nsend it out!", this.chestSize * 0.95);
+    // SLAM (L1 mới): dạy 2-hop — bấm xe → chiếm Ô CHỜ → lao ra ray. Các bước sau (khoá ô,
+    // xe quay về) nối tiếp bằng sentinel 11-14 (xem launchFromInventory/updateSlotLocks/parkChest).
+    const msg = this.slamMode
+      ? "Tap the car — it grabs a\nwaiting slot & rolls out!"
+      : "Tap the car to\nsend it out!";
+    this.showTutHint(front.container.x, front.container.y, msg, this.chestSize * 0.95);
   }
 
   // ---- Twin-car intro (only on its designated level) -----------------
@@ -753,8 +761,16 @@ export class GameScene extends Phaser.Scene {
       mat(0, byT, bx, bh), // left
       mat(bx + bw, byT, GAME_W - (bx + bw), bh), // right
     ];
-    // tapping the dark area nudges the hand so the player looks at the target
-    for (const m of mats) m.on("pointerdown", () => this.nudgeTutHand());
+    // tapping the dark area nudges the hand so the player looks at the target — TRỪ khi
+    // bước tutorial hiện tại là "bấm đâu cũng được để tiếp tục" (tutDismissTap, slam bước 2).
+    for (const m of mats) m.on("pointerdown", () => {
+      if (this.tutDismissTap) {
+        const f = this.tutDismissTap;
+        this.tutDismissTap = undefined;
+        this.clearTutHint();
+        f();
+      } else this.nudgeTutHand();
+    });
 
     const ring = this.add.circle(x, y, r - 6).setStrokeStyle(4, 0xffe14a, 1).setDepth(D + 2);
     const hand = this.add
@@ -818,6 +834,7 @@ export class GameScene extends Phaser.Scene {
     }
     this.tutObjs = [];
     this.tutHand = undefined;
+    this.tutDismissTap = undefined;
     this.tutPaused = false; // unfreeze — the guided action is done
   }
 
@@ -1532,6 +1549,18 @@ export class GameScene extends Phaser.Scene {
           this.slotLocks[i] = ghost;
         }
         ghost.setTexture(tex).setPosition(this.slotXs[i] ?? ghost.x, this.slotY).setVisible(true);
+        // Tutorial slam bước 2: ghost khoá ô ĐẦU TIÊN vừa hiện → spotlight bài học "ô chờ bị
+        // khoá khi xe đang chạy" (bấm chỗ nào cũng được để tiếp tục — tutDismissTap).
+        if (this.tutStep === 11) {
+          this.tutStep = 12;
+          const gi = i;
+          this.time.delayedCall(600, () => {
+            if (this.tutStep === 12 && !this.won && !this.lost) {
+              this.tutDismissTap = () => { this.tutStep = 13; };
+              this.showTutHint(this.slotXs[gi] ?? 0, this.slotY, "The slot is LOCKED while its\ncar is out! (tap to continue)", SLOT_SIZE * 0.95);
+            }
+          });
+        }
       } else if (ghost) {
         ghost.setVisible(false);
       }
@@ -3182,6 +3211,10 @@ export class GameScene extends Phaser.Scene {
       this.notePeak();
       this.layoutInventory(true);
       this.updateSlotWarning();
+      // Tutorial slam: bước 1 xong (đã phóng) → chờ ghost khoá ô xuất hiện (bước 11, bắt ở
+      // updateSlotLocks). Twin intro (tutStep 8) cũng hoàn thành ở đây vì nhánh slam return sớm.
+      if (this.tutStep === 1) { this.clearTutHint(); this.tutStep = 11; }
+      else if (this.tutStep === 8) { this.clearTutHint(); this.tutStep = 0; }
       return;
     }
 
@@ -3265,8 +3298,8 @@ export class GameScene extends Phaser.Scene {
       // next frame — the glide itself IS the motion, so it feels immediate & smooth.
       this.pending.push(v);
     }
-    if (this.tutStep === 3) {
-      this.clearTutHint(); // tutorial complete
+    if (this.tutStep === 3 || this.tutStep === 14) {
+      this.clearTutHint(); // tutorial complete (3 = chế độ cũ, 14 = slam "xe quay về")
       this.tutStep = 0;
     }
 
@@ -3861,7 +3894,7 @@ export class GameScene extends Phaser.Scene {
     const lay = this.level.layer2 ? this.level.layer2.map((v, i) => (v >= 0 && this.keys[i] && this.keys[i]!.scene ? v : -1)) : null;
     const queue = this.invColumns.map((col) => col.filter((v) => v.container.scene).map((v) => ({ color: v.chest.color, cap: Math.max(0, v.chest.count - v.inFlight), pid: v.chest.pairId ?? null })));
     const parked = this.slots.map((v) => (v ? { color: v.chest.color, cap: Math.max(0, v.chest.count - v.inFlight), pid: v.chest.pairId ?? null } : null));
-    return { cols, rows, occ, lay, queue, parked };
+    return { cols, rows, occ, lay, queue, parked, hid: [...this.hiddenSet] };
   }
 
   // Greedy playout from a solver-form state; returns true if it clears the board. Mirrors the
@@ -3879,7 +3912,7 @@ export class GameScene extends Phaser.Scene {
   // vị trí xe, tia bắn lại sau mỗi con, ≤14 con/lượt-qua-lane), cuối vòng auto-continue nếu màu
   // còn reachable. Slam 2-hop: xe chiếm slot trống đầu NGAY khi phóng.
   private simRollout(
-    s: { cols: number; rows: number; occ: number[]; lay: number[] | null; queue: { color: number; cap: number; pid: number | null }[][]; parked: ({ color: number; cap: number; pid: number | null } | null)[] },
+    s: { cols: number; rows: number; occ: number[]; lay: number[] | null; queue: { color: number; cap: number; pid: number | null }[][]; parked: ({ color: number; cap: number; pid: number | null } | null)[]; hid?: number[] },
     seed: number,
     forceFirst?: string,
     natural = false, // lối NGƯỜI: gần như không phá cách, trong nhóm chọn nước ăn nhiều nhất
@@ -3892,17 +3925,30 @@ export class GameScene extends Phaser.Scene {
     const queue = s.queue.map((c) => c.map((m) => ({ ...m })));
     const slots: ({ color: number; cap: number; pid: number | null } | null)[] = s.parked.map((p) => (p ? { ...p } : null));
     const isC = (v: number) => v >= 0 && v < 90;
+    // slime "?" ẨN: chặn tia + không target được tới khi 1 ô kề 4-hướng bị ăn (hiddenSet thật).
+    const hid = new Set<number>(s.hid ?? []);
     let remaining = occ.reduce((a, v) => a + (isC(v) ? 1 : 0), 0) + (lay ? lay.reduce((a, v) => a + (v >= 0 ? 1 : 0), 0) : 0);
     type Cell = { o: number[]; l: number[] | null };
-    const clearCell = (st: Cell, i: number) => { if (st.l && st.l[i] >= 0) { st.o[i] = st.l[i]; st.l[i] = -1; } else st.o[i] = -1; };
+    const clearCell = (st: Cell, i: number) => {
+      if (st.l && st.l[i] >= 0) { st.o[i] = st.l[i]; st.l[i] = -1; } else st.o[i] = -1;
+      if (hid.size) { // lộ "?" ở 4 ô kề (revealHiddenAround)
+        const r = (i / cols) | 0, c = i % cols;
+        if (r > 0) hid.delete(i - cols);
+        if (r < rows - 1) hid.delete(i + cols);
+        if (c > 0) hid.delete(i - 1);
+        if (c < cols - 1) hid.delete(i + 1);
+      }
+    };
     const rayHit = (o: number[], sr: number, sc: number, dr: number, dc: number): { idx: number; steps: number } | null => {
-      const occAt = (r: number, c: number) => r >= 0 && r < rows && c >= 0 && c < cols && isC(o[r * cols + c]);
+      // ĐÁ (≥90) chặn tia như GameScene.rayHit thật (tia dừng ở MỌI tile) nhưng không là target.
+      const blockAt = (r: number, c: number) => { if (r < 0 || r >= rows || c < 0 || c >= cols) return false; const v = o[r * cols + c]; return isC(v) || v >= 90; };
       const diagonal = dr !== 0 && dc !== 0;
       let r = sr, c = sc, st = 0;
       while (r >= 0 && r < rows && c >= 0 && c < cols) {
         const idx = r * cols + c;
+        if (o[idx] >= 90) return null;
         if (isC(o[idx])) return { idx, steps: st };
-        if (diagonal && occAt(r, c + dc) && occAt(r + dr, c)) return null;
+        if (diagonal && blockAt(r, c + dc) && blockAt(r + dr, c)) return null;
         r += dr; c += dc; st++;
       }
       return null;
@@ -3924,7 +3970,8 @@ export class GameScene extends Phaser.Scene {
       let best: { idx: number; steps: number } | null = null;
       for (const [r0, c0, dr, dc] of lanRays(e, l)) {
         const h = rayHit(o, r0, c0, dr, dc);
-        if (h && o[h.idx] === color && (!best || h.steps < best.steps)) best = h;
+        // "?" ẩn: tia dừng ở đó nhưng không target được (findLosTargets lọc hiddenSet)
+        if (h && !hid.has(h.idx) && o[h.idx] === color && (!best || h.steps < best.steps)) best = h;
       }
       return best;
     };
@@ -3933,7 +3980,7 @@ export class GameScene extends Phaser.Scene {
       for (const { e, l } of seq) {
         for (const [r0, c0, dr, dc] of lanRays(e, l)) {
           const h = rayHit(o, r0, c0, dr, dc);
-          if (h) S.add(o[h.idx]);
+          if (h && !hid.has(h.idx)) S.add(o[h.idx]);
         }
       }
       return S;
@@ -5008,6 +5055,17 @@ export class GameScene extends Phaser.Scene {
         let si = m.traySlot;
         if (si == null || this.slots[si] !== m) si = this.slots.findIndex((s) => s === null || s === m);
         if (si >= 0) { this.slots[si] = m; m.traySlot = si; this.parkIntoSlot(m, si); }
+        // Tutorial slam bước 3: xe KHÔNG đầy quay VỀ ô chờ → spotlight "bấm nó chạy tiếp";
+        // hoàn thành ở relaunchFromSlot (sentinel 14).
+        if (this.slamMode && this.tutStep === 13 && si >= 0) {
+          this.tutStep = 14;
+          const si0 = si;
+          this.time.delayedCall(700, () => {
+            if (this.tutStep === 14 && !this.won && !this.lost) {
+              this.showTutHint(this.slotXs[si0] ?? 0, this.slotY, "Not full yet, so it came back!\nTap it to run again. If NO car\ncan move, you lose!", SLOT_SIZE * 0.95);
+            }
+          });
+        }
       }
       this.updateSlotWarning();
       return;
@@ -5097,9 +5155,9 @@ export class GameScene extends Phaser.Scene {
     hit.removeAllListeners("pointerdown");
     hit.on("pointerdown", () => this.relaunchFromSlot(slotIndex));
 
-    // Tutorial step 2: the first car to park → point the hand at its bay. Wait for
-    // the slide-in tween to settle before dimming, so the spotlight lands on the car.
-    if (this.tutStep === 2) {
+    // Tutorial step 2 (CHẾ ĐỘ CŨ — slam có chuỗi sentinel 11-14 riêng): the first car to
+    // park → point the hand at its bay. Wait for the slide-in tween to settle first.
+    if (this.tutStep === 2 && !this.slamMode) {
       this.tutStep = 3;
       this.time.delayedCall(700, () => {
         if (this.tutStep === 3 && !this.won && !this.lost) {
@@ -5137,6 +5195,7 @@ export class GameScene extends Phaser.Scene {
 
   private lose(pending?: ActiveChest) {
     if (this.won || this.lost) return;
+    if (this.tutStep > 0) { this.clearTutHint(); this.tutStep = 0; } // đừng để spotlight kẹt trên màn thua
     this.lost = true;
     this.emitPlayLog("lose");
     this.failedThisAttempt = true; // a loss means a later win is worth 1 rock, not 2
@@ -5280,6 +5339,7 @@ export class GameScene extends Phaser.Scene {
 
   private win() {
     if (this.won) return;
+    if (this.tutStep > 0) { this.clearTutHint(); this.tutStep = 0; } // tutorial dở dang (vd xe không quay về) → dọn khi thắng
     this.won = true;
     this.emitPlayLog("win");
     const next = this.levelNum + 1;
