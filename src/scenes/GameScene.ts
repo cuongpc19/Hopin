@@ -3880,6 +3880,7 @@ export class GameScene extends Phaser.Scene {
   private simRollout(
     s: { cols: number; rows: number; occ: number[]; lay: number[] | null; queue: { color: number; cap: number; pid: number | null }[][]; parked: ({ color: number; cap: number; pid: number | null } | null)[] },
     seed: number,
+    forceFirst?: string,
   ): { win: boolean; plan: string[]; left: number } {
     const { cols, rows } = s;
     let x = (seed >>> 0) || 1;
@@ -3944,6 +3945,25 @@ export class GameScene extends Phaser.Scene {
       return members.length >= 2 ? members : null;
     };
     const plan: string[] = [];
+    // FORCED first move (1-ply MC): thực hiện đúng nước ứng viên rồi mới chạy policy thường
+    if (forceFirst) {
+      if (forceFirst.startsWith("bay")) {
+        const i = parseInt(forceFirst.slice(3), 10);
+        const p = slots[i];
+        if (!p) return { win: false, plan, left: remaining };
+        plan.push("bay" + i);
+        remaining -= collectFix(occ, lay, p);
+        if (p.cap === 0) slots[i] = null;
+      } else {
+        const j = parseInt(forceFirst.slice(1), 10);
+        const grp = headGroup(j);
+        if (!grp || slots.filter((p) => p === null).length < grp.length) return { win: false, plan, left: remaining };
+        plan.push("q" + j);
+        for (const m of grp) { for (const col of queue) { const k = col.indexOf(m); if (k >= 0) { col.splice(k, 1); break; } } }
+        for (const m of grp) remaining -= collectFix(occ, lay, m);
+        for (const m of grp) if (m.cap > 0) { const sl = slots.indexOf(null); if (sl >= 0) slots[sl] = m; }
+      }
+    }
     let guard = 0;
     while (remaining > 0 && guard++ < 500) {
       // xe ở Ô ăn được = 1 tap mỗi lần (ưu tiên tuyệt đối)
@@ -4001,8 +4021,8 @@ export class GameScene extends Phaser.Scene {
   }
   private computeGuideTarget(): { key: string; x: number; y: number } | null {
     if (!this.slamMode) return null;
-    if (this.active.length > 0 || this.pending.length > 0) return null; // advise on a quiet board only
-    // current advice still valid? keep it (no recompute — zero flicker until the player acts)
+    if (this.active.length > 0 || this.pending.length > 0) return null; // chỉ mách khi board yên
+    // advice hiện tại còn hợp lệ → giữ nguyên (không tính lại, không nhấp nháy)
     if (this.guidePlan && this.guidePlan.length) {
       const t = this.guideStepTarget(this.guidePlan[0]);
       if (t) return t;
@@ -4010,26 +4030,43 @@ export class GameScene extends Phaser.Scene {
     }
     const base = this.captureSimState();
     this.guidePlanNonce++;
-    const K = 32;
-    const winFirst = new Map<string, number>();
-    let bestEffort: { first: string; left: number } | null = null;
-    for (let t = 0; t < K; t++) {
-      const r = this.simRollout(base, (this.levelNum * 7919 + this.guidePlanNonce * 104729 + t * 137 + 11) >>> 0);
-      const first = r.plan[0];
-      if (!first) continue;
-      if (r.win) winFirst.set(first, (winFirst.get(first) || 0) + 1);
-      else if (!bestEffort || r.left < bestEffort.left) bestEffort = { first, left: r.left };
+    // ứng viên: mọi xe Ô đang ăn được + mọi cột phóng được
+    const cands: string[] = [];
+    for (let i = 0; i < this.slots.length; i++) { const v = this.slots[i]; if (v && this.carCanCollect(v)) cands.push("bay" + i); }
+    const seen = new Set<ChestView>();
+    for (let j = 0; j < this.invColumns.length; j++) {
+      const head = this.invColumns[j][0];
+      if (!head || !head.container.scene || seen.has(head)) continue;
+      const group = this.groupOf(head);
+      group.forEach((m) => seen.add(m));
+      let ok = true;
+      for (const m of group) {
+        const p = this.findInInventory(m);
+        if (!p || !p.col.slice(0, p.r).every((c) => group.includes(c))) { ok = false; break; }
+      }
+      const freeSlots = this.slots.reduce((n, sl) => n + (sl ? 0 : 1), 0);
+      if (!ok || freeSlots < group.length || this.active.length + this.pending.length + group.length > MAX_ON_TRACK) continue;
+      cands.push("q" + j);
     }
-    let advice: string | null = null;
-    let winning = false;
-    if (winFirst.size) {
-      advice = [...winFirst.entries()].sort((a, b) => b[1] - a[1])[0][0];
-      winning = true;
-    } else if (bestEffort) advice = bestEffort.first;
-    if (!advice) return null;
-    this.guidePlan = [advice];
-    this.guidePlanWinning = winning;
-    const t0 = this.guideStepTarget(advice);
+    if (!cands.length) return null;
+    // 1-ply Monte-Carlo: mỗi ứng viên chạy M ván bot BẮT ĐẦU bằng đúng nước đó → winrate;
+    // chọn nước winrate cao nhất — "tối ưu theo xác suất thắng", tránh nước-bẫy kiểu phóng twin
+    // nhỏ sớm rồi khoá 2 ô suốt ván (bài học ván L148 user thua dù theo guide 100%).
+    const M = 9;
+    let best: { key: string; wins: number; left: number } | null = null;
+    for (const key of cands) {
+      let wins = 0, leftSum = 0;
+      for (let t = 0; t < M; t++) {
+        const r = this.simRollout(base, (this.levelNum * 7919 + this.guidePlanNonce * 104729 + t * 137 + key.length * 31 + key.charCodeAt(key.length - 1) * 7 + 11) >>> 0, key);
+        if (r.win) wins++;
+        leftSum += r.left;
+      }
+      if (!best || wins > best.wins || (wins === best.wins && leftSum < best.left)) best = { key, wins, left: leftSum };
+    }
+    if (!best) return null;
+    this.guidePlan = [best.key];
+    this.guidePlanWinning = best.wins > 0;
+    const t0 = this.guideStepTarget(best.key);
     if (!t0) { this.guidePlan = null; return null; }
     return t0;
   }
