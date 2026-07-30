@@ -3874,10 +3874,10 @@ export class GameScene extends Phaser.Scene {
   // tie-breaking and records the FULL move sequence — one entry per player tap ("bay<i>" = tap the
   // parked car in slot i, "q<j>" = launch the front of queue column j). Returns win + plan + how
   // much was left uneaten (for best-effort ranking when nothing wins).
-  // simCore rollout (v5) — ĐÚNG LUẬT ăn của game, không còn xấp xỉ 4-hướng: LoS 3 TIA (thẳng +
-  // 2 chéo 45°, chéo bị "kẹp góc" khi 2 ô kề chéo đều occupied) từ mọi lane của 4 cạnh; một lần
-  // ra ray = FIXPOINT ăn mọi hit khớp màu (auto-continue-lap). Đã verify bằng replay playlog
-  // (3 ván L148 khớp 100% chuỗi freeSlots) và solver đạt 85% win-rollout trên L148.
+  // trip-sim v2 — mô phỏng HÀNH TRÌNH xe (verify per-trip 13/17 khớp thật, các chuyến "ăn 0"
+  // đoán trúng): vào ray ngay trên Ô CHỜ, chạy CCW, ăn nearest-first theo lane đi qua (3 tia từ
+  // vị trí xe, tia bắn lại sau mỗi con, ≤14 con/lượt-qua-lane), cuối vòng auto-continue nếu màu
+  // còn reachable. Slam 2-hop: xe chiếm slot trống đầu NGAY khi phóng.
   private simRollout(
     s: { cols: number; rows: number; occ: number[]; lay: number[] | null; queue: { color: number; cap: number; pid: number | null }[][]; parked: ({ color: number; cap: number; pid: number | null } | null)[] },
     seed: number,
@@ -3892,43 +3892,75 @@ export class GameScene extends Phaser.Scene {
     const slots: ({ color: number; cap: number; pid: number | null } | null)[] = s.parked.map((p) => (p ? { ...p } : null));
     const isC = (v: number) => v >= 0 && v < 90;
     let remaining = occ.reduce((a, v) => a + (isC(v) ? 1 : 0), 0) + (lay ? lay.reduce((a, v) => a + (v >= 0 ? 1 : 0), 0) : 0);
-    const clearCell = (arrO: number[], arrL: number[] | null, i: number) => { if (arrL && arrL[i] >= 0) { arrO[i] = arrL[i]; arrL[i] = -1; } else arrO[i] = -1; };
-    const rayHit = (arrO: number[], sr: number, sc: number, dr: number, dc: number): number => {
-      const occAt = (r: number, c: number) => r >= 0 && r < rows && c >= 0 && c < cols && isC(arrO[r * cols + c]);
+    type Cell = { o: number[]; l: number[] | null };
+    const clearCell = (st: Cell, i: number) => { if (st.l && st.l[i] >= 0) { st.o[i] = st.l[i]; st.l[i] = -1; } else st.o[i] = -1; };
+    const rayHit = (o: number[], sr: number, sc: number, dr: number, dc: number): { idx: number; steps: number } | null => {
+      const occAt = (r: number, c: number) => r >= 0 && r < rows && c >= 0 && c < cols && isC(o[r * cols + c]);
       const diagonal = dr !== 0 && dc !== 0;
-      let r = sr, c = sc;
+      let r = sr, c = sc, st = 0;
       while (r >= 0 && r < rows && c >= 0 && c < cols) {
         const idx = r * cols + c;
-        if (isC(arrO[idx])) return idx;
-        if (diagonal && occAt(r, c + dc) && occAt(r + dr, c)) return -1;
-        r += dr; c += dc;
+        if (isC(o[idx])) return { idx, steps: st };
+        if (diagonal && occAt(r, c + dc) && occAt(r + dr, c)) return null;
+        r += dr; c += dc; st++;
       }
-      return -1;
+      return null;
     };
-    const reachSet = (arrO: number[]): Set<number> => {
-      const hits = new Set<number>();
-      const add = (h: number) => { if (h >= 0) hits.add(h); };
-      for (let sc = 0; sc < cols; sc++) {
-        add(rayHit(arrO, rows - 1, sc, -1, 0)); add(rayHit(arrO, rows - 1, sc - 1, -1, -1)); add(rayHit(arrO, rows - 1, sc + 1, -1, 1));
-        add(rayHit(arrO, 0, sc, 1, 0)); add(rayHit(arrO, 0, sc - 1, 1, -1)); add(rayHit(arrO, 0, sc + 1, 1, 1));
-      }
-      for (let sr = 0; sr < rows; sr++) {
-        add(rayHit(arrO, sr, 0, 0, 1)); add(rayHit(arrO, sr - 1, 0, -1, 1)); add(rayHit(arrO, sr + 1, 0, 1, 1));
-        add(rayHit(arrO, sr, cols - 1, 0, -1)); add(rayHit(arrO, sr - 1, cols - 1, -1, -1)); add(rayHit(arrO, sr + 1, cols - 1, 1, -1));
-      }
-      return hits;
+    // lane sequence CCW: bottom 0..cols-1, right rows-1..0, top cols-1..0, left 0..rows-1
+    const seq: { e: string; l: number }[] = [];
+    for (let sc = 0; sc < cols; sc++) seq.push({ e: "b", l: sc });
+    for (let sr = rows - 1; sr >= 0; sr--) seq.push({ e: "r", l: sr });
+    for (let sc = cols - 1; sc >= 0; sc--) seq.push({ e: "t", l: sc });
+    for (let sr = 0; sr < rows; sr++) seq.push({ e: "l", l: sr });
+    const NL = seq.length;
+    const lanRays = (e: string, l: number): [number, number, number, number][] => {
+      if (e === "b") return [[rows - 1, l, -1, 0], [rows - 1, l - 1, -1, -1], [rows - 1, l + 1, -1, 1]];
+      if (e === "t") return [[0, l, 1, 0], [0, l - 1, 1, -1], [0, l + 1, 1, 1]];
+      if (e === "l") return [[l, 0, 0, 1], [l - 1, 0, -1, 1], [l + 1, 0, 1, 1]];
+      return [[l, cols - 1, 0, -1], [l - 1, cols - 1, -1, -1], [l + 1, cols - 1, 1, -1]];
     };
-    const collectFix = (arrO: number[], arrL: number[] | null, car: { color: number; cap: number }): number => {
-      let eaten = 0;
-      for (;;) {
-        if (car.cap <= 0) return eaten;
-        let ate = false;
-        for (const i of reachSet(arrO)) {
-          if (arrO[i] === car.color) { clearCell(arrO, arrL, i); car.cap--; eaten++; ate = true; break; }
+    const nearestTarget = (o: number[], e: string, l: number, color: number): { idx: number; steps: number } | null => {
+      let best: { idx: number; steps: number } | null = null;
+      for (const [r0, c0, dr, dc] of lanRays(e, l)) {
+        const h = rayHit(o, r0, c0, dr, dc);
+        if (h && o[h.idx] === color && (!best || h.steps < best.steps)) best = h;
+      }
+      return best;
+    };
+    const reachColors = (o: number[]): Set<number> => {
+      const S = new Set<number>();
+      for (const { e, l } of seq) {
+        for (const [r0, c0, dr, dc] of lanRays(e, l)) {
+          const h = rayHit(o, r0, c0, dr, dc);
+          if (h) S.add(o[h.idx]);
         }
-        if (!ate) return eaten;
       }
+      return S;
     };
+    const entryLane = (slotI: number) => Math.min(cols - 1, Math.floor(((slotI + 0.5) / 5) * cols));
+    // một CHUYẾN từ entry lane — trả số đã ăn (mutate st)
+    const trip = (st: Cell, car: { color: number; cap: number }, entryIdx: number): number => {
+      let ate = 0, pos = entryIdx % NL, steps = 0, laps = 0;
+      while (car.cap > 0 && laps < 60) {
+        const { e, l } = seq[pos];
+        let per = 0;
+        while (car.cap > 0 && per < 14) {
+          const h = nearestTarget(st.o, e, l, car.color);
+          if (!h) break;
+          clearCell(st, h.idx);
+          car.cap--; ate++; per++;
+        }
+        pos = (pos + 1) % NL; steps++;
+        if (steps >= NL) {
+          laps++;
+          if (car.cap <= 0) break;
+          if (!reachColors(st.o).has(car.color)) break;
+          steps = 0;
+        }
+      }
+      return ate;
+    };
+    const live: Cell = { o: occ, l: lay };
     const headGroup = (j: number): { color: number; cap: number; pid: number | null }[] | null => {
       const f = queue[j][0];
       if (!f) return null;
@@ -3945,41 +3977,46 @@ export class GameScene extends Phaser.Scene {
       }
       return members.length >= 2 ? members : null;
     };
+    const doLaunch = (j: number): boolean => {
+      const grp = headGroup(j);
+      if (!grp || slots.filter((p) => p === null).length < grp.length) return false;
+      for (const m of grp) { for (const col of queue) { const k = col.indexOf(m); if (k >= 0) { col.splice(k, 1); break; } } }
+      for (const m of grp) {
+        const sl = slots.indexOf(null);
+        slots[sl] = m;
+        remaining -= trip(live, m, entryLane(sl));
+        if (m.cap === 0) slots[sl] = null;
+      }
+      return true;
+    };
+    const doTap = (i: number): boolean => {
+      const p = slots[i];
+      if (!p) return false;
+      remaining -= trip(live, p, entryLane(i));
+      if (p.cap === 0) slots[i] = null;
+      return true;
+    };
     const plan: string[] = [];
-    // FORCED first move (1-ply MC): thực hiện đúng nước ứng viên rồi mới chạy policy thường
     if (forceFirst) {
       if (forceFirst.startsWith("bay")) {
         const i = parseInt(forceFirst.slice(3), 10);
-        const p = slots[i];
-        if (!p) return { win: false, plan, left: remaining };
-        plan.push("bay" + i);
-        remaining -= collectFix(occ, lay, p);
-        if (p.cap === 0) slots[i] = null;
+        if (!slots[i]) return { win: false, plan, left: remaining };
+        plan.push("bay" + i); doTap(i);
       } else {
         const j = parseInt(forceFirst.slice(1), 10);
-        const grp = headGroup(j);
-        if (!grp || slots.filter((p) => p === null).length < grp.length) return { win: false, plan, left: remaining };
+        if (!doLaunch(j)) return { win: false, plan, left: remaining };
         plan.push("q" + j);
-        for (const m of grp) { for (const col of queue) { const k = col.indexOf(m); if (k >= 0) { col.splice(k, 1); break; } } }
-        for (const m of grp) remaining -= collectFix(occ, lay, m);
-        for (const m of grp) if (m.cap > 0) { const sl = slots.indexOf(null); if (sl >= 0) slots[sl] = m; }
       }
     }
     let guard = 0;
     while (remaining > 0 && guard++ < 500) {
-      // xe ở Ô ăn được = 1 tap mỗi lần (ưu tiên tuyệt đối)
       let any = true;
       while (any && remaining > 0) {
         any = false;
-        const S = new Set<number>(); for (const i of reachSet(occ)) S.add(occ[i]);
+        const S = reachColors(occ);
         for (let i = 0; i < slots.length; i++) {
           const p = slots[i];
-          if (p && p.cap > 0 && S.has(p.color)) {
-            plan.push("bay" + i);
-            remaining -= collectFix(occ, lay, p);
-            if (p.cap === 0) slots[i] = null;
-            any = true; break;
-          }
+          if (p && p.cap > 0 && S.has(p.color)) { plan.push("bay" + i); doTap(i); any = true; break; }
         }
       }
       if (remaining === 0) break;
@@ -3995,11 +4032,20 @@ export class GameScene extends Phaser.Scene {
         cands.push({ j, grp });
       }
       if (!cands.length) break;
-      // ước ăn/thừa trên CLONE (đúng luật 3-tia)
+      // ước ăn/thừa trên CLONE (đúng trip-sim, entry theo slot sẽ chiếm)
       const meta = cands.map((c) => {
-        const o2 = occ.slice(); const l2 = lay ? lay.slice() : null;
+        const st2: Cell = { o: occ.slice(), l: lay ? lay.slice() : null };
+        const sl2 = slots.map((p) => (p ? { ...p } : null));
         let eaten = 0, leftover = 0;
-        for (const m of c.grp) { const m2 = { color: m.color, cap: m.cap }; eaten += collectFix(o2, l2, m2); leftover += m2.cap; }
+        for (const m of c.grp) {
+          const m2 = { color: m.color, cap: m.cap };
+          const sl = sl2.indexOf(null);
+          if (sl < 0) { leftover += m2.cap; continue; }
+          sl2[sl] = m as unknown as { color: number; cap: number; pid: number | null };
+          eaten += trip(st2, m2, entryLane(sl));
+          if (m2.cap === 0) sl2[sl] = null;
+          leftover += m2.cap;
+        }
         return { ...c, eaten, leftover };
       });
       const clean = meta.filter((m) => m.leftover === 0 && m.eaten > 0);
@@ -4014,12 +4060,11 @@ export class GameScene extends Phaser.Scene {
       const tier = tiers[ti];
       const pick = tier[Math.floor(rng() * tier.length)];
       plan.push("q" + pick.j);
-      for (const m of pick.grp) { for (const col of queue) { const k = col.indexOf(m); if (k >= 0) { col.splice(k, 1); break; } } }
-      for (const m of pick.grp) remaining -= collectFix(occ, lay, m);
-      for (const m of pick.grp) if (m.cap > 0) { const sl = slots.indexOf(null); if (sl >= 0) slots[sl] = m; }
+      doLaunch(pick.j);
     }
     return { win: remaining === 0, plan, left: remaining };
   }
+
   private computeGuideTarget(): { key: string; x: number; y: number } | null {
     if (!this.slamMode) return null;
     if (this.active.length > 0 || this.pending.length > 0) return null; // chỉ mách khi board yên
