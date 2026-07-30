@@ -487,7 +487,7 @@ export class GameScene extends Phaser.Scene {
     this.level = makeLevel(levelNum);
     this.slamMode = this.level.slam === true; // lock mode (tap bay cars; slot locks while out)
     this.trayMode = this.level.tray === true || this.slamMode; // slam reuses the tray bay system
-    this.postLog({ ev: "start", cars: this.level.chests.length, twins: new Set(this.level.chests.filter((c) => c.pairId != null).map((c) => c.pairId)).size, buried: this.level.chests.filter((c) => (c as unknown as { buried?: boolean }).buried).length });
+    this.postLog({ ev: "start", v: (typeof __APP_BUILD__ !== "undefined" ? __APP_BUILD__ : "?"), cars: this.level.chests.length, twins: new Set(this.level.chests.filter((c) => c.pairId != null).map((c) => c.pairId)).size, buried: this.level.chests.filter((c) => (c as unknown as { buried?: boolean }).buried).length });
     // SLAM: ALWAYS 5 waiting slots (the "Add" booster grows it to 6). No per-level bays.
     // Win when all REMOVABLE cells are gone (slimes + wood + soft rock). Hard rocks
     // stay forever and are not counted. A 2-layer cell counts TWICE (top + hidden bottom).
@@ -3160,7 +3160,7 @@ export class GameScene extends Phaser.Scene {
       if (this.active.length + this.pending.length + need > MAX_ON_TRACK) { this.trackFullNotice(); return; }
       this.playPop();
       // TELEMETRY: a queue tap is the player's core DECISION — log it with context (streamed live).
-      const launchEv = { ev: "launch", t: Math.round((typeof performance !== "undefined" ? performance.now() : 0) - this.playStart), colors: group.map((v) => v.chest.color), counts: group.map((v) => v.chest.count), buried: group.some((v) => !!(v.chest as unknown as { buried?: boolean }).buried), freeSlotsBefore: freeSlots, onRay: this.active.length + this.pending.length, twin: group.length > 1 };
+      const _p0 = this.findInInventory(group[0]); const launchEv = { ev: "launch", col: _p0 ? this.invColumns.indexOf(_p0.col) : -1, t: Math.round((typeof performance !== "undefined" ? performance.now() : 0) - this.playStart), colors: group.map((v) => v.chest.color), counts: group.map((v) => v.chest.count), buried: group.some((v) => !!(v.chest as unknown as { buried?: boolean }).buried), freeSlotsBefore: freeSlots, onRay: this.active.length + this.pending.length, twin: group.length > 1 };
       this.playLog.push(launchEv);
       this.postLog(launchEv);
       { const p0 = this.findInInventory(group[0]); if (p0) this.onGuideAction("q" + this.invColumns.indexOf(p0.col)); } // guide plan: player launched column j
@@ -3873,6 +3873,10 @@ export class GameScene extends Phaser.Scene {
   // tie-breaking and records the FULL move sequence — one entry per player tap ("bay<i>" = tap the
   // parked car in slot i, "q<j>" = launch the front of queue column j). Returns win + plan + how
   // much was left uneaten (for best-effort ranking when nothing wins).
+  // simCore rollout (v5) — ĐÚNG LUẬT ăn của game, không còn xấp xỉ 4-hướng: LoS 3 TIA (thẳng +
+  // 2 chéo 45°, chéo bị "kẹp góc" khi 2 ô kề chéo đều occupied) từ mọi lane của 4 cạnh; một lần
+  // ra ray = FIXPOINT ăn mọi hit khớp màu (auto-continue-lap). Đã verify bằng replay playlog
+  // (3 ván L148 khớp 100% chuỗi freeSlots) và solver đạt 85% win-rollout trên L148.
   private simRollout(
     s: { cols: number; rows: number; occ: number[]; lay: number[] | null; queue: { color: number; cap: number; pid: number | null }[][]; parked: ({ color: number; cap: number; pid: number | null } | null)[] },
     seed: number,
@@ -3883,123 +3887,118 @@ export class GameScene extends Phaser.Scene {
     const occ = s.occ.slice();
     const lay = s.lay ? s.lay.slice() : null;
     const queue = s.queue.map((c) => c.map((m) => ({ ...m })));
-    const parked: ({ color: number; cap: number; pid: number | null } | null)[] = s.parked.map((p) => (p ? { ...p } : null));
+    const slots: ({ color: number; cap: number; pid: number | null } | null)[] = s.parked.map((p) => (p ? { ...p } : null));
     const isC = (v: number) => v >= 0 && v < 90;
     let remaining = occ.reduce((a, v) => a + (isC(v) ? 1 : 0), 0) + (lay ? lay.reduce((a, v) => a + (v >= 0 ? 1 : 0), 0) : 0);
-    const clearCell = (i: number) => { if (lay && lay[i] >= 0) { occ[i] = lay[i]; lay[i] = -1; } else occ[i] = -1; remaining--; };
-    const exposed = (): Set<number> => {
-      const E = new Set<number>();
-      for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) { const i = r * cols + c; if (isC(occ[i])) { E.add(i); break; } }
-        for (let c = cols - 1; c >= 0; c--) { const i = r * cols + c; if (isC(occ[i])) { E.add(i); break; } }
+    const clearCell = (arrO: number[], arrL: number[] | null, i: number) => { if (arrL && arrL[i] >= 0) { arrO[i] = arrL[i]; arrL[i] = -1; } else arrO[i] = -1; };
+    const rayHit = (arrO: number[], sr: number, sc: number, dr: number, dc: number): number => {
+      const occAt = (r: number, c: number) => r >= 0 && r < rows && c >= 0 && c < cols && isC(arrO[r * cols + c]);
+      const diagonal = dr !== 0 && dc !== 0;
+      let r = sr, c = sc;
+      while (r >= 0 && r < rows && c >= 0 && c < cols) {
+        const idx = r * cols + c;
+        if (isC(arrO[idx])) return idx;
+        if (diagonal && occAt(r, c + dc) && occAt(r + dr, c)) return -1;
+        r += dr; c += dc;
       }
-      for (let c = 0; c < cols; c++) {
-        for (let r = 0; r < rows; r++) { const i = r * cols + c; if (isC(occ[i])) { E.add(i); break; } }
-        for (let r = rows - 1; r >= 0; r--) { const i = r * cols + c; if (isC(occ[i])) { E.add(i); break; } }
-      }
-      return E;
+      return -1;
     };
-    const collect = (car: { color: number; cap: number }) => {
-      for (;;) {
-        if (car.cap <= 0) return;
-        const E = exposed();
-        let t = -1;
-        for (const i of E) if (occ[i] === car.color) { t = i; break; }
-        if (t < 0) return;
-        clearCell(t); car.cap--;
+    const reachSet = (arrO: number[]): Set<number> => {
+      const hits = new Set<number>();
+      const add = (h: number) => { if (h >= 0) hits.add(h); };
+      for (let sc = 0; sc < cols; sc++) {
+        add(rayHit(arrO, rows - 1, sc, -1, 0)); add(rayHit(arrO, rows - 1, sc - 1, -1, -1)); add(rayHit(arrO, rows - 1, sc + 1, -1, 1));
+        add(rayHit(arrO, 0, sc, 1, 0)); add(rayHit(arrO, 0, sc - 1, 1, -1)); add(rayHit(arrO, 0, sc + 1, 1, 1));
       }
+      for (let sr = 0; sr < rows; sr++) {
+        add(rayHit(arrO, sr, 0, 0, 1)); add(rayHit(arrO, sr - 1, 0, -1, 1)); add(rayHit(arrO, sr + 1, 0, 1, 1));
+        add(rayHit(arrO, sr, cols - 1, 0, -1)); add(rayHit(arrO, sr - 1, cols - 1, -1, -1)); add(rayHit(arrO, sr + 1, cols - 1, 1, -1));
+      }
+      return hits;
+    };
+    const collectFix = (arrO: number[], arrL: number[] | null, car: { color: number; cap: number }): number => {
+      let eaten = 0;
+      for (;;) {
+        if (car.cap <= 0) return eaten;
+        let ate = false;
+        for (const i of reachSet(arrO)) {
+          if (arrO[i] === car.color) { clearCell(arrO, arrL, i); car.cap--; eaten++; ate = true; break; }
+        }
+        if (!ate) return eaten;
+      }
+    };
+    const headGroup = (j: number): { color: number; cap: number; pid: number | null }[] | null => {
+      const f = queue[j][0];
+      if (!f) return null;
+      if (f.pid == null) return [f];
+      const members: { color: number; cap: number; pid: number | null }[] = [];
+      for (let jj = 0; jj < queue.length; jj++) {
+        for (let r = 0; r < queue[jj].length; r++) {
+          const c = queue[jj][r];
+          if (c.pid === f.pid) {
+            if (queue[jj].slice(0, r).some((m) => m.pid !== f.pid)) return null;
+            members.push(c);
+          }
+        }
+      }
+      return members.length >= 2 ? members : null;
     };
     const plan: string[] = [];
     let guard = 0;
     while (remaining > 0 && guard++ < 500) {
-      // a productive BAY car = one tap each (slam never auto-launches bays)
+      // xe ở Ô ăn được = 1 tap mỗi lần (ưu tiên tuyệt đối)
       let any = true;
       while (any && remaining > 0) {
         any = false;
-        const E = exposed(); const S = new Set<number>(); for (const i of E) S.add(occ[i]);
-        for (let i = 0; i < parked.length; i++) {
-          const p = parked[i];
+        const S = new Set<number>(); for (const i of reachSet(occ)) S.add(occ[i]);
+        for (let i = 0; i < slots.length; i++) {
+          const p = slots[i];
           if (p && p.cap > 0 && S.has(p.color)) {
             plan.push("bay" + i);
-            collect(p); if (p.cap === 0) parked[i] = null;
+            remaining -= collectFix(occ, lay, p);
+            if (p.cap === 0) slots[i] = null;
             any = true; break;
           }
         }
       }
       if (remaining === 0) break;
-      const E = exposed(); const S = new Set<number>(); for (const i of E) S.add(occ[i]);
-      const freeBays = parked.filter((p) => p === null).length;
-      const fronts: { j: number; group: { color: number; cap: number; pid: number | null }[] }[] = [];
-      for (let j = 0; j < queue.length; j++) {
-        const f = queue[j][0]; if (!f) continue;
-        if (f.pid == null) { fronts.push({ j, group: [f] }); continue; }
-        const members: { color: number; cap: number; pid: number | null }[] = [];
-        let okG = true;
-        for (let jj = 0; jj < queue.length; jj++) for (let r = 0; r < queue[jj].length; r++) { const c = queue[jj][r]; if (c.pid === f.pid) { if (queue[jj].slice(0, r).some((m) => m.pid !== f.pid)) okG = false; members.push(c); } }
-        if (okG && members.length >= 2) fronts.push({ j, group: members });
-      }
+      const freeB = slots.filter((p) => p === null).length;
+      const cands: { j: number; grp: { color: number; cap: number; pid: number | null }[] }[] = [];
       const seenPid = new Set<number>();
-      const uniq = fronts.filter((f) => { const pid = f.group[0].pid; if (pid == null) return true; if (seenPid.has(pid)) return false; seenPid.add(pid); return true; });
-      const fit = uniq.filter((f) => freeBays >= f.group.length);
-      if (!fit.length) return { win: false, plan, left: remaining };
-// POLICY v3 (đã kiểm bằng debug script — L148 5%→45% winrate rollout): CẤP ưu tiên giữ kỷ
-      // luật bot (ăn-hết > nhóm > blocker-có-đệm > đào > cùng-đường), random TRONG cấp + 15% nhảy
-      // cấp để mở những đường greedy thuần không thấy.
-      const est = (car: { color: number; cap: number }): { eaten: number; leftover: number } => {
+      for (let j = 0; j < queue.length; j++) {
+        const grp = headGroup(j);
+        if (!grp) continue;
+        const pid = grp[0].pid;
+        if (pid != null) { if (seenPid.has(pid)) continue; seenPid.add(pid); }
+        if (freeB < grp.length) continue;
+        cands.push({ j, grp });
+      }
+      if (!cands.length) break;
+      // ước ăn/thừa trên CLONE (đúng luật 3-tia)
+      const meta = cands.map((c) => {
         const o2 = occ.slice(); const l2 = lay ? lay.slice() : null;
-        let cap = car.cap, eaten = 0;
-        const exp2 = (): Set<number> => {
-          const E2 = new Set<number>();
-          for (let r2 = 0; r2 < rows; r2++) {
-            for (let c2 = 0; c2 < cols; c2++) { const i2 = r2 * cols + c2; if (isC(o2[i2])) { E2.add(i2); break; } }
-            for (let c2 = cols - 1; c2 >= 0; c2--) { const i2 = r2 * cols + c2; if (isC(o2[i2])) { E2.add(i2); break; } }
-          }
-          for (let c2 = 0; c2 < cols; c2++) {
-            for (let r2 = 0; r2 < rows; r2++) { const i2 = r2 * cols + c2; if (isC(o2[i2])) { E2.add(i2); break; } }
-            for (let r2 = rows - 1; r2 >= 0; r2--) { const i2 = r2 * cols + c2; if (isC(o2[i2])) { E2.add(i2); break; } }
-          }
-          return E2;
-        };
-        for (;;) {
-          if (cap <= 0) break;
-          const E2 = exp2();
-          let t2 = -1;
-          for (const i2 of E2) if (o2[i2] === car.color) { t2 = i2; break; }
-          if (t2 < 0) break;
-          if (l2 && l2[t2] >= 0) { o2[t2] = l2[t2]; l2[t2] = -1; } else o2[t2] = -1;
-          cap--; eaten++;
-        }
-        return { eaten, leftover: cap };
-      };
-      const meta = fit.map((f) => { let eaten = 0, leftover = 0; for (const m of f.group) { const r2 = est(m); eaten += r2.eaten; leftover += r2.leftover; } return { f, eaten, leftover }; });
+        let eaten = 0, leftover = 0;
+        for (const m of c.grp) { const m2 = { color: m.color, cap: m.cap }; eaten += collectFix(o2, l2, m2); leftover += m2.cap; }
+        return { ...c, eaten, leftover };
+      });
       const clean = meta.filter((m) => m.leftover === 0 && m.eaten > 0);
-      const grpP = meta.filter((m) => m.f.group.length > 1 && m.eaten > 0);
-      const blk = freeBays >= 2 ? meta.filter((m) => m.eaten > 0) : [];
-      const dg = freeBays >= 2 ? meta.filter((m) => m.eaten === 0) : [];
-      const last = freeBays === 1 ? meta : [];
-      const tiers = [clean, grpP, blk, dg, last].filter((t2) => t2.length);
-      if (!tiers.length) return { win: false, plan, left: remaining };
+      const grpP = meta.filter((m) => m.grp.length > 1 && m.eaten > 0);
+      const blk = freeB >= 2 ? meta.filter((m) => m.eaten > 0) : [];
+      const dg = freeB >= 2 ? meta.filter((m) => m.eaten === 0) : [];
+      const last = freeB === 1 ? meta : [];
+      const tiers = [clean, grpP, blk, dg, last].filter((t) => t.length);
+      if (!tiers.length) break;
       let ti = 0;
       while (ti < tiers.length - 1 && rng() < 0.15) ti++;
       const tier = tiers[ti];
-      const pick = tier[Math.floor(rng() * tier.length)].f;
+      const pick = tier[Math.floor(rng() * tier.length)];
       plan.push("q" + pick.j);
-      for (const m of pick.group) { for (const col of queue) { const k = col.indexOf(m); if (k >= 0) { col.splice(k, 1); break; } } }
-      for (const m of pick.group) collect(m);
-      for (const m of pick.group) if (m.cap > 0) { const slot = parked.indexOf(null); if (slot >= 0) parked[slot] = m; }
+      for (const m of pick.grp) { for (const col of queue) { const k = col.indexOf(m); if (k >= 0) { col.splice(k, 1); break; } } }
+      for (const m of pick.grp) remaining -= collectFix(occ, lay, m);
+      for (const m of pick.grp) if (m.cap > 0) { const sl = slots.indexOf(null); if (sl >= 0) slots[sl] = m; }
     }
     return { win: remaining === 0, plan, left: remaining };
   }
-
-  // Build (or reuse) the guide PLAN — the full winning move sequence — and return the CURRENT
-  // step's target. "Đường tối ưu nhất": among K winning rollouts pick the SHORTEST plan (fewest
-  // taps); with no winner, the rollout that left the least uneaten. The plan is computed ONCE and
-  // replayed step by step; it re-plans only when the player deviates (onGuideAction clears it) or
-  // the current step is no longer valid. Deterministic seeds → no flicker.
-  // ONE-MOVE advice, recomputed from the LIVE state after every player action (v4.2). A long
-  // replayed plan accumulated sim-vs-game drift until it collapsed mid-run (user log: W plan →
-  // bays choked → F). Now each advice carries at most ONE move of sim error, and the pick is the
-  // first move most FREQUENT among winning rollouts — maximise win probability, not plan length.
   private computeGuideTarget(): { key: string; x: number; y: number } | null {
     if (!this.slamMode) return null;
     if (this.active.length > 0 || this.pending.length > 0) return null; // advise on a quiet board only
