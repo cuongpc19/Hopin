@@ -72,15 +72,28 @@ function rollout(seed, wantFirst) {
     // phân loại: productive (màu nào đó ∈ S) vs dig
     const prods = fit.filter((f) => f.group.some((m) => m.cap > 0 && S.has(m.color)));
     const digs = fit.filter((f) => !f.group.some((m) => m.cap > 0 && S.has(m.color)));
-    // trọng số: productive 8 (nếu freeBays≥2) / 3 (nếu=1); dig 2 (freeBays≥2) / 0.5 (=1); cột dài dig ưu tiên
-    const opts = [];
-    for (const f of prods) opts.push({ f, w: freeBays >= 2 ? 8 : 3 });
-    for (const f of digs) opts.push({ f, w: (freeBays >= 2 ? 2 : 0.5) * (1 + f.group.length === 1 ? queue[f.j].length / 10 : 0) });
-    if (!opts.length) break; // hết nước
-    let sum = 0; for (const o of opts) sum += o.w;
-    let r = rng() * sum, pick = opts[0];
-    for (const o of opts) { r -= o.w; if (r <= 0) { pick = o; break; } }
-    const f = pick.f;
+    // POLICY v3: cấp ưu tiên (kỷ luật bot) + random trong cấp + 15% nhảy cấp (mở đường lạ)
+    const tryCollectEst=(car)=>{ // ước ăn được bao nhiêu (trên board hiện tại, không mutate)
+      const o2=occ.slice(),l2=lay?lay.slice():null;let cap=car.cap,eaten=0;
+      const exp2=()=>{const E=new Set();
+        for(let r=0;r<rows;r++){for(let c=0;c<cols;c++){const i=r*cols+c;if(isC(o2[i])){E.add(i);break;}}for(let c=cols-1;c>=0;c--){const i=r*cols+c;if(isC(o2[i])){E.add(i);break;}}}
+        for(let c=0;c<cols;c++){for(let r=0;r<rows;r++){const i=r*cols+c;if(isC(o2[i])){E.add(i);break;}}for(let r=rows-1;r>=0;r--){const i=r*cols+c;if(isC(o2[i])){E.add(i);break;}}}
+        return E;};
+      for(;;){if(cap<=0)break;const E=exp2();let t=-1;for(const i of E)if(o2[i]===car.color){t=i;break;}if(t<0)break;
+        if(l2&&l2[t]>=0){o2[t]=l2[t];l2[t]=-1;}else o2[t]=-1;cap--;eaten++;}
+      return {eaten,leftover:cap};};
+    const meta=fit.map(f=>{let eaten=0,leftover=0;for(const m of f.group){const r2=tryCollectEst(m);eaten+=r2.eaten;leftover+=r2.leftover;}return {...f,eaten,leftover};});
+    const clean=meta.filter(m=>m.leftover===0&&m.eaten>0);
+    const grpP=meta.filter(m=>m.group.length>1&&m.eaten>0);
+    const blk=(freeBays>=2)?meta.filter(m=>m.eaten>0):[];
+    const dig=(freeBays>=2)?meta.filter(m=>m.eaten===0):[];
+    const last=(freeBays===1)?meta:[];
+    const tiers=[clean,grpP,blk,dig,last].filter(t2=>t2.length);
+    if(!tiers.length)break;
+    let ti=0;
+    while(ti<tiers.length-1&&rng()<0.15)ti++; // thỉnh thoảng nhảy xuống cấp dưới
+    const tier=tiers[ti];
+    const f=tier[Math.floor(rng()*tier.length)];
     if (!first) first = "q" + f.j + ":" + f.group[0].color;
     for (const m of f.group) { for (const col of queue) { const k = col.indexOf(m); if (k >= 0) { col.splice(k, 1); break; } } }
     for (const m of f.group) collect(m);

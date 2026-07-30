@@ -313,6 +313,7 @@ export class GameScene extends Phaser.Scene {
   private guideAt = 0;   // last recompute time (throttle)
   private guidePlan: string[] | null = null; // the winning move sequence being replayed step by step
   private guidePlanWinning = false;          // plan came from a WINNING rollout (vs best-effort)
+  private guidePlanNonce = 0;                // bumps every re-plan so a re-plan explores NEW seeds
   private tutBooster?: { list: BoosterDef[]; idx: number; key: string }; // active booster tutorial
 
   private signalCount?: Phaser.GameObjects.Text; // "N/5" on the start-signal's green light
@@ -442,7 +443,7 @@ export class GameScene extends Phaser.Scene {
     this.levelNum = levelNum;
     this.playLog = []; this.playStart = (typeof performance !== "undefined" ? performance.now() : 0); this.peakUsed = 0;
     try { this.guideMode = localStorage.getItem("hopin_guide") === "1"; } catch { this.guideMode = false; }
-    this.guideKey = ""; this.guideHand = undefined; this.guideRing = undefined; this.guidePlan = null; this.guidePlanWinning = false;
+    this.guideKey = ""; this.guideHand = undefined; this.guideRing = undefined; this.guidePlan = null; this.guidePlanWinning = false; this.guidePlanNonce = 0;
     if (typeof window !== "undefined") { (window as any).hopLog = () => console.log(localStorage.getItem("hopin_playlog") || "[]"); (window as any).hopLogClear = () => localStorage.removeItem("hopin_playlog"); }
     // "start" streams AFTER makeLevel below (needs this.level); see the postLog("start") call there.
     this.children.removeAll();
@@ -3941,14 +3942,47 @@ export class GameScene extends Phaser.Scene {
       const uniq = fronts.filter((f) => { const pid = f.group[0].pid; if (pid == null) return true; if (seenPid.has(pid)) return false; seenPid.add(pid); return true; });
       const fit = uniq.filter((f) => freeBays >= f.group.length);
       if (!fit.length) return { win: false, plan, left: remaining };
-      const prods = fit.filter((f) => f.group.some((m) => m.cap > 0 && S.has(m.color)));
-      const digs = fit.filter((f) => !f.group.some((m) => m.cap > 0 && S.has(m.color)));
-      const opts: { f: typeof fit[number]; w: number }[] = [];
-      for (const f of prods) opts.push({ f, w: freeBays >= 2 ? 8 : 3 });
-      for (const f of digs) opts.push({ f, w: (freeBays >= 2 ? 2 : 0.5) + (f.group.length === 1 ? queue[f.j].length / 10 : 0) });
-      let sum = 0; for (const o of opts) sum += o.w;
-      let r = rng() * sum; let pick = opts[0].f;
-      for (const o of opts) { r -= o.w; if (r <= 0) { pick = o.f; break; } }
+// POLICY v3 (đã kiểm bằng debug script — L148 5%→45% winrate rollout): CẤP ưu tiên giữ kỷ
+      // luật bot (ăn-hết > nhóm > blocker-có-đệm > đào > cùng-đường), random TRONG cấp + 15% nhảy
+      // cấp để mở những đường greedy thuần không thấy.
+      const est = (car: { color: number; cap: number }): { eaten: number; leftover: number } => {
+        const o2 = occ.slice(); const l2 = lay ? lay.slice() : null;
+        let cap = car.cap, eaten = 0;
+        const exp2 = (): Set<number> => {
+          const E2 = new Set<number>();
+          for (let r2 = 0; r2 < rows; r2++) {
+            for (let c2 = 0; c2 < cols; c2++) { const i2 = r2 * cols + c2; if (isC(o2[i2])) { E2.add(i2); break; } }
+            for (let c2 = cols - 1; c2 >= 0; c2--) { const i2 = r2 * cols + c2; if (isC(o2[i2])) { E2.add(i2); break; } }
+          }
+          for (let c2 = 0; c2 < cols; c2++) {
+            for (let r2 = 0; r2 < rows; r2++) { const i2 = r2 * cols + c2; if (isC(o2[i2])) { E2.add(i2); break; } }
+            for (let r2 = rows - 1; r2 >= 0; r2--) { const i2 = r2 * cols + c2; if (isC(o2[i2])) { E2.add(i2); break; } }
+          }
+          return E2;
+        };
+        for (;;) {
+          if (cap <= 0) break;
+          const E2 = exp2();
+          let t2 = -1;
+          for (const i2 of E2) if (o2[i2] === car.color) { t2 = i2; break; }
+          if (t2 < 0) break;
+          if (l2 && l2[t2] >= 0) { o2[t2] = l2[t2]; l2[t2] = -1; } else o2[t2] = -1;
+          cap--; eaten++;
+        }
+        return { eaten, leftover: cap };
+      };
+      const meta = fit.map((f) => { let eaten = 0, leftover = 0; for (const m of f.group) { const r2 = est(m); eaten += r2.eaten; leftover += r2.leftover; } return { f, eaten, leftover }; });
+      const clean = meta.filter((m) => m.leftover === 0 && m.eaten > 0);
+      const grpP = meta.filter((m) => m.f.group.length > 1 && m.eaten > 0);
+      const blk = freeBays >= 2 ? meta.filter((m) => m.eaten > 0) : [];
+      const dg = freeBays >= 2 ? meta.filter((m) => m.eaten === 0) : [];
+      const last = freeBays === 1 ? meta : [];
+      const tiers = [clean, grpP, blk, dg, last].filter((t2) => t2.length);
+      if (!tiers.length) return { win: false, plan, left: remaining };
+      let ti = 0;
+      while (ti < tiers.length - 1 && rng() < 0.15) ti++;
+      const tier = tiers[ti];
+      const pick = tier[Math.floor(rng() * tier.length)].f;
       plan.push("q" + pick.j);
       for (const m of pick.group) { for (const col of queue) { const k = col.indexOf(m); if (k >= 0) { col.splice(k, 1); break; } } }
       for (const m of pick.group) collect(m);
@@ -3974,11 +4008,12 @@ export class GameScene extends Phaser.Scene {
     }
     // (re)plan from the live state
     const base = this.captureSimState();
-    const K = 32;
+    this.guidePlanNonce++;
+    const K = 40;
     let bestWin: string[] | null = null;
     let bestEffort: { plan: string[]; left: number } | null = null;
     for (let t = 0; t < K; t++) {
-      const r = this.simRollout(base, (this.levelNum * 7919 + t * 137 + 11) >>> 0);
+      const r = this.simRollout(base, (this.levelNum * 7919 + this.guidePlanNonce * 104729 + t * 137 + 11) >>> 0);
       if (r.win) { if (!bestWin || r.plan.length < bestWin.length) bestWin = r.plan; }
       else if (!bestEffort || r.left < bestEffort.left) bestEffort = { plan: r.plan, left: r.left };
     }
