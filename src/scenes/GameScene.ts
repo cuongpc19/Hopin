@@ -3882,6 +3882,7 @@ export class GameScene extends Phaser.Scene {
     s: { cols: number; rows: number; occ: number[]; lay: number[] | null; queue: { color: number; cap: number; pid: number | null }[][]; parked: ({ color: number; cap: number; pid: number | null } | null)[] },
     seed: number,
     forceFirst?: string,
+    natural = false, // lối NGƯỜI: gần như không phá cách, trong nhóm chọn nước ăn nhiều nhất
   ): { win: boolean; plan: string[]; left: number } {
     const { cols, rows } = s;
     let x = (seed >>> 0) || 1;
@@ -4074,9 +4075,12 @@ export class GameScene extends Phaser.Scene {
       const tiers = [clean, grpP, blk, dg, last].filter((t) => t.length);
       if (!tiers.length) break;
       let ti = 0;
-      while (ti < tiers.length - 1 && rng() < 0.15) ti++;
+      const jumpP = natural ? 0.03 : 0.15;
+      while (ti < tiers.length - 1 && rng() < jumpP) ti++;
       const tier = tiers[ti];
-      const pick = tier[Math.floor(rng() * tier.length)];
+      const pick = natural
+        ? tier.reduce((a, b) => (b.eaten > a.eaten ? b : a))
+        : tier[Math.floor(rng() * tier.length)];
       plan.push("q" + pick.j);
       doLaunch(pick.j);
     }
@@ -4126,18 +4130,25 @@ export class GameScene extends Phaser.Scene {
     // nhỏ sớm rồi khoá 2 ô suốt ván (bài học ván L148 user thua dù theo guide 100%).
     // QUÉT THÍCH ỨNG: vòng nông M=9/ứng viên; level gắt (không thấy đường thắng) → quét sâu
     // thêm 21 seed/ứng viên trước khi chịu F — bám được cả level chỉ ~7% đường thắng như L148.
-    const runPass = (from: number, to: number, acc: Map<string, { wins: number; left: number; winPlan: string[] | null }>) => {
+    const runPass = (from: number, to: number, acc: Map<string, { wins: number; left: number; winPlan: string[] | null; natPlan?: string[] | null }>) => {
       for (const key of cands) {
-        const a = acc.get(key) || { wins: 0, left: 0, winPlan: null };
+        const a = acc.get(key) || { wins: 0, left: 0, winPlan: null, natPlan: null };
         for (let t = from; t < to; t++) {
-          const r = this.simRollout(base, (this.levelNum * 7919 + this.guidePlanNonce * 104729 + t * 137 + key.length * 31 + key.charCodeAt(key.length - 1) * 7 + 11) >>> 0, key);
-          if (r.win) { a.wins++; if (!a.winPlan || r.plan.length < a.winPlan.length) a.winPlan = r.plan; }
+          const nat = t < 3; // 3 seed đầu: lối NGƯỜI — ưu tiên ván thắng tự nhiên (user: nước đi phải giống người)
+          const r = this.simRollout(base, (this.levelNum * 7919 + this.guidePlanNonce * 104729 + t * 137 + key.length * 31 + key.charCodeAt(key.length - 1) * 7 + 11) >>> 0, key, nat);
+          if (r.win) {
+            a.wins++;
+            const better = nat && !a.natPlan ? true : !a.winPlan || r.plan.length < a.winPlan.length;
+            if (nat && (!a.natPlan || r.plan.length < a.natPlan.length)) a.natPlan = r.plan;
+            if (better && !a.natPlan) a.winPlan = r.plan;
+            if (!a.winPlan || r.plan.length < a.winPlan.length) a.winPlan = r.plan;
+          }
           a.left += r.left;
         }
         acc.set(key, a);
       }
     };
-    const acc = new Map<string, { wins: number; left: number; winPlan: string[] | null }>();
+    const acc = new Map<string, { wins: number; left: number; winPlan: string[] | null; natPlan?: string[] | null }>();
     runPass(0, 9, acc);
     if (![...acc.values()].some((a) => a.wins > 0)) runPass(9, 30, acc); // level gắt → quét sâu
     let best: { key: string; wins: number; left: number; winPlan: string[] | null } | null = null;
@@ -4156,7 +4167,8 @@ export class GameScene extends Phaser.Scene {
           if (this.groupOf(head2).some((m) => (cnt.get(m.chest.color) || 0) < 12)) adj = Math.max(0, adj - 2);
         }
       }
-      if (!best || adj > best.wins || (adj === best.wins && a.left < best.left)) best = { key, wins: adj, left: a.left, winPlan: a.winPlan };
+      const plan = a.natPlan || a.winPlan; // ưu tiên ván thắng LỐI NGƯỜI
+      if (!best || adj > best.wins || (adj === best.wins && a.left < best.left)) best = { key, wins: adj, left: a.left, winPlan: plan };
     }
     if (!best) return null;
     // LƯU trọn chuỗi thắng (user 2026-07-30: "hệ thống đã lưu thứ tự đi xe thế nào thì thắng k?")
