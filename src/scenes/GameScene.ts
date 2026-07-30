@@ -4443,7 +4443,26 @@ export class GameScene extends Phaser.Scene {
       // show its rope — the old centre-based check hid ropes on peeking twins, so the player
       // saw two linked cars with no rope (user 2026-07-30, L131). Clip on the car's TOP edge.
       const ropeClipY = this.invMaskBottom + this.chestSize / 2;
-      if (this.invMaskBottom > 0 && (a.container.y > ropeClipY || b.container.y > ropeClipY)) continue;
+      const aVis = !(this.invMaskBottom > 0 && a.container.y > ropeClipY);
+      const bVis = !(this.invMaskBottom > 0 && b.container.y > ropeClipY);
+      if (!aVis || !bVis) {
+        // One member visible, partner fully hidden (vertical pair at the viewport edge): draw a
+        // short rope STUB pointing at the hidden partner so the visible car never looks unlinked
+        // ("xe đôi không có dây" — user 2026-07-30); the full rope appears once both are on-screen.
+        const vis = aVis ? a : bVis ? b : null;
+        if (vis) {
+          const hid = vis === a ? b : a;
+          const vx = vis.container.x, vy = vis.container.y;
+          const dx = hid.container.x - vx, dy = hid.container.y - vy;
+          const dd = Math.hypot(dx, dy) || 1; const ux2 = dx / dd, uy2 = dy / dd;
+          const r0 = (vis.carImg.displayWidth * (vis.container.scaleX || 1)) * 0.42;
+          const sx = vx + ux2 * r0, sy = vy + uy2 * r0;
+          g.lineStyle(6.5, 0xff9d5a, 0.85); g.lineBetween(sx, sy, sx + ux2 * 20, sy + uy2 * 20);
+          g.lineStyle(2.2, 0xffe9cf, 0.7); g.lineBetween(sx, sy, sx + ux2 * 20, sy + uy2 * 20);
+          g.fillStyle(0xfff3d0, 1); g.fillCircle(sx, sy, 5);
+        }
+        continue;
+      }
       const ax = a.container.x, ay = a.container.y;
       const bx = b.container.x, by = b.container.y;
       const dist = Phaser.Math.Distance.Between(ax, ay, bx, by);
