@@ -3251,6 +3251,7 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     this.playPop(); // cheerful "pop" as the car springs out of its bay
+    for (const m of group) (m as unknown as { _capOut?: number })._capOut = m.chest.count; // telemetry trip: seats khi ra ray
     if (!auto) { this.postLog({ ev: "bayTap", colors: group.map((m) => m.chest.color), counts: group.map((m) => m.chest.count), slot: slotIndex }); this.onGuideAction("bay" + slotIndex); } // slam: tapping a bay is the player's 2nd decision type
     for (const v of group) {
       const si = this.slots.indexOf(v);
@@ -4865,6 +4866,7 @@ export class GameScene extends Phaser.Scene {
 
   private leaveCar(view: ChestView) {
     if (view.left) return;
+    { const co = (view as unknown as { _capOut?: number })._capOut; if (co !== undefined) { this.postLog({ ev: "trip", color: view.chest.color, ate: co - view.chest.count, capLeft: view.chest.count, back: "left" }); (view as unknown as { _capOut?: number })._capOut = undefined; } }
     view.left = true;
     this.disarmBay(view); // stop any telegraph bob so its child tweens don't outlive the car
     const ai = this.active.findIndex((a) => a.view === view);
@@ -4896,6 +4898,8 @@ export class GameScene extends Phaser.Scene {
         if (act) { this.removeActive(act); m.waiting = false; }
       }
       for (const m of members) {
+        const co = (m as unknown as { _capOut?: number })._capOut;
+        if (co !== undefined) { this.postLog({ ev: "trip", color: m.chest.color, ate: co - m.chest.count, capLeft: m.chest.count, back: "slot" }); (m as unknown as { _capOut?: number })._capOut = undefined; }
         let si = m.traySlot;
         if (si == null || this.slots[si] !== m) si = this.slots.findIndex((s) => s === null || s === m);
         if (si >= 0) { this.slots[si] = m; m.traySlot = si; this.parkIntoSlot(m, si); }
