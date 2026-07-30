@@ -3837,22 +3837,145 @@ export class GameScene extends Phaser.Scene {
   }
 
   // ---- STEP GUIDE (user 2026-07-30) --------------------------------------------------
-  // Recommend the next move with the greedy-solver priority: (1) a parked bay car that can
-  // collect right now, (2) a launchable queue car/group whose colour is reachable, (3) dig —
-  // launch the front of the LONGEST column to reveal deeper cars. Points a bobbing 👇 at it.
+  // "Lấy kết quả của con bot thắng": from the CURRENT board/queue/bay state, fork-simulate each
+  // candidate move with the greedy solver — recommend the first move that opens a WINNING line.
+  // Falls back to the plain greedy priority when no simulated candidate wins (bot-unwinnable spots).
+
+  // Snapshot of the live game reduced to solver form. Cell colours come from the still-alive key
+  // sprites (this.keys) so collected cells read as empty; layer2 bottoms that are still hidden
+  // under a top tile are carried so the sim reveals them exactly like the game does.
+  private captureSimState() {
+    const cols = this.level.cols, rows = this.level.rows;
+    const occ = new Array(cols * rows).fill(-1);
+    for (let i = 0; i < cols * rows; i++) {
+      const k = this.keys[i];
+      if (k && k.scene) occ[i] = this.level.board[i];
+    }
+    // level.board/layer2 are mutated in place as tops are eaten (board[i] becomes the revealed
+    // bottom, layer2[i] flips to -1) — so board+layer2 already ARE the current truth.
+    const lay = this.level.layer2 ? this.level.layer2.map((v, i) => (v >= 0 && this.keys[i] && this.keys[i]!.scene ? v : -1)) : null;
+    const queue = this.invColumns.map((col) => col.filter((v) => v.container.scene).map((v) => ({ color: v.chest.color, cap: Math.max(0, v.chest.count - v.inFlight), pid: v.chest.pairId ?? null })));
+    const parked = this.slots.map((v) => (v ? { color: v.chest.color, cap: Math.max(0, v.chest.count - v.inFlight), pid: v.chest.pairId ?? null } : null));
+    return { cols, rows, occ, lay, queue, parked };
+  }
+
+  // Greedy playout from a solver-form state; returns true if it clears the board. Mirrors the
+  // Node-side solvable() priority: productive bay car → productive queue front (groups whole) →
+  // dig longest column → stuck=lose. Layer2-aware. Bounded steps.
+  private simPlayout(s: { cols: number; rows: number; occ: number[]; lay: number[] | null; queue: { color: number; cap: number; pid: number | null }[][]; parked: ({ color: number; cap: number; pid: number | null } | null)[] }): boolean {
+    const { cols, rows } = s;
+    const occ = s.occ.slice();
+    const lay = s.lay ? s.lay.slice() : null;
+    const queue = s.queue.map((c) => c.map((x) => ({ ...x })));
+    const parked: ({ color: number; cap: number; pid: number | null } | null)[] = s.parked.map((x) => (x ? { ...x } : null));
+    const isC = (v: number) => v >= 0 && v < 90;
+    let remaining = occ.reduce((a, v) => a + (isC(v) ? 1 : 0), 0) + (lay ? lay.reduce((a, v) => a + (v >= 0 ? 1 : 0), 0) : 0);
+    const clearCell = (i: number) => { if (lay && lay[i] >= 0) { occ[i] = lay[i]; lay[i] = -1; } else occ[i] = -1; remaining--; };
+    const exposed = (): Set<number> => {
+      const E = new Set<number>();
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) { const i = r * cols + c; if (isC(occ[i])) { E.add(i); break; } }
+        for (let c = cols - 1; c >= 0; c--) { const i = r * cols + c; if (isC(occ[i])) { E.add(i); break; } }
+      }
+      for (let c = 0; c < cols; c++) {
+        for (let r = 0; r < rows; r++) { const i = r * cols + c; if (isC(occ[i])) { E.add(i); break; } }
+        for (let r = rows - 1; r >= 0; r--) { const i = r * cols + c; if (isC(occ[i])) { E.add(i); break; } }
+      }
+      return E;
+    };
+    const collect = (car: { color: number; cap: number }) => {
+      for (;;) {
+        if (car.cap <= 0) return;
+        const E = exposed();
+        let t = -1;
+        for (const i of E) if (occ[i] === car.color) { t = i; break; }
+        if (t < 0) return;
+        clearCell(t); car.cap--;
+      }
+    };
+    const bays = parked.length;
+    let guard = 0;
+    while (remaining > 0 && guard++ < 400) {
+      const E = exposed();
+      const S = new Set<number>(); for (const i of E) S.add(occ[i]);
+      let acted = false;
+      // (1) productive bay car
+      for (let i = 0; i < bays; i++) {
+        const p = parked[i];
+        if (p && p.cap > 0 && S.has(p.color)) { collect(p); if (p.cap === 0) parked[i] = null; acted = true; break; }
+      }
+      if (acted) continue;
+      const freeBays = parked.filter((x) => x === null).length;
+      // (2) productive queue front (a pid group launches whole and needs a bay per member)
+      const fronts: { j: number; group: { color: number; cap: number; pid: number | null }[] }[] = [];
+      for (let j = 0; j < queue.length; j++) {
+        const f = queue[j][0]; if (!f) continue;
+        if (f.pid == null) { fronts.push({ j, group: [f] }); continue; }
+        // group: gather members across fronts/own column prefix
+        const members: { color: number; cap: number; pid: number | null }[] = [];
+        let okG = true;
+        for (let jj = 0; jj < queue.length; jj++) {
+          for (let r = 0; r < queue[jj].length; r++) {
+            const c = queue[jj][r];
+            if (c.pid === f.pid) { if (queue[jj].slice(0, r).some((x) => x.pid !== f.pid)) okG = false; members.push(c); }
+          }
+        }
+        if (okG && members.length >= 2) fronts.push({ j, group: members });
+      }
+      const seenPid = new Set<number>();
+      const uniq = fronts.filter((f) => { const pid = f.group[0].pid; if (pid == null) return true; if (seenPid.has(pid)) return false; seenPid.add(pid); return true; });
+      const prod = uniq.filter((f) => f.group.some((m) => m.cap > 0 && S.has(m.color)) && freeBays >= f.group.length);
+      if (prod.length) {
+        const pick = prod[0];
+        for (const m of pick.group) { // remove from queue
+          for (const col of queue) { const k = col.indexOf(m); if (k >= 0) { col.splice(k, 1); break; } }
+        }
+        for (const m of pick.group) collect(m);
+        for (const m of pick.group) if (m.cap > 0) { const slot = parked.indexOf(null); if (slot >= 0) parked[slot] = m; else return false; }
+        continue;
+      }
+      // (3) dig: longest column's solo front into a free bay
+      if (freeBays > 0) {
+        let bj = -1, bl = -1;
+        for (let j = 0; j < queue.length; j++) { const f = queue[j][0]; if (f && f.pid == null && queue[j].length > bl) { bl = queue[j].length; bj = j; } }
+        if (bj >= 0) {
+          const car = queue[bj].shift()!;
+          collect(car);
+          if (car.cap > 0) { const slot = parked.indexOf(null); if (slot >= 0) parked[slot] = car; }
+          continue;
+        }
+        // only groups left: send one whole if it fits
+        const g = uniq.find((f) => f.group[0].pid != null && freeBays >= f.group.length);
+        if (g) {
+          for (const m of g.group) { for (const col of queue) { const k = col.indexOf(m); if (k >= 0) { col.splice(k, 1); break; } } }
+          for (const m of g.group) collect(m);
+          for (const m of g.group) if (m.cap > 0) { const slot = parked.indexOf(null); if (slot >= 0) parked[slot] = m; else return false; }
+          continue;
+        }
+      }
+      return false; // no move
+    }
+    return remaining === 0;
+  }
+
   private computeGuideTarget(): { key: string; x: number; y: number } | null {
     if (!this.slamMode) return null;
+    // only advise on a QUIET board (no cars mid-flight) — the sim snapshot is exact then
+    if (this.active.length > 0 || this.pending.length > 0) return null;
     const freeSlots = this.slots.reduce((n, s) => n + (s ? 0 : 1), 0);
-    // (1) bay car that can collect
+    const base = this.captureSimState();
+    type Cand = { key: string; x: number; y: number };
+    const cands: Cand[] = [];
+    // bay taps
     for (let i = 0; i < this.slots.length; i++) {
       const v = this.slots[i];
-      if (v && this.carCanCollect(v)) return { key: "bay" + i, x: v.container.x, y: v.container.y };
+      if (!v || !this.carCanCollect(v)) continue;
+      cands.push({ key: "bay" + i, x: v.container.x, y: v.container.y });
     }
-    // launchable queue heads (front-prefix + fits bays + ray room)
-    const heads: { view: ChestView; group: ChestView[]; col: ChestView[] }[] = [];
+    // queue heads (launchable)
     const seen = new Set<ChestView>();
-    for (const col of this.invColumns) {
-      const head = col[0];
+    for (let j = 0; j < this.invColumns.length; j++) {
+      const head = this.invColumns[j][0];
       if (!head || !head.container.scene || seen.has(head)) continue;
       const group = this.groupOf(head);
       group.forEach((m) => seen.add(m));
@@ -3861,20 +3984,63 @@ export class GameScene extends Phaser.Scene {
         const p = this.findInInventory(m);
         if (!p || !p.col.slice(0, p.r).every((c) => group.includes(c))) { ok = false; break; }
       }
-      if (!ok) continue;
-      if (freeSlots < group.length || this.active.length + this.pending.length + group.length > MAX_ON_TRACK) continue;
-      heads.push({ view: head, group, col });
+      if (!ok || freeSlots < group.length || this.active.length + this.pending.length + group.length > MAX_ON_TRACK) continue;
+      cands.push({ key: "q" + j + ":" + head.chest.color, x: head.container.x, y: head.container.y });
     }
-    // (2) productive queue launch (some member's colour reachable)
-    const prod = heads.filter((h) => h.group.some((m) => (m.chest.kind ?? "color") === "color" && this.reachableColors.has(m.chest.color)));
-    if (prod.length) { const t = prod[0].view; return { key: "q" + t.chest.color + ":" + t.container.x, x: t.container.x, y: t.container.y }; }
-    // (3) dig: the longest column's front (reveals the most)
-    if (heads.length) {
-      heads.sort((a, b) => b.col.length - a.col.length);
-      const t = heads[0].view;
-      return { key: "dig" + t.chest.color + ":" + t.container.x, x: t.container.x, y: t.container.y };
+    if (!cands.length) return null;
+    // FORK: for each candidate, apply its first move on a copy then greedy-playout; prefer a WINNER.
+    const applyFirst = (st: ReturnType<GameScene["captureSimState"]>, key: string): typeof st => {
+      const s2 = { ...st, occ: st.occ.slice(), lay: st.lay ? st.lay.slice() : null, queue: st.queue.map((c) => c.map((x) => ({ ...x }))), parked: st.parked.map((x) => (x ? { ...x } : null)) };
+      if (key.startsWith("bay")) {
+        const i = parseInt(key.slice(3), 10);
+        const p = s2.parked[i];
+        if (p) { this.simCollectInto(s2, p); if (p.cap === 0) s2.parked[i] = null; }
+      } else {
+        const j = parseInt(key.slice(1), 10);
+        const f = s2.queue[j] && s2.queue[j][0];
+        if (f) {
+          const members = f.pid == null ? [f] : s2.queue.flat().filter((c) => c.pid === f.pid);
+          for (const m of members) { for (const col of s2.queue) { const k = col.indexOf(m); if (k >= 0) { col.splice(k, 1); break; } } }
+          for (const m of members) this.simCollectInto(s2, m);
+          for (const m of members) if (m.cap > 0) { const slot = s2.parked.indexOf(null); if (slot >= 0) s2.parked[slot] = m; }
+        }
+      }
+      return s2;
+    };
+    let winner: Cand | null = null;
+    for (const c of cands) {
+      const st = applyFirst(base, c.key);
+      if (this.simPlayout(st)) { winner = c; break; }
     }
-    return null;
+    const pick = winner ?? cands[0]; // no simulated win → best-effort first candidate
+    return { key: (winner ? "W" : "F") + pick.key, x: pick.x, y: pick.y };
+  }
+
+  // Collect helper on solver-form state (mirrors simPlayout's collect + layer2 reveal).
+  private simCollectInto(st: { cols: number; rows: number; occ: number[]; lay: number[] | null }, car: { color: number; cap: number }) {
+    const { cols, rows } = st;
+    const isC = (v: number) => v >= 0 && v < 90;
+    const exposed = (): Set<number> => {
+      const E = new Set<number>();
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) { const i = r * cols + c; if (isC(st.occ[i])) { E.add(i); break; } }
+        for (let c = cols - 1; c >= 0; c--) { const i = r * cols + c; if (isC(st.occ[i])) { E.add(i); break; } }
+      }
+      for (let c = 0; c < cols; c++) {
+        for (let r = 0; r < rows; r++) { const i = r * cols + c; if (isC(st.occ[i])) { E.add(i); break; } }
+        for (let r = rows - 1; r >= 0; r--) { const i = r * cols + c; if (isC(st.occ[i])) { E.add(i); break; } }
+      }
+      return E;
+    };
+    for (;;) {
+      if (car.cap <= 0) return;
+      const E = exposed();
+      let t = -1;
+      for (const i of E) if (st.occ[i] === car.color) { t = i; break; }
+      if (t < 0) return;
+      if (st.lay && st.lay[t] >= 0) { st.occ[t] = st.lay[t]; st.lay[t] = -1; } else st.occ[t] = -1;
+      car.cap--;
+    }
   }
 
   private clearGuidePointer() {
