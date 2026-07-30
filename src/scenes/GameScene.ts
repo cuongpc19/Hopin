@@ -311,6 +311,8 @@ export class GameScene extends Phaser.Scene {
   private guideRing?: Phaser.GameObjects.Arc;
   private guideKey = ""; // identity of the current suggestion (avoid re-tweening every frame)
   private guideAt = 0;   // last recompute time (throttle)
+  private guidePlan: string[] | null = null; // the winning move sequence being replayed step by step
+  private guidePlanWinning = false;          // plan came from a WINNING rollout (vs best-effort)
   private tutBooster?: { list: BoosterDef[]; idx: number; key: string }; // active booster tutorial
 
   private signalCount?: Phaser.GameObjects.Text; // "N/5" on the start-signal's green light
@@ -440,7 +442,7 @@ export class GameScene extends Phaser.Scene {
     this.levelNum = levelNum;
     this.playLog = []; this.playStart = (typeof performance !== "undefined" ? performance.now() : 0); this.peakUsed = 0;
     try { this.guideMode = localStorage.getItem("hopin_guide") === "1"; } catch { this.guideMode = false; }
-    this.guideKey = ""; this.guideHand = undefined; this.guideRing = undefined;
+    this.guideKey = ""; this.guideHand = undefined; this.guideRing = undefined; this.guidePlan = null; this.guidePlanWinning = false;
     if (typeof window !== "undefined") { (window as any).hopLog = () => console.log(localStorage.getItem("hopin_playlog") || "[]"); (window as any).hopLogClear = () => localStorage.removeItem("hopin_playlog"); }
     // "start" streams AFTER makeLevel below (needs this.level); see the postLog("start") call there.
     this.children.removeAll();
@@ -3160,6 +3162,7 @@ export class GameScene extends Phaser.Scene {
       const launchEv = { ev: "launch", t: Math.round((typeof performance !== "undefined" ? performance.now() : 0) - this.playStart), colors: group.map((v) => v.chest.color), counts: group.map((v) => v.chest.count), buried: group.some((v) => !!(v.chest as unknown as { buried?: boolean }).buried), freeSlotsBefore: freeSlots, onRay: this.active.length + this.pending.length, twin: group.length > 1 };
       this.playLog.push(launchEv);
       this.postLog(launchEv);
+      { const p0 = this.findInInventory(group[0]); if (p0) this.onGuideAction("q" + this.invColumns.indexOf(p0.col)); } // guide plan: player launched column j
       for (const v of group) {
         const p = this.findInInventory(v)!;
         p.col.splice(p.r, 1);
@@ -3247,7 +3250,7 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     this.playPop(); // cheerful "pop" as the car springs out of its bay
-    if (!auto) this.postLog({ ev: "bayTap", colors: group.map((m) => m.chest.color), counts: group.map((m) => m.chest.count), slot: slotIndex }); // slam: tapping a bay is the player's 2nd decision type
+    if (!auto) { this.postLog({ ev: "bayTap", colors: group.map((m) => m.chest.color), counts: group.map((m) => m.chest.count), slot: slotIndex }); this.onGuideAction("bay" + slotIndex); } // slam: tapping a bay is the player's 2nd decision type
     for (const v of group) {
       const si = this.slots.indexOf(v);
       // TRAY mode: the car darts out to collect but its bay stays RESERVED (slots[si]
@@ -3865,11 +3868,14 @@ export class GameScene extends Phaser.Scene {
   // Randomised bay-aware ROLLOUT from a solver-form state ("lấy kết quả của con bot thắng"):
   // play to the end with light random tie-breaking; return whether it WON and the FIRST move
   // it made. computeGuideTarget runs many seeds and advises the first move of a winning line.
+  // Randomised bay-aware ROLLOUT from a solver-form state. Plays to the end with light random
+  // tie-breaking and records the FULL move sequence — one entry per player tap ("bay<i>" = tap the
+  // parked car in slot i, "q<j>" = launch the front of queue column j). Returns win + plan + how
+  // much was left uneaten (for best-effort ranking when nothing wins).
   private simRollout(
     s: { cols: number; rows: number; occ: number[]; lay: number[] | null; queue: { color: number; cap: number; pid: number | null }[][]; parked: ({ color: number; cap: number; pid: number | null } | null)[] },
     seed: number,
-    forceFirst?: string,
-  ): { win: boolean; first: string | null } {
+  ): { win: boolean; plan: string[]; left: number } {
     const { cols, rows } = s;
     let x = (seed >>> 0) || 1;
     const rng = () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 0xffffffff; };
@@ -3902,28 +3908,26 @@ export class GameScene extends Phaser.Scene {
         clearCell(t); car.cap--;
       }
     };
-    let first: string | null = null;
+    const plan: string[] = [];
     let guard = 0;
     while (remaining > 0 && guard++ < 500) {
-      // every productive BAY car eats (loop — one reveal can open another)
+      // a productive BAY car = one tap each (slam never auto-launches bays)
       let any = true;
-      while (any) {
+      while (any && remaining > 0) {
         any = false;
         const E = exposed(); const S = new Set<number>(); for (const i of E) S.add(occ[i]);
         for (let i = 0; i < parked.length; i++) {
           const p = parked[i];
           if (p && p.cap > 0 && S.has(p.color)) {
-            if (!first) first = "bay" + i;
+            plan.push("bay" + i);
             collect(p); if (p.cap === 0) parked[i] = null;
             any = true; break;
           }
         }
-        if (forceFirst && !first) break; // a forced first move must be the queue move below
       }
       if (remaining === 0) break;
       const E = exposed(); const S = new Set<number>(); for (const i of E) S.add(occ[i]);
       const freeBays = parked.filter((p) => p === null).length;
-      // queue candidates (groups whole, front-prefix)
       const fronts: { j: number; group: { color: number; cap: number; pid: number | null }[] }[] = [];
       for (let j = 0; j < queue.length; j++) {
         const f = queue[j][0]; if (!f) continue;
@@ -3936,120 +3940,84 @@ export class GameScene extends Phaser.Scene {
       const seenPid = new Set<number>();
       const uniq = fronts.filter((f) => { const pid = f.group[0].pid; if (pid == null) return true; if (seenPid.has(pid)) return false; seenPid.add(pid); return true; });
       const fit = uniq.filter((f) => freeBays >= f.group.length);
-      if (!fit.length) return { win: false, first };
-      let pick: { j: number; group: { color: number; cap: number; pid: number | null }[] } | undefined;
-      if (forceFirst && !first) {
-        // honour the forced first move (either a bay tap handled by caller-prepared state, or q<j>)
-        if (forceFirst.startsWith("q")) {
-          const j = parseInt(forceFirst.slice(1), 10);
-          pick = fit.find((f) => f.j === j);
-          if (!pick) return { win: false, first: null }; // forced move not available
-        }
-      }
-      if (!pick) {
-        const prods = fit.filter((f) => f.group.some((m) => m.cap > 0 && S.has(m.color)));
-        const digs = fit.filter((f) => !f.group.some((m) => m.cap > 0 && S.has(m.color)));
-        const opts: { f: typeof fit[number]; w: number }[] = [];
-        for (const f of prods) opts.push({ f, w: freeBays >= 2 ? 8 : 3 });
-        for (const f of digs) opts.push({ f, w: (freeBays >= 2 ? 2 : 0.5) + (f.group.length === 1 ? queue[f.j].length / 10 : 0) });
-        let sum = 0; for (const o of opts) sum += o.w;
-        let r = rng() * sum; pick = opts[0].f;
-        for (const o of opts) { r -= o.w; if (r <= 0) { pick = o.f; break; } }
-      }
-      if (!first) first = "q" + pick.j + ":" + pick.group[0].color;
+      if (!fit.length) return { win: false, plan, left: remaining };
+      const prods = fit.filter((f) => f.group.some((m) => m.cap > 0 && S.has(m.color)));
+      const digs = fit.filter((f) => !f.group.some((m) => m.cap > 0 && S.has(m.color)));
+      const opts: { f: typeof fit[number]; w: number }[] = [];
+      for (const f of prods) opts.push({ f, w: freeBays >= 2 ? 8 : 3 });
+      for (const f of digs) opts.push({ f, w: (freeBays >= 2 ? 2 : 0.5) + (f.group.length === 1 ? queue[f.j].length / 10 : 0) });
+      let sum = 0; for (const o of opts) sum += o.w;
+      let r = rng() * sum; let pick = opts[0].f;
+      for (const o of opts) { r -= o.w; if (r <= 0) { pick = o.f; break; } }
+      plan.push("q" + pick.j);
       for (const m of pick.group) { for (const col of queue) { const k = col.indexOf(m); if (k >= 0) { col.splice(k, 1); break; } } }
       for (const m of pick.group) collect(m);
       for (const m of pick.group) if (m.cap > 0) { const slot = parked.indexOf(null); if (slot >= 0) parked[slot] = m; }
     }
-    return { win: remaining === 0, first };
+    return { win: remaining === 0, plan, left: remaining };
   }
 
+  // Build (or reuse) the guide PLAN — the full winning move sequence — and return the CURRENT
+  // step's target. "Đường tối ưu nhất": among K winning rollouts pick the SHORTEST plan (fewest
+  // taps); with no winner, the rollout that left the least uneaten. The plan is computed ONCE and
+  // replayed step by step; it re-plans only when the player deviates (onGuideAction clears it) or
+  // the current step is no longer valid. Deterministic seeds → no flicker.
   private computeGuideTarget(): { key: string; x: number; y: number } | null {
     if (!this.slamMode) return null;
-    // only advise on a QUIET board (no cars mid-flight) — the sim snapshot is exact then
-    if (this.active.length > 0 || this.pending.length > 0) return null;
-    const freeSlots = this.slots.reduce((n, s) => n + (s ? 0 : 1), 0);
+    if (this.active.length > 0 || this.pending.length > 0) return null; // advise on a quiet board only
+    // current step still valid? → keep pointing at it
+    const step = this.guidePlan && this.guidePlan.length ? this.guidePlan[0] : null;
+    if (step) {
+      const t = this.guideStepTarget(step);
+      if (t) return t;
+      this.guidePlan = null; // stale step → re-plan
+    }
+    // (re)plan from the live state
     const base = this.captureSimState();
-    type Cand = { key: string; x: number; y: number };
-    const cands: Cand[] = [];
-    for (let i = 0; i < this.slots.length; i++) {
-      const v = this.slots[i];
-      if (!v || !this.carCanCollect(v)) continue;
-      cands.push({ key: "bay" + i, x: v.container.x, y: v.container.y });
+    const K = 32;
+    let bestWin: string[] | null = null;
+    let bestEffort: { plan: string[]; left: number } | null = null;
+    for (let t = 0; t < K; t++) {
+      const r = this.simRollout(base, (this.levelNum * 7919 + t * 137 + 11) >>> 0);
+      if (r.win) { if (!bestWin || r.plan.length < bestWin.length) bestWin = r.plan; }
+      else if (!bestEffort || r.left < bestEffort.left) bestEffort = { plan: r.plan, left: r.left };
     }
-    const seen = new Set<ChestView>();
-    for (let j = 0; j < this.invColumns.length; j++) {
-      const head = this.invColumns[j][0];
-      if (!head || !head.container.scene || seen.has(head)) continue;
-      const group = this.groupOf(head);
-      group.forEach((m) => seen.add(m));
-      let ok = true;
-      for (const m of group) {
-        const p = this.findInInventory(m);
-        if (!p || !p.col.slice(0, p.r).every((c) => group.includes(c))) { ok = false; break; }
-      }
-      if (!ok || freeSlots < group.length || this.active.length + this.pending.length + group.length > MAX_ON_TRACK) continue;
-      cands.push({ key: "q" + j + ":" + head.chest.color, x: head.container.x, y: head.container.y });
-    }
-    if (!cands.length) return null;
-    // A bay tap is always "productive by definition" here (carCanCollect gated) — any winning
-    // rollout that STARTS by eating from a bay will report first="bay<i>". Strategy:
-    //  1. STICKY: if the previous advice is still a candidate, try a few rollouts honouring it.
-    //  2. Run up to ~24 free rollouts; the first WINNING line's first move becomes the advice.
-    //  3. No winner → fallback: previous advice if still valid, else first candidate.
-    const prevKey = this.guideKey.replace(/^[WF]/, "");
-    const prev = cands.find((c) => c.key === prevKey);
-    const baySeed = (this.time.now | 0) ^ 0x9e3779b9;
-    if (prev) {
-      for (let t = 0; t < 6; t++) {
-        const force = prev.key.startsWith("q") ? "q" + parseInt(prev.key.slice(1), 10) : undefined;
-        const st = prev.key.startsWith("bay") ? this.applyBayFirst(base, parseInt(prev.key.slice(3), 10)) : base;
-        const r = this.simRollout(st, baySeed + t * 101, force);
-        if (r.win) return { key: "W" + prev.key, x: prev.x, y: prev.y };
-      }
-    }
-    for (let t = 0; t < 24; t++) {
-      const r = this.simRollout(base, baySeed + 7919 + t * 137);
-      if (r.win && r.first) {
-        const c = cands.find((cc) => cc.key === r.first || (r.first!.startsWith("q") && cc.key.startsWith("q" + r.first!.slice(1).split(":")[0] + ":")));
-        if (c) return { key: "W" + c.key, x: c.x, y: c.y };
-      }
-    }
-    if (prev) return { key: "F" + prev.key, x: prev.x, y: prev.y };
-    const pick = cands[0];
-    return { key: "F" + pick.key, x: pick.x, y: pick.y };
+    const chosen = bestWin ?? (bestEffort ? bestEffort.plan : null);
+    if (!chosen || !chosen.length) return null;
+    this.guidePlan = chosen.slice();
+    this.guidePlanWinning = !!bestWin;
+    const t0 = this.guideStepTarget(this.guidePlan[0]);
+    if (!t0) { this.guidePlan = null; return null; }
+    return t0;
   }
 
-  // Clone the state with bay car <i> having eaten everything it currently can (a forced bay-tap
-  // first move for the sticky check).
-  private applyBayFirst(st: ReturnType<GameScene["captureSimState"]>, i: number): ReturnType<GameScene["captureSimState"]> {
-    const s2 = { ...st, occ: st.occ.slice(), lay: st.lay ? st.lay.slice() : null, queue: st.queue.map((c) => c.map((m) => ({ ...m }))), parked: st.parked.map((p) => (p ? { ...p } : null)) };
-    const p = s2.parked[i];
-    if (!p) return s2;
-    const isC = (v: number) => v >= 0 && v < 90;
-    const exposed = (): Set<number> => {
-      const E = new Set<number>();
-      for (let r = 0; r < s2.rows; r++) {
-        for (let c = 0; c < s2.cols; c++) { const k = r * s2.cols + c; if (isC(s2.occ[k])) { E.add(k); break; } }
-        for (let c = s2.cols - 1; c >= 0; c--) { const k = r * s2.cols + c; if (isC(s2.occ[k])) { E.add(k); break; } }
-      }
-      for (let c = 0; c < s2.cols; c++) {
-        for (let r = 0; r < s2.rows; r++) { const k = r * s2.cols + c; if (isC(s2.occ[k])) { E.add(k); break; } }
-        for (let r = s2.rows - 1; r >= 0; r--) { const k = r * s2.cols + c; if (isC(s2.occ[k])) { E.add(k); break; } }
-      }
-      return E;
-    };
-    for (;;) {
-      if (p.cap <= 0) break;
-      const E = exposed();
-      let t = -1;
-      for (const k of E) if (s2.occ[k] === p.color) { t = k; break; }
-      if (t < 0) break;
-      if (s2.lay && s2.lay[t] >= 0) { s2.occ[t] = s2.lay[t]; s2.lay[t] = -1; } else s2.occ[t] = -1;
-      p.cap--;
+  // Map a plan step to its on-screen target; null when the step no longer matches the live state.
+  private guideStepTarget(step: string): { key: string; x: number; y: number } | null {
+    const tag = this.guidePlanWinning ? "W" : "F";
+    if (step.startsWith("bay")) {
+      const i = parseInt(step.slice(3), 10);
+      const v = this.slots[i];
+      if (!v || !this.carCanCollect(v)) return null;
+      return { key: tag + "bay" + i, x: v.container.x, y: v.container.y };
     }
-    if (p.cap === 0) s2.parked[i] = null;
-    return s2;
+    const j = parseInt(step.slice(1), 10);
+    const head = this.invColumns[j] && this.invColumns[j][0];
+    if (!head || !head.container.scene) return null;
+    const group = this.groupOf(head);
+    for (const m of group) {
+      const p = this.findInInventory(m);
+      if (!p || !p.col.slice(0, p.r).every((c) => group.includes(c))) return null;
+    }
+    const freeSlots = this.slots.reduce((n, s) => n + (s ? 0 : 1), 0);
+    if (freeSlots < group.length || this.active.length + this.pending.length + group.length > MAX_ON_TRACK) return null;
+    return { key: tag + "q" + j, x: head.container.x, y: head.container.y };
+  }
+
+  // Called from the tap handlers: advance the plan when the player follows it, drop it otherwise.
+  private onGuideAction(action: string) {
+    if (!this.guidePlan || !this.guidePlan.length) return;
+    if (this.guidePlan[0] === action) this.guidePlan.shift();
+    else this.guidePlan = null; // deviated → re-plan on the next quiet frame
   }
   private clearGuidePointer() {
     if (this.guideHand) { this.tweens.killTweensOf(this.guideHand); this.guideHand.destroy(); this.guideHand = undefined; }
