@@ -218,6 +218,14 @@
         <div class="palette" id="palette"></div>
       </div>
 
+      <div class="row" style="margin-top:10px;">
+        <label>Màu nền hiện tại:</label>
+        <span id="bgSwatch" style="display:inline-block;width:22px;height:22px;border-radius:6px;border:1px solid #555;vertical-align:middle;"></span>
+        <span id="bgLabel" class="hint"></span>
+        <div class="spacer"></div>
+        <button id="bgRecolor" title="Tô lại toàn bộ nền (vùng lan từ mép bảng) theo Màu vẽ đang chọn">Tô nền = màu vẽ</button>
+      </div>
+
       <div class="board-wrap"><div id="board"></div></div>
       <p class="hint">Click hoặc kéo để vẽ ô chìa. Chọn ô tẩy (⌫) để xoá ô về trống. Mỗi ô màu = 1 chìa khoá.</p>
     </div>
@@ -972,10 +980,60 @@ function renderOutput() {
 }
 
 // ---- Master refresh ----
-function refresh() { renderValidation(); renderOutput(); }
+// ---- Background colour: detect + show + recolour ----
+// The "nền/viền" is whatever fills the board's outer ring (a picture bg floods the margins).
+// So the current background = the majority colour among the border cells (may be EMPTY).
+function borderCellIdx() {
+  const s = [];
+  for (let c = 0; c < cols; c++) { s.push(c); s.push((rows - 1) * cols + c); }
+  for (let r = 1; r < rows - 1; r++) { s.push(r * cols); s.push(r * cols + cols - 1); }
+  return s;
+}
+function detectBgId() {
+  const tally = {};
+  for (const i of borderCellIdx()) { const v = board[i]; tally[v] = (tally[v] || 0) + 1; }
+  let best = EMPTY, bn = -1;
+  for (const k in tally) if (tally[k] > bn) { bn = tally[k]; best = +k; }
+  return best;
+}
+function updateBgReadout() {
+  const bg = detectBgId();
+  const sw = document.getElementById("bgSwatch");
+  const lb = document.getElementById("bgLabel");
+  if (!sw || !lb) return;
+  if (bg === EMPTY) {
+    sw.style.background = "repeating-linear-gradient(45deg,#444 0 6px,#222 6px 12px)";
+    lb.textContent = "Trống (nhân vật nổi trên nền cỏ game)";
+  } else {
+    sw.style.background = COLORS[bg] ? COLORS[bg].hex : "#000";
+    lb.textContent = `${bg} · ${COLORS[bg] ? COLORS[bg].name : "?"}`;
+  }
+}
+// Flood-fill the background region (from the border, over cells matching the current bg)
+// and repaint it to `toId` — so only the real background changes, not same-colour subject cells.
+function recolorBackground(toId) {
+  const bg = detectBgId();
+  if (toId === bg) return;
+  const seen = new Uint8Array(board.length);
+  const stack = [];
+  for (const i of borderCellIdx()) if (board[i] === bg && !seen[i]) { seen[i] = 1; stack.push(i); }
+  while (stack.length) {
+    const i = stack.pop();
+    board[i] = toId;
+    const r = Math.floor(i / cols), c = i % cols;
+    const nb = [];
+    if (r > 0) nb.push(i - cols); if (r < rows - 1) nb.push(i + cols);
+    if (c > 0) nb.push(i - 1); if (c < cols - 1) nb.push(i + 1);
+    for (const j of nb) if (!seen[j] && board[j] === bg) { seen[j] = 1; stack.push(j); }
+  }
+  renderBoard(); refresh();
+}
+
+function refresh() { renderValidation(); renderOutput(); updateBgReadout(); }
 
 // ---- Events ----
 document.getElementById("clear").onclick = () => { board.fill(EMPTY); renderBoard(); refresh(); };
+document.getElementById("bgRecolor").onclick = () => recolorBackground(paintColor);
 document.getElementById("autogen").onclick = autoGenerate;
 document.getElementById("addChest").onclick = () => { chests.push({ color: paintColor >= 0 ? paintColor : 0, count: 4 }); selected = chests.length - 1; renderChests(); refresh(); };
 document.getElementById("clearChests").onclick = () => { chests = []; selected = -1; renderChests(); refresh(); };
