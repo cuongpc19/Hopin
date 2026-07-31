@@ -36,15 +36,17 @@ const DESIGN = [
   { lvl: 12, target: 85, size: 31, K: 5, minxe: 16, maxxe: 80, twins: 1, img: "11_turtle_sea.png" },
   { lvl: 13, target: 95, size: 31, K: 11, minxe: 16, maxxe: 80, twins: 0, img: "7_dino_animals1.png" },
   { lvl: 14, target: 85, size: 31, K: 12, minxe: 16, maxxe: 80, twins: 1, img: "7_doll_toys.png" },
-  { lvl: 15, target: 50, size: 25, K: 12, minxe: 20, maxxe: 80, twins: 3, buried: 0.33, layer2: 0.3, img: "7_mushroom_heroes.png" },
+  // target 50→60 (user 2026-08-01)
+  { lvl: 15, target: 60, size: 25, K: 12, minxe: 20, maxxe: 80, twins: 3, buried: 0.33, layer2: 0.3, img: "7_mushroom_heroes.png" },
   { lvl: 16, target: 100, size: 31, K: 6, minxe: 16, maxxe: 80, twins: 1, img: "3_dino_animals2.png" },
   { lvl: 17, target: 93, size: 31, K: 5, minxe: 16, maxxe: 80, twins: 0, buried: 0.15, img: "3_dolphin_flashcard.png" },
   { lvl: 18, target: 90, size: 31, K: 8, minxe: 11, maxxe: 80, twins: 1, buried: 0.15, img: "7_cat_animals1.png" },
   { lvl: 19, target: 80, size: 31, K: 12, minxe: 11, maxxe: 80, twins: 0, buried: 0.2, img: "7_owl_animals1.png" },
-  // target 65→45 (user 2026-07-31): mốc khó giữa-game gắt hơn.
-  { lvl: 20, target: 45, size: 31, K: 9, minxe: 20, maxxe: 80, twins: 2, layer2: 0.3, buried: 0.25, img: "8_rainbow_flashcard.png" },
+  // target 65→45→55 (user 2026-08-01)
+  { lvl: 20, target: 55, size: 31, K: 9, minxe: 20, maxxe: 80, twins: 2, layer2: 0.3, buried: 0.25, img: "8_rainbow_flashcard.png" },
   { lvl: 21, target: 100, size: 31, K: 6, minxe: 16, maxxe: 80, twins: 0, hidden: 0.1, buried: 0.15, img: "3_lamp_objects.png" },
-  { lvl: 22, target: 85, size: 31, K: 10, minxe: 11, maxxe: 80, twins: 1, hidden: 0.1, buried: 0.2, img: "7_rainbow_animals2.png" },
+  // target 85→90 (user 2026-08-01)
+  { lvl: 22, target: 90, size: 31, K: 10, minxe: 11, maxxe: 80, twins: 1, hidden: 0.1, buried: 0.2, img: "7_rainbow_animals2.png" },
   // target 90→95 (user 2026-08-01): level GIỚI THIỆU đá cứng nên hiền — bỏ xe "?" (người
   // thật phóng hớ, sim không đo được), giảm ô ẩn, giữ tường T + 2 twin nhẹ.
   { lvl: 23, target: 95, size: 30, K: 7, minxe: 16, maxxe: 80, twins: 2, walls: "T", hidden: 0.06, img: "5_bus_heroes.png" },
