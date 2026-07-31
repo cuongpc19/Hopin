@@ -5855,7 +5855,7 @@ export class GameScene extends Phaser.Scene {
       // "+40" LUÔN cạnh xu như ảnh mẫu (WIN_GOLD — mọi ván thắng đều nhận)
       objs.push(
         this.add
-          .text(cx + 88, coinY + 34, `+${reward}`, { fontFamily: '"Lilita One", "Arial Black", Arial, sans-serif', fontSize: "34px", color: "#ffffff", stroke: "#7a5205", strokeThickness: 5 })
+          .text(cx + 92, coinY + 46, `+${reward}`, { fontFamily: '"Lilita One", "Arial Black", Arial, sans-serif', fontSize: "40px", color: "#ffffff", stroke: "#7a5205", strokeThickness: 6 })
           .setOrigin(0.5)
           .setDepth(403)
       );
