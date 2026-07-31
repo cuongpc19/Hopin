@@ -174,9 +174,12 @@
           <option value="light">🌕 Sáng</option>
         </select>
         <label style="margin-left:8px">Viền</label>
-        <select id="borderMode" title="Có viền = tô 1 khung chữ nhật màu sáng (tự chọn) lấp các ô trống bao quanh chủ thể; Không = chủ thể nổi trên nền cỏ">
+        <select id="borderMode" title="Có viền = tô 1 khung chữ nhật lấp các ô trống bao quanh chủ thể; Không = chủ thể nổi trên nền cỏ">
           <option value="off">Không viền</option>
           <option value="on">Có viền</option>
+        </select>
+        <select id="borderColor" title="Màu khung viền (khi Có viền) — Tự động = màu sáng tool tự chọn">
+          <option value="auto">Tự động (sáng)</option>
         </select>
         <span id="bgSwatch" style="display:inline-block;width:20px;height:20px;border-radius:5px;border:1px solid #555;vertical-align:middle;"></span>
         <div class="spacer"></div>
@@ -1033,6 +1036,7 @@ function updateBgReadout() {
   const lb = document.getElementById("bgLabel"); // optional
   const tg = document.getElementById("borderMode");
   if (tg) tg.value = borderId === EMPTY ? "off" : "on";
+  // borderColor stays enabled even when off, so you can set the DEFAULT colour beforehand.
   if (borderId === EMPTY) {
     if (sw) sw.style.background = "repeating-linear-gradient(45deg,#444 0 6px,#222 6px 12px)";
     if (lb) lb.textContent = "chủ thể nổi trên nền cỏ";
@@ -1046,9 +1050,35 @@ function refresh() { renderValidation(); renderOutput(); updateBgReadout(); }
 
 // ---- Events ----
 document.getElementById("clear").onclick = () => { board.fill(EMPTY); borderId = EMPTY; renderBoard(); refresh(); };
-// Có viền / Không viền: fill (auto-bright) or clear the subject's bounding rectangle.
+// Border colour picker: "Tự động" + every game colour (tinted). The chosen value is REMEMBERED
+// (localStorage) as your DEFAULT border colour for the next level (user 2026-08-01).
+const BORDER_PREF_KEY = "pf_ed_border";
+function fillBorderColorSelect() {
+  const sel = document.getElementById("borderColor");
+  if (!sel) return;
+  sel.innerHTML = '<option value="auto">Tự động (sáng)</option>';
+  for (let i = 0; i < BASE_N; i++) {
+    const o = document.createElement("option");
+    o.value = i; o.textContent = `${i} · ${BASE_COLORS[i].name}`;
+    o.style.background = BASE_COLORS[i].hex;
+    const [r, g, b] = hexToRgb(BASE_COLORS[i].hex);
+    o.style.color = (0.299 * r + 0.587 * g + 0.114 * b) < 140 ? "#fff" : "#111";
+    sel.appendChild(o);
+  }
+  try { sel.value = localStorage.getItem(BORDER_PREF_KEY) || "auto"; } catch { sel.value = "auto"; }
+}
+// The border colour to apply now: the picked game id, or an auto-bright pick.
+function chosenBorderId() {
+  const v = document.getElementById("borderColor").value;
+  return v === "auto" ? autoBrightBorderId() : +v;
+}
+// Có viền / Không viền: fill (chosen/auto colour) or clear the subject's bounding rectangle.
 document.getElementById("borderMode").onchange = (e) => {
-  applyBorder(e.target.value === "on" ? autoBrightBorderId() : EMPTY);
+  applyBorder(e.target.value === "on" ? chosenBorderId() : EMPTY);
+};
+document.getElementById("borderColor").onchange = (e) => {
+  try { localStorage.setItem(BORDER_PREF_KEY, e.target.value); } catch { /* ignore */ } // remember as default
+  if (document.getElementById("borderMode").value === "on") applyBorder(chosenBorderId()); // recolour live
 };
 document.getElementById("autogen").onclick = autoGenerate;
 document.getElementById("addChest").onclick = () => { chests.push({ color: paintColor >= 0 ? paintColor : 0, count: 4 }); selected = chests.length - 1; renderChests(); refresh(); };
@@ -1187,7 +1217,7 @@ document.getElementById("boardType").onchange = (e) => { lightBoard = e.target.v
 
 // ---- Boot ----
 loadDefault();
-syncBoardTypeUI();
+fillBorderColorSelect(); syncBoardTypeUI();
 renderPalette(); renderBoard(); renderChests(); refresh();
 initGameApi();
 </script>
