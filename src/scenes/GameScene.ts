@@ -5771,9 +5771,11 @@ export class GameScene extends Phaser.Scene {
     this.tweens.add({ targets: banner, alpha: 1, duration: 260 });
     this.tweens.add({ targets: bText, scale: 1, duration: 380, ease: "Back.out" });
 
-    // ---- XU VÀNG toả tia + "+N" (chỉ khi first-clear có thưởng) ----
+    // ---- XU VÀNG toả tia — LUÔN hiện như video (fix 2026-08-01 "chưa thấy coin":
+    // cả cụm từng nằm trong if(reward>0) nên CHƠI LẠI level cũ, reward=0, xu biến mất).
+    // Dòng "+N" vẫn chỉ hiện khi first-clear có thưởng.
     const coinY = cy + 16;
-    if (reward > 0) {
+    {
       const rays = this.add.graphics().setDepth(401);
       rays.setPosition(cx, coinY);
       rays.fillStyle(0xf5c542, 0.16);
@@ -5792,12 +5794,14 @@ export class GameScene extends Phaser.Scene {
       coin.setScale(cs * 0.2);
       this.tweens.add({ targets: coin, scaleX: cs, scaleY: cs, duration: 420, ease: "Back.out", delay: 160 });
       objs.push(coin);
-      objs.push(
-        this.add
-          .text(cx + 76, coinY + 30, `+${reward}`, { fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "30px", color: "#ffffff", stroke: "#7a5205", strokeThickness: 5 })
-          .setOrigin(0.5)
-          .setDepth(403)
-      );
+      if (reward > 0) {
+        objs.push(
+          this.add
+            .text(cx + 76, coinY + 30, `+${reward}`, { fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "30px", color: "#ffffff", stroke: "#7a5205", strokeThickness: 5 })
+            .setOrigin(0.5)
+            .setDepth(403)
+        );
+      }
     }
 
     // ---- khối sự kiện Cỏ May Mắn (panel tím như "New Feature Unlock" của video) ----
