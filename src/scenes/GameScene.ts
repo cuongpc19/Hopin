@@ -5626,10 +5626,10 @@ export class GameScene extends Phaser.Scene {
       this.startLevel(nextLevel);
     };
 
-    // nền: LEVEL đang chơi vẫn hiện RẤT MỜ sau lớp phủ tối (user 2026-08-01, như ảnh mẫu
-    // — không che đặc nữa, board ghost nhẹ phía sau)
+    // nền: LEVEL đang chơi chỉ còn THẤP THOÁNG sau lớp phủ tối 97% (user 2026-08-01
+    // "giảm sâu hơn nhiều nữa" — 0.92 vẫn còn rõ quá)
     const cover = this.add
-      .rectangle(cx, cy, GAME_W + 240, GAME_H + 240, 0x0d0d12, 0.92)
+      .rectangle(cx, cy, GAME_W + 240, GAME_H + 240, 0x0d0d12, 0.97)
       .setDepth(399);
     objs.push(cover);
     const dim = this.add.rectangle(cx, cy, GAME_W + 240, GAME_H + 240, 0x000000, 0.001).setDepth(400).setInteractive();
