@@ -275,7 +275,10 @@ if (FILL_BG) {
   // nhỏ chủ thể); tổng viền ≤30% board — vượt = ảnh KHÔNG ĐẠT (exit 2, caller đổi ảnh
   // gọn hơn); màu viền cấm trùng màu chủ thể SÁT ranh (8 hướng). bgId ở trên chỉ còn là
   // màu ƯU TIÊN đầu — adjacency ban vẫn thắng.
-  const prefer = [bgId, ...(levelLightBoard ? PREFER_LIGHT : PREFER_DARK).filter((c) => c !== bgId)];
+  // bgId=12 mặc định KHÔNG được dẫn đầu prefer nữa (viền 12 = tàng hình trên thảm tối);
+  // chỉ tôn trọng khi user ép BG_ID rõ ràng.
+  const seed = process.env.BG_ID != null && process.env.BG_ID !== "bright" ? [bgId] : [];
+  const prefer = [...seed, ...(levelLightBoard ? PREFER_LIGHT : PREFER_DARK).filter((c) => !seed.includes(c))];
   const bres = applyBoxBorder(board, BOARD_SIZE, BOARD_SIZE, { margin: SAFE_MARGIN, prefer });
   if (!bres.ok) {
     console.error(`✗ viền ${bres.cells} ô = ${bres.pct}% board > 30% — ảnh KHÔNG ĐẠT rule viền (chọn ảnh chủ thể đặc/gọn hơn; KHÔNG thu nhỏ chủ thể)`);

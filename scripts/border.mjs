@@ -7,10 +7,11 @@
 
 export const MAX_BORDER_PCT = 30;
 
-// Ưu tiên màu viền theo theme. Board tối: neutral tối trước (12 navy-đen, 14 kem, 10 xám
-// đậm...). Board sáng (lightBoard/dark-outline): màu sáng trước.
-export const PREFER_DARK = [12, 14, 10, 9, 11, 13, 15, 16];
-export const PREFER_LIGHT = [14, 8, 9, 15, 17, 12];
+// Ưu tiên màu viền theo theme. ⚠ CẤM navy-12 làm viền chữ nhật trên board tối: 12 TRÙNG màu
+// thảm nền → khung tàng hình + lỗ kín trong chủ thể thành "hố đen" (L20 cầu vồng, user
+// 2026-08-01 "hơi quái"). Khác thời phủ-kín cũ (§20 cho phép 12) — với khung NHỎ thì 12 vô nghĩa.
+export const PREFER_DARK = [14, 10, 9, 11, 13, 15, 16];
+export const PREFER_LIGHT = [14, 8, 9, 15, 17];
 
 /**
  * Áp viền chữ nhật lên board (mutate). Ô chủ thể = giá trị >= 0, trống = -1.
