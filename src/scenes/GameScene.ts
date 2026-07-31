@@ -5978,14 +5978,14 @@ export class GameScene extends Phaser.Scene {
 
     // ---- nút CLAIM xanh — BÉ lại như ảnh mẫu (2026-08-01) ----
     const cbw = Math.min(GAME_W - 180, 190);
-    const claim = this.add.graphics().setDepth(402);
-    claim.fillStyle(0x35c04a, 1);
-    claim.fillRoundedRect(cx - cbw / 2, claimY - 25, cbw, 50, 24);
-    claim.fillStyle(0x5fd873, 0.8); // gloss nửa trên
-    claim.fillRoundedRect(cx - cbw / 2 + 4, claimY - 21, cbw - 8, 21, 10);
-    claim.lineStyle(3, 0x1f8a33, 1);
-    claim.strokeRoundedRect(cx - cbw / 2, claimY - 25, cbw, 50, 24);
-    objs.push(claim);
+    const claimBtn = this.add.graphics().setDepth(402);
+    claimBtn.fillStyle(0x35c04a, 1);
+    claimBtn.fillRoundedRect(cx - cbw / 2, claimY - 25, cbw, 50, 24);
+    claimBtn.fillStyle(0x5fd873, 0.8); // gloss nửa trên
+    claimBtn.fillRoundedRect(cx - cbw / 2 + 4, claimY - 21, cbw - 8, 21, 10);
+    claimBtn.lineStyle(3, 0x1f8a33, 1);
+    claimBtn.strokeRoundedRect(cx - cbw / 2, claimY - 25, cbw, 50, 24);
+    objs.push(claimBtn);
     const cText = this.add
       .text(cx, claimY, "CLAIM", { fontFamily: '"Lilita One", "Arial Black", Arial, sans-serif', fontSize: "22px", color: "#ffffff", stroke: "#187029", strokeThickness: 4 })
       .setOrigin(0.5)
