@@ -18,7 +18,15 @@
          cached by the time Phaser boots — the splash then appears the instant the
          engine is ready instead of after a second round-trip. -->
     <link rel="preload" as="image" href="art/hopin.png" />
+    <!-- Font tròn-mập kiểu game (Lilita One, OFL) cho banner LEVEL COMPLETE!/CLAIM —
+         bundle nội bộ, preload + @font-face để canvas Phaser có sẵn lúc vẽ text. -->
+    <link rel="preload" as="font" type="font/ttf" href="fonts/LilitaOne.ttf" crossorigin />
     <style>
+      @font-face {
+        font-family: "Lilita One";
+        src: url("fonts/LilitaOne.ttf") format("truetype");
+        font-display: swap;
+      }
       html,
       body {
         margin: 0;

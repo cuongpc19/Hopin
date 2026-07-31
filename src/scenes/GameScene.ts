@@ -5649,14 +5649,38 @@ export class GameScene extends Phaser.Scene {
     const glow = this.add.ellipse(cx, heroCY + 54, 270, 60, 0xf5b52a, 0.28).setDepth(401);
     objs.push(glow);
     this.tweens.add({ targets: glow, scaleX: 1.12, alpha: 0.4, duration: 900, yoyo: true, repeat: -1, ease: "Sine.inOut" });
+    // Xe LUÔN màu VÀNG (id 2 — user 2026-08-01 "chọn luôn xe màu vàng, thêm độ chói");
+    // slime chỉ lấy các màu TƯƠI SÁNG có art mặt cười (bỏ xám/nâu/trắng đục).
     const pool = [...new Set(this.level.chests.map((c) => c.color).filter((c) => c >= 0 && c < 19))];
-    const facePool = pool.filter((c) => !this.missingSlime.has(c));
-    const slimeCols = facePool.length ? facePool : [0, 3, 4];
-    const carKey = this.textures.exists(`car-${pool[0] ?? 0}`) ? `car-${pool[0] ?? 0}` : "car-0";
+    const BRIGHT = [0, 1, 2, 3, 4, 5, 7, 17];
+    const facePool = pool.filter((c) => !this.missingSlime.has(c) && BRIGHT.includes(c));
+    const slimeCols = facePool.length ? facePool : [0, 3, 4].filter((c) => !this.missingSlime.has(c));
+    if (!slimeCols.length) slimeCols.push(0);
+    const carKey = this.textures.exists("car-2") ? "car-2" : "car-0";
     const car = this.add.image(cx, heroCY, carKey).setDepth(402);
     car.setScale(132 / Math.max(car.width, car.height));
     objs.push(car);
     this.tweens.add({ targets: car, y: heroCY - 5, duration: 640, yoyo: true, repeat: -1, ease: "Sine.inOut" });
+    // độ chói: vệt glint trắng loé trên thân xe theo nhịp
+    timers.push(
+      this.time.addEvent({
+        delay: 1300,
+        loop: true,
+        callback: () => {
+          if (closed) return;
+          const gx = car.x + (Math.random() * 70 - 35);
+          const gy = car.y + (Math.random() * 50 - 30);
+          const glint = this.add
+            .text(gx, gy, "✦", { fontSize: "22px", color: "#ffffff" })
+            .setOrigin(0.5)
+            .setDepth(404)
+            .setAlpha(0)
+            .setScale(0.3);
+          objs.push(glint);
+          this.tweens.add({ targets: glint, alpha: 0.95, scale: 1.1, duration: 170, yoyo: true, ease: "Sine.inOut", onComplete: () => glint.destroy() });
+        },
+      })
+    );
 
     // sao lấp lánh quanh hero (như video)
     timers.push(
@@ -5764,7 +5788,7 @@ export class GameScene extends Phaser.Scene {
     banner.setAlpha(0);
     objs.push(banner);
     const bText = this.add
-      .text(cx, bannerY, "LEVEL COMPLETE!", { fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "27px", color: "#ffffff", stroke: "#a35c05", strokeThickness: 4 })
+      .text(cx, bannerY, "LEVEL COMPLETE!", { fontFamily: '"Lilita One", "Arial Black", Arial, sans-serif', fontSize: "28px", color: "#ffffff", stroke: "#a35c05", strokeThickness: 5 })
       .setOrigin(0.5)
       .setDepth(403)
       .setScale(0.2);
@@ -5781,10 +5805,10 @@ export class GameScene extends Phaser.Scene {
       rays.setPosition(cx, coinY);
       for (let i = 0; i < 16; i++) {
         const a = (Math.PI * 2 * i) / 16;
-        const inner = 62;
-        const len = i % 2 === 0 ? 132 : 98; // dài-ngắn xen kẽ
+        const inner = 72;
+        const len = i % 2 === 0 ? 178 : 132; // dài-ngắn xen kẽ (2026-08-01: hào quang TO hơn nữa)
         const halfW = i % 2 === 0 ? 0.085 : 0.06; // nan mảnh
-        rays.fillStyle(0xffe08a, i % 2 === 0 ? 0.13 : 0.09);
+        rays.fillStyle(0xffe08a, i % 2 === 0 ? 0.14 : 0.1);
         rays.fillTriangle(
           Math.cos(a - halfW) * inner, Math.sin(a - halfW) * inner,
           Math.cos(a + halfW) * inner, Math.sin(a + halfW) * inner,
@@ -5793,11 +5817,13 @@ export class GameScene extends Phaser.Scene {
       }
       objs.push(rays);
       this.tweens.add({ targets: rays, angle: 360, duration: 30000, repeat: -1 });
-      const haloOut = this.add.circle(cx, coinY, 92, 0xf5c542, 0.09).setDepth(400);
-      const haloIn = this.add.circle(cx, coinY, 66, 0xffd76a, 0.16).setDepth(401);
-      objs.push(haloOut, haloIn);
-      this.tweens.add({ targets: haloOut, scale: 1.14, alpha: 0.15, duration: 1100, yoyo: true, repeat: -1, ease: "Sine.inOut" });
-      this.tweens.add({ targets: haloIn, scale: 1.1, alpha: 0.24, duration: 1100, yoyo: true, repeat: -1, ease: "Sine.inOut", delay: 550 });
+      const haloOut = this.add.circle(cx, coinY, 132, 0xf5c542, 0.11).setDepth(400);
+      const haloMid = this.add.circle(cx, coinY, 100, 0xffd76a, 0.13).setDepth(400);
+      const haloIn = this.add.circle(cx, coinY, 72, 0xffe090, 0.2).setDepth(401);
+      objs.push(haloOut, haloMid, haloIn);
+      this.tweens.add({ targets: haloOut, scale: 1.16, alpha: 0.17, duration: 1200, yoyo: true, repeat: -1, ease: "Sine.inOut" });
+      this.tweens.add({ targets: haloMid, scale: 1.12, alpha: 0.2, duration: 1200, yoyo: true, repeat: -1, ease: "Sine.inOut", delay: 400 });
+      this.tweens.add({ targets: haloIn, scale: 1.1, alpha: 0.3, duration: 1200, yoyo: true, repeat: -1, ease: "Sine.inOut", delay: 800 });
       const coin = this.add.image(cx, coinY, "coin-art").setDepth(402);
       const cs = 116 / Math.max(coin.width, coin.height);
       coin.setScale(cs * 0.2);
@@ -5806,7 +5832,7 @@ export class GameScene extends Phaser.Scene {
       if (reward > 0) {
         objs.push(
           this.add
-            .text(cx + 88, coinY + 34, `+${reward}`, { fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "32px", color: "#ffffff", stroke: "#7a5205", strokeThickness: 5 })
+            .text(cx + 88, coinY + 34, `+${reward}`, { fontFamily: '"Lilita One", "Arial Black", Arial, sans-serif', fontSize: "34px", color: "#ffffff", stroke: "#7a5205", strokeThickness: 5 })
             .setOrigin(0.5)
             .setDepth(403)
         );
@@ -5855,7 +5881,7 @@ export class GameScene extends Phaser.Scene {
     claim.strokeRoundedRect(cx - cbw / 2, claimY - 29, cbw, 58, 28);
     objs.push(claim);
     const cText = this.add
-      .text(cx, claimY, "CLAIM", { fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "24px", color: "#ffffff" })
+      .text(cx, claimY, "CLAIM", { fontFamily: '"Lilita One", "Arial Black", Arial, sans-serif', fontSize: "26px", color: "#ffffff", stroke: "#187029", strokeThickness: 4 })
       .setOrigin(0.5)
       .setDepth(403);
     objs.push(cText);

@@ -3,6 +3,14 @@ import { GameScene, GAME_W, GAME_H } from "./scenes/GameScene";
 import { SplashScene } from "./scenes/SplashScene";
 import { LevelSelectScene } from "./scenes/LevelSelectScene";
 
+// Hâm nóng font game (Lilita One — banner LEVEL COMPLETE!/CLAIM): canvas Phaser chỉ dùng
+// được font đã nạp xong; load sớm để tới màn thắng đầu tiên chữ đã đúng font.
+try {
+  document.fonts?.load('32px "Lilita One"');
+} catch {
+  /* trình duyệt không hỗ trợ Font Loading API — font vẫn swap khi sẵn sàng */
+}
+
 // Dev/testing reset via URL — handy on a phone where DevTools/Console isn't available.
 // Runs BEFORE the game boots so scenes read clean state:
 //   ?reset=1    → re-arm the booster & twin-car tutorials (keeps gold + progress)
