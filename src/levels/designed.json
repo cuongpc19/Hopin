@@ -648,7 +648,8 @@
         "count": 86
       }
     ],
-    "slam": true
+    "slam": true,
+    "lightBoard": true
   },
   "2": {
     "track": "square",
@@ -2035,7 +2036,8 @@
       }
     ],
     "slam": true,
-    "img": "2_owl_animals2.png"
+    "img": "2_owl_animals2.png",
+    "lightBoard": true
   },
   "4": {
     "track": "square",
@@ -2759,7 +2761,8 @@
       }
     ],
     "slam": true,
-    "img": "5_artist_heroes.png"
+    "img": "5_artist_heroes.png",
+    "lightBoard": true
   },
   "5": {
     "track": "square",
@@ -8578,7 +8581,8 @@
       }
     ],
     "slam": true,
-    "img": "3_pig_animals2.png"
+    "img": "3_pig_animals2.png",
+    "lightBoard": true
   },
   "12": {
     "track": "square",
@@ -9660,7 +9664,8 @@
       }
     ],
     "slam": true,
-    "img": "4_robot.png"
+    "img": "4_robot.png",
+    "lightBoard": true
   },
   "13": {
     "track": "square",
@@ -13217,7 +13222,8 @@
       -1,
       -1
     ],
-    "img": "7_mushroom_heroes.png"
+    "img": "7_mushroom_heroes.png",
+    "lightBoard": true
   },
   "16": {
     "track": "square",
@@ -14299,7 +14305,8 @@
       }
     ],
     "slam": true,
-    "img": "3_lamp_objects.png"
+    "img": "3_lamp_objects.png",
+    "lightBoard": true
   },
   "17": {
     "track": "square",
@@ -17580,7 +17587,8 @@
       }
     ],
     "slam": true,
-    "img": "7_owl_animals1.png"
+    "img": "7_owl_animals1.png",
+    "lightBoard": true
   },
   "20": {
     "track": "square",
@@ -25585,7 +25593,8 @@
       -1,
       -1
     ],
-    "img": "5_prince.png"
+    "img": "5_prince.png",
+    "lightBoard": true
   },
   "24": {
     "track": "square",
@@ -29886,7 +29895,8 @@
       -1,
       -1
     ],
-    "img": "11_fruitbasket_food.png"
+    "img": "11_fruitbasket_food.png",
+    "lightBoard": true
   },
   "26": {
     "track": "square",
@@ -256437,7 +256447,8 @@
       -1,
       -1
     ],
-    "img": "3_frog.png"
+    "img": "3_frog.png",
+    "lightBoard": true
   },
   "135": {
     "track": "square",
@@ -261833,7 +261844,8 @@
       -1,
       -1,
       -1
-    ]
+    ],
+    "lightBoard": true
   },
   "139": {
     "track": "square",
@@ -263172,7 +263184,8 @@
       -1,
       -1
     ],
-    "img": "Adorable Penguin on Beige Background.jpg"
+    "img": "Adorable Penguin on Beige Background.jpg",
+    "lightBoard": true
   },
   "140": {
     "track": "square",
@@ -268580,7 +268593,8 @@
       -1,
       -1
     ],
-    "img": "Kawaii Chibi Panda – Cute & Cozy.jpg"
+    "img": "Kawaii Chibi Panda – Cute & Cozy.jpg",
+    "lightBoard": true
   },
   "144": {
     "track": "square",
@@ -276834,7 +276848,8 @@
       -1,
       -1,
       -1
-    ]
+    ],
+    "lightBoard": true
   },
   "151": {
     "track": "square",
@@ -278196,7 +278211,8 @@
       -1,
       -1,
       -1
-    ]
+    ],
+    "lightBoard": true
   },
   "152": {
     "track": "square",
