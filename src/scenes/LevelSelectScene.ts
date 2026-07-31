@@ -58,7 +58,7 @@ export class LevelSelectScene extends Phaser.Scene {
     this.buildBackground();
     this.buildTopBar();
     this.buildStage(current);
-    this.buildPlay(current);
+    // Nút PLAY riêng đã BỎ — Ô LEVEL (buildStage) đã tap-để-chơi (user 2026-08-01).
     this.buildBottomNav();
     if (showEvent) this.buildEventBar();
   }
@@ -68,7 +68,10 @@ export class LevelSelectScene extends Phaser.Scene {
     // background2: tranh sáng (xe + slime giữa rừng) — COVER toàn màn (crop 2 bên),
     // chỉ vignette nhẹ trên/dưới cho HUD với nav nổi chữ, KHÔNG phủ veil tối.
     const key = this.textures.exists("background2") ? "background2" : "background";
-    const img = this.add.image(GAME_W / 2, GAME_H / 2, key).setDepth(-100);
+    // Đẩy tranh (xe + slime) LÊN một chút để Ô LEVEL bên dưới không che gầm xe
+    // (user 2026-08-01). Đáy lộ ra ≤ RAISE bị thanh nav (cao 74) che nên không hở.
+    const RAISE = 50;
+    const img = this.add.image(GAME_W / 2, GAME_H / 2 - RAISE, key).setDepth(-100);
     const sc = Math.max(GAME_W / img.width, GAME_H / img.height);
     img.setScale(sc);
     const vig = this.add.graphics().setDepth(-98);
@@ -374,51 +377,6 @@ export class LevelSelectScene extends Phaser.Scene {
       .text(x + w / 2 - 14, y, tail, { fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "13px", color: "#ffe08a" })
       .setOrigin(0.5)
       .setDepth(D + 2);
-  }
-
-  // ---- Play button ----------------------------------------------------
-  private buildPlay(progress: number) {
-    const D = 40;
-    const y = GAME_H - 116;
-    const w = 250;
-    const h = 60;
-    const g = this.add.graphics().setDepth(D);
-    const draw = (fill: number) => {
-      g.clear();
-      g.fillStyle(0xb9760d, 1);
-      g.fillRoundedRect(GAME_W / 2 - w / 2, y - h / 2 + 4, w, h, 18);
-      g.fillStyle(fill, 1);
-      g.fillRoundedRect(GAME_W / 2 - w / 2, y - h / 2, w, h, 18);
-      g.lineStyle(3, 0xfff0c0, 0.9);
-      g.strokeRoundedRect(GAME_W / 2 - w / 2, y - h / 2, w, h, 18);
-    };
-    draw(0xf9c22e);
-    const label = this.add
-      .text(GAME_W / 2, y - 1, `PLAY  ·  ${progress}`, {
-        fontFamily: "Arial, sans-serif",
-        fontStyle: "bold",
-        fontSize: "26px",
-        color: "#ffffff",
-        stroke: "#8a5a12",
-        strokeThickness: 6,
-      })
-      .setOrigin(0.5)
-      .setDepth(D + 1);
-    const hit = this.add
-      .rectangle(GAME_W / 2, y, w, h, 0xffffff, 0.001)
-      .setDepth(D + 2)
-      .setInteractive({ useHandCursor: true });
-    hit.on("pointerover", () => draw(0xffd24a));
-    hit.on("pointerout", () => draw(0xf9c22e));
-    hit.on("pointerdown", () => {
-      this.tweens.add({
-        targets: label,
-        scale: 0.92,
-        duration: 90,
-        yoyo: true,
-        onComplete: () => this.scene.start("game", { level: progress }),
-      });
-    });
   }
 
   // ---- Bottom nav -----------------------------------------------------
