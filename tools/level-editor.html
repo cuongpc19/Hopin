@@ -179,6 +179,11 @@
         <span class="hint">ảnh tự căn giữa, chừa lề tới đường ray.</span>
         <input id="cols" type="hidden" value="25" />
         <input id="rows" type="hidden" value="25" />
+        <label style="margin-left:8px">Loại board</label>
+        <select id="boardType" title="Nền board trong game: Tối (navy caro, mặc định) hoặc Sáng (cát, level.lightBoard)">
+          <option value="dark">🌑 Tối (mặc định)</option>
+          <option value="light">🌕 Sáng</option>
+        </select>
         <div class="spacer"></div>
         <button id="clear" class="danger">Xoá sạch</button>
       </div>
@@ -323,6 +328,7 @@ let chests = [];       // { color, count }
 let paintColor = 0;    // selected color id, or EMPTY for eraser
 let painting = false;
 let fullPalette = false; // true when the palette is a bespoke image-derived set (export it whole)
+let lightBoard = false;  // board theme: false = dark navy (default), true = light sand (level.lightBoard)
 
 // ---- Init board ----
 function newBoard(c, r, fill = EMPTY) {
@@ -936,6 +942,7 @@ let currentTab = "json";
 let levelName = "Level 1"; // which level we're currently designing
 function levelObject() {
   const o = { name: levelName, cols, rows, board: [...board], chests: chests.map(c => ({ color: c.color, count: c.count })) };
+  if (lightBoard) o.lightBoard = true; // only emit when set (dark = default, omitted)
   // carry palette for image-derived (bespoke) sets, or when custom colours were added beyond the base
   if (fullPalette) { o.palette = COLORS.map(c => c.hex); o.paletteFull = true; }
   else if (COLORS.length > BASE_N) o.palette = COLORS.map(c => c.hex);
@@ -970,9 +977,18 @@ function applyLevel(obj) {
   levelName = obj.name || levelName;
   cols = obj.cols; rows = obj.rows; board = obj.board.slice();
   chests = (obj.chests || []).map(c => ({ color: c.color, count: c.count }));
+  lightBoard = !!obj.lightBoard;
   restorePalette(obj.palette, obj.paletteFull); selected = -1;
-  syncSizeUI();
+  syncSizeUI(); syncBoardTypeUI();
   renderPalette(); renderBoard(); renderChests(); refresh(); refreshPicker();
+}
+// Reflect the board theme in the select + tint the editor board-wrap so you preview how
+// tiles read on a dark navy vs light sand mat.
+function syncBoardTypeUI() {
+  const sel = document.getElementById("boardType");
+  if (sel) sel.value = lightBoard ? "light" : "dark";
+  const wrap = document.querySelector(".board-wrap");
+  if (wrap) wrap.style.background = lightBoard ? "#dcc79c" : "#2b2f4a";
 }
 function toTemplate() {
   const lines = [];
@@ -1062,9 +1078,9 @@ document.getElementById("lvSave").onclick = () => {
 document.getElementById("lvNew").onclick = () => {
   if (!confirm("Tạo level mới? (nhớ lưu level hiện tại nếu cần)")) return;
   levelName = nextLevelName();
-  COLORS = BASE_COLORS.map(c => ({ ...c })); fullPalette = false;
+  COLORS = BASE_COLORS.map(c => ({ ...c })); fullPalette = false; lightBoard = false;
   loadDefault(); chests = []; selected = -1; paintColor = 0;
-  syncSizeUI();
+  syncSizeUI(); syncBoardTypeUI();
   renderPalette(); renderBoard(); renderChests(); refresh(); refreshPicker();
 };
 document.getElementById("lvDup").onclick = () => {
@@ -1114,6 +1130,7 @@ document.getElementById("gameSave").onclick = async () => {
     "Nên tạo lại bằng “Màu game” trước khi lưu. Vẫn lưu?")) return;
   const o = levelObject();
   const level = { track: "square", cols: o.cols, rows: o.rows, board: o.board, chests: o.chests };
+  if (o.lightBoard) level.lightBoard = true; // carry the board theme into the game level
   const st = document.getElementById("gameStatus");
   try {
     const r = await fetch("/api/save-level", {
@@ -1150,7 +1167,7 @@ async function loadGameLevel(n) {
   const data = await fetchLevels();
   const lv = data[n];
   if (lv) {
-    applyLevel({ name: "Level " + n, cols: lv.cols, rows: lv.rows, board: lv.board, chests: lv.chests });
+    applyLevel({ name: "Level " + n, cols: lv.cols, rows: lv.rows, board: lv.board, chests: lv.chests, lightBoard: lv.lightBoard });
     gp.value = String(n);
     st.textContent = `Đang xem Level ${n} (từ game).`;
   } else {
@@ -1193,10 +1210,11 @@ function syncBgColorEnabled() {
   sel.style.opacity = flat ? "" : ".45";
 }
 document.getElementById("imgBgMode").addEventListener("change", syncBgColorEnabled);
+document.getElementById("boardType").onchange = (e) => { lightBoard = e.target.value === "light"; syncBoardTypeUI(); refresh(); };
 
 // ---- Boot ----
 loadDefault();
-fillBgColorSelect(); syncBgColorEnabled();
+fillBgColorSelect(); syncBgColorEnabled(); syncBoardTypeUI();
 renderPalette(); renderBoard(); renderChests(); refresh(); refreshPicker();
 initGameApi();
 </script>
