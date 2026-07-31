@@ -45,7 +45,9 @@ const DESIGN = [
   { lvl: 20, target: 45, size: 31, K: 9, minxe: 20, maxxe: 80, twins: 2, layer2: 0.3, buried: 0.25, img: "8_rainbow_flashcard.png" },
   { lvl: 21, target: 100, size: 31, K: 6, minxe: 16, maxxe: 80, twins: 0, hidden: 0.1, buried: 0.15, img: "3_lamp_objects.png" },
   { lvl: 22, target: 85, size: 31, K: 10, minxe: 11, maxxe: 80, twins: 1, hidden: 0.1, buried: 0.2, img: "7_rainbow_animals2.png" },
-  { lvl: 23, target: 90, size: 30, K: 7, minxe: 16, maxxe: 80, twins: 2, walls: "T", hidden: 0.1, buried: 0.2, img: "5_bus_heroes.png" },
+  // target 90→95 (user 2026-08-01): level GIỚI THIỆU đá cứng nên hiền — bỏ xe "?" (người
+  // thật phóng hớ, sim không đo được), giảm ô ẩn, giữ tường T + 2 twin nhẹ.
+  { lvl: 23, target: 95, size: 30, K: 7, minxe: 16, maxxe: 80, twins: 2, walls: "T", hidden: 0.06, img: "5_bus_heroes.png" },
   // walls TL (CSV) bất khả thi trong SLAM: 2 cạnh chặn → mọi cấu hình ≈0% (đo 2026-07-31).
   // Hạ còn 1 tường T như L23 (vẫn giữ đá cứng), target 90 giữ nguyên — LỆCH CSV có chủ đích.
   // K hạ 10→7 (CSV là TRẦN màu): tường + nhiều màu ép trần winrate ~64-71 < target 90.
