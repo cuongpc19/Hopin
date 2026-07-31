@@ -3086,26 +3086,22 @@ export class GameScene extends Phaser.Scene {
   // A FACELESS board tile: flat palette colour with a thin darker rim + a soft top
   // gloss for a little depth. No eyes/mouth — keeps the mosaic clean (faces live only
   // on the tray cars). Uniform 128px so setTexture on reveal needs no resize juggling.
-  // Tile "KHỐI THẠCH 3D" v3 (user 2026-08-01, chỉnh theo ảnh mẫu Level-39 sau 2 bản bị chê):
-  // FULL-BLEED kín cả ô (không chừa mép — tranh liền mạch, không thành "đậu rời"), bo góc
-  // NHỎ, cạnh đùn dưới chỉ hơi tối (0.72 — bản trước 0.55 đen quá thành sọc bẩn), sáng nhẹ
-  // nửa trên + gloss rất dịu. Trơn, không mắt.
+  // Tile BEVEL PHẲNG — bản gốc (user 2026-08-01 thử 3 bản "3D jelly" rồi quyết quay về:
+  // các bản khối/hạt cườm đều nhiễu ở cỡ ô nhỏ; bản phẳng nguyên thuỷ sạch nhất).
   private makeTileTexture(key: string, col: number, size = 128) {
     if (this.textures.exists(key)) this.textures.remove(key);
     const g = this.make.graphics({ x: 0, y: 0 }, false);
-    const r = size * 0.13;
-    // cạnh đùn dưới — DỊU (mặt bên khối lộ ~12% ở đáy)
-    g.fillStyle(shade(col, 0.72), 1);
-    g.fillRoundedRect(0, size * 0.1, size, size * 0.9, r);
-    // mặt trên phủ gần kín
+    const r = size * 0.24;
+    g.fillStyle(shade(col, 0.82), 1);
+    g.fillRoundedRect(size * 0.03, size * 0.04, size * 0.94, size * 0.94, r); // thin rim
     g.fillStyle(col, 1);
-    g.fillRoundedRect(0, 0, size, size * 0.88, r);
-    // sáng nhẹ nửa trên
-    g.fillStyle(shade(col, 1.14), 0.4);
-    g.fillRoundedRect(size * 0.04, size * 0.03, size * 0.92, size * 0.38, r * 0.9);
-    // gloss dịu góc trên-trái
-    g.fillStyle(0xffffff, 0.3);
-    g.fillEllipse(size * 0.3, size * 0.16, size * 0.34, size * 0.12);
+    g.fillRoundedRect(size * 0.09, size * 0.08, size * 0.82, size * 0.82, r * 0.9); // flat body
+    g.fillStyle(0xffffff, 0.18);
+    g.fillRoundedRect(size * 0.18, size * 0.14, size * 0.5, size * 0.16, size * 0.09); // soft gloss
+    // Two very small, very faint eyes — a hint of life without the noisy full face.
+    g.fillStyle(0x2a2a34, 0.28);
+    g.fillCircle(size * 0.42, size * 0.5, size * 0.032);
+    g.fillCircle(size * 0.58, size * 0.5, size * 0.032);
     g.generateTexture(key, size, size);
     g.destroy();
   }
