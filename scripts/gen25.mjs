@@ -41,7 +41,8 @@ const DESIGN = [
   { lvl: 17, target: 93, size: 31, K: 5, minxe: 16, maxxe: 80, twins: 0, buried: 0.15, img: "3_dolphin_flashcard.png" },
   { lvl: 18, target: 90, size: 31, K: 8, minxe: 11, maxxe: 80, twins: 1, buried: 0.15, img: "7_cat_animals1.png" },
   { lvl: 19, target: 80, size: 31, K: 12, minxe: 11, maxxe: 80, twins: 0, buried: 0.2, img: "7_owl_animals1.png" },
-  { lvl: 20, target: 65, size: 31, K: 9, minxe: 20, maxxe: 80, twins: 2, layer2: 0.2, buried: 0.25, img: "8_rainbow_flashcard.png" },
+  // target 65→45 (user 2026-07-31): mốc khó giữa-game gắt hơn.
+  { lvl: 20, target: 45, size: 31, K: 9, minxe: 20, maxxe: 80, twins: 2, layer2: 0.3, buried: 0.25, img: "8_rainbow_flashcard.png" },
   { lvl: 21, target: 100, size: 31, K: 6, minxe: 16, maxxe: 80, twins: 0, hidden: 0.1, buried: 0.15, img: "3_lamp_objects.png" },
   { lvl: 22, target: 85, size: 31, K: 10, minxe: 11, maxxe: 80, twins: 1, hidden: 0.1, buried: 0.2, img: "7_rainbow_animals2.png" },
   { lvl: 23, target: 90, size: 30, K: 7, minxe: 16, maxxe: 80, twins: 2, walls: "T", hidden: 0.1, buried: 0.2, img: "5_bus_heroes.png" },
@@ -49,8 +50,8 @@ const DESIGN = [
   // Hạ còn 1 tường T như L23 (vẫn giữ đá cứng), target 90 giữ nguyên — LỆCH CSV có chủ đích.
   // K hạ 10→7 (CSV là TRẦN màu): tường + nhiều màu ép trần winrate ~64-71 < target 90.
   { lvl: 24, target: 90, size: 26, K: 7, minxe: 16, maxxe: 80, twins: 2, walls: "T", hidden: 0.1, buried: 0.2, img: "7_robot_animals1.png" },
-  // K 12→10 + BỎ layer2: tường + board đặc 30×30 + 81 ô ẩn đã ăn hết dư địa (0.25 chôn → 36%).
-  { lvl: 25, target: 60, size: 30, K: 10, minxe: 15, maxxe: 80, twins: 0, walls: "T", hidden: 0.12, buried: 0.25, img: "11_fruitbasket_food.png" },
+  // target 60→35 (user 2026-07-31): boss cuối pack. Trả lại layer2 (0.25 từng đo ~36%).
+  { lvl: 25, target: 35, size: 30, K: 10, minxe: 15, maxxe: 80, twins: 0, walls: "T", layer2: 0.25, hidden: 0.12, buried: 0.25, img: "11_fruitbasket_food.png" },
 ];
 
 // ---- kho ảnh: tìm file theo tên trong sliced/** — dự phòng: cùng thư mục, chưa dùng ----
