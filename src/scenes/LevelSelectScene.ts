@@ -59,6 +59,10 @@ export class LevelSelectScene extends Phaser.Scene {
 
     this.gold = this.readInt("pf_gold", 0);
     const progress = Math.max(1, this.readInt("pf_progress", 1));
+    // WHERE the player currently is (may be below the highest unlocked, e.g. after a reset
+    // or replaying an earlier level). Home features THIS level. Falls back to progress for
+    // players from before pf_current existed. (user 2026-07-31)
+    const current = Phaser.Math.Clamp(this.readInt("pf_current", progress), 1, LEVEL_COUNT);
 
     // Lucky Clover event bar sits between the top bar and the map when active.
     const showEvent = isEventUnlocked() && !isEventComplete();
@@ -67,9 +71,9 @@ export class LevelSelectScene extends Phaser.Scene {
     this.nodes = [];
 
     this.buildBackground();
-    this.buildMap(progress);
+    this.buildMap(progress, current);
     this.buildTopBar();
-    this.buildPlay(progress);
+    this.buildPlay(current);
     this.buildBottomNav();
     this.setupScroll();
     if (showEvent) this.buildEventBar();
@@ -113,7 +117,7 @@ export class LevelSelectScene extends Phaser.Scene {
     return GAME_W / 2 + Math.sin(level * 0.7) * 46; // gentle side-to-side wave
   }
 
-  private buildMap(progress: number) {
+  private buildMap(progress: number, current: number) {
     const map = this.add.container(0, 0).setDepth(5);
     this.map = map;
 
@@ -138,7 +142,7 @@ export class LevelSelectScene extends Phaser.Scene {
     stroke(4, 0xfff0c2, 0.95);  // bright core highlight
     map.add(road);
 
-    for (let L = 1; L <= LEVEL_COUNT; L++) this.makeNode(map, L, progress);
+    for (let L = 1; L <= LEVEL_COUNT; L++) this.makeNode(map, L, progress, current);
 
     // Clip the map to the window between the HUD and the Play button.
     const mg = this.make.graphics();
@@ -151,7 +155,7 @@ export class LevelSelectScene extends Phaser.Scene {
     const bottomPad = 60; // lift the tree so level 1 clears the bottom edge (fully visible)
     this.scrollMin = this.viewBottom - bottomPad; // level 1 rests just above the bottom
     this.scrollMax = this.viewTop + (LEVEL_COUNT - 1) * SPACING; // level N reaches the top
-    this.scrollC = Phaser.Math.Clamp(viewMid + (progress - 1) * SPACING, this.scrollMin, this.scrollMax);
+    this.scrollC = Phaser.Math.Clamp(viewMid + (current - 1) * SPACING, this.scrollMin, this.scrollMax);
     map.y = this.scrollC;
   }
 
@@ -162,10 +166,10 @@ export class LevelSelectScene extends Phaser.Scene {
     return { face: 0x1c8f79, edge: 0x0a3b30, hi: 0x8fe8d0 };
   }
 
-  private makeNode(map: Phaser.GameObjects.Container, level: number, progress: number) {
+  private makeNode(map: Phaser.GameObjects.Container, level: number, progress: number, curLevel: number) {
     const d = levelDifficulty(level);
-    const cleared = level < progress;
-    const current = level === progress;
+    const cleared = level < progress; // beaten history (highest reached) → star badge
+    const current = level === curLevel; // where the player is NOW → gold highlight (wins over cleared)
     // Sequential mode locks anything past the reached level; "Any Level" unlocks all.
     const locked = !this.freeSelect() && level > progress;
     const x = this.waveX(level);

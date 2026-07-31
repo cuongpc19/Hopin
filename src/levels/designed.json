@@ -2680,13 +2680,11 @@
       },
       {
         "color": 10,
-        "count": 20,
-        "pairId": 0
+        "count": 20
       },
       {
         "color": 0,
-        "count": 35,
-        "pairId": 0
+        "count": 35
       },
       {
         "color": 11,
@@ -2726,13 +2724,11 @@
       },
       {
         "color": 11,
-        "count": 26,
-        "pairId": 1
+        "count": 26
       },
       {
         "color": 10,
-        "count": 26,
-        "pairId": 1
+        "count": 26
       },
       {
         "color": 14,

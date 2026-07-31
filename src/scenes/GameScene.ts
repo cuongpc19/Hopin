@@ -276,6 +276,11 @@ export class GameScene extends Phaser.Scene {
   private slotCount = SLOT_COUNT; // grows when the "Add" booster is used
   private slotTiles: Phaser.GameObjects.Image[] = []; // the bay sprites (re-laid on Add)
   private slotLocks: Phaser.GameObjects.Image[] = []; // SLAM: dimmed "reserved car" shown on a bay whose car is out
+  // SLAM idle nudge (user 2026-07-31): if the player hasn't launched/relaunched for a while
+  // and a waiting car COULD still collect, gently pulse a "tap me" marker on it.
+  private idleSince = 0; // this.time.now of the last player launch/relaunch (0 = not yet armed)
+  private idleNudges = new Map<ChestView, Phaser.GameObjects.GameObject[]>();
+  private readonly IDLE_NUDGE_MS = 5000;
   private slotWarnActive = false; // waiting bays all full → flashing a warning
   private slotWarnG: Phaser.GameObjects.GameObject[] = []; // the pulsing warning rings
   private handMode = false; // "Hand" booster armed: next tap picks a queued car
@@ -444,6 +449,9 @@ export class GameScene extends Phaser.Scene {
 
   private startLevel(levelNum: number) {
     this.levelNum = levelNum;
+    // Remember WHERE the player currently is (not just the highest ever reached) so the
+    // Home picker features THIS level, not the max unlocked one (user 2026-07-31).
+    try { localStorage.setItem("pf_current", String(levelNum)); } catch { /* storage unavailable */ }
     this.playLog = []; this.playStart = (typeof performance !== "undefined" ? performance.now() : 0); this.peakUsed = 0;
     try { this.guideMode = localStorage.getItem("hopin_guide") === "1"; } catch { this.guideMode = false; }
     this.guideKey = ""; this.guideHand = undefined; this.guideRing = undefined; this.guidePlan = null; this.guidePlanWinning = false; this.guidePlanNonce = 0;
@@ -463,6 +471,8 @@ export class GameScene extends Phaser.Scene {
     this.slots = new Array(this.slotCount).fill(null);
     this.slotTiles = [];
     this.slotLocks = []; // children.removeAll() already destroyed old lock icons
+    this.idleNudges.clear(); // children.removeAll() destroyed the marker objects too
+    this.idleSince = 0;
     this.slotWarnActive = false; // children.removeAll() already destroyed old rings
     this.slotWarnG = [];
     this.handMode = false;
@@ -836,6 +846,24 @@ export class GameScene extends Phaser.Scene {
     this.tutHand = undefined;
     this.tutDismissTap = undefined;
     this.tutPaused = false; // unfreeze — the guided action is done
+  }
+
+  // A NON-blocking tutorial callout: a little label pops above a spot, drifts up and fades
+  // on its own. Unlike showTutHint it never freezes the game or demands a tap — used for the
+  // "bay is locked" lesson so play continues while the car circles (user 2026-07-31).
+  private tutFloatTip(x: number, y: number, msg: string) {
+    const label = this.add
+      .text(x, y - SLOT_SIZE * 0.95, msg, {
+        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "14px",
+        color: "#ffffff", backgroundColor: "#e08a1e", padding: { x: 12, y: 6 }, align: "center",
+      })
+      .setOrigin(0.5)
+      .setDepth(260);
+    this.tweens.add({ targets: label, y: label.y - 12, duration: 2400, ease: "Sine.out" });
+    this.time.delayedCall(2600, () => {
+      if (!label.active) return;
+      this.tweens.add({ targets: label, alpha: 0, duration: 400, onComplete: () => label.destroy() });
+    });
   }
 
   // Board size depends on the grid AND the height left over for it (passed in),
@@ -1549,22 +1577,96 @@ export class GameScene extends Phaser.Scene {
           this.slotLocks[i] = ghost;
         }
         ghost.setTexture(tex).setPosition(this.slotXs[i] ?? ghost.x, this.slotY).setVisible(true);
-        // Tutorial slam bước 2: ghost khoá ô ĐẦU TIÊN vừa hiện → spotlight bài học "ô chờ bị
-        // khoá khi xe đang chạy" (bấm chỗ nào cũng được để tiếp tục — tutDismissTap).
+        // Tutorial slam bước 2 (làm lại 2026-07-31): ghost khoá ô ĐẦU TIÊN vừa hiện → chỉ hiện
+        // 1 chú thích NỔI, KHÔNG freeze, KHÔNG bắt bấm vào ô khoá (bản cũ kẹt ở đây vì ô khoá
+        // không bấm được). Game vẫn chạy; đợi xe quay về (bước 13) mới spotlight tiếp.
         if (this.tutStep === 11) {
-          this.tutStep = 12;
-          const gi = i;
-          this.time.delayedCall(600, () => {
-            if (this.tutStep === 12 && !this.won && !this.lost) {
-              this.tutDismissTap = () => { this.tutStep = 13; };
-              this.showTutHint(this.slotXs[gi] ?? 0, this.slotY, "The slot is LOCKED while its\ncar is out! (tap to continue)", SLOT_SIZE * 0.95);
-            }
-          });
+          this.tutStep = 13;
+          this.tutFloatTip(this.slotXs[i] ?? 0, this.slotY, "This bay stays LOCKED\nwhile its car is out!");
         }
       } else if (ghost) {
         ghost.setVisible(false);
       }
     }
+  }
+
+  // SLAM idle nudge: after IDLE_NUDGE_MS with no launch, pulse a "tap me" marker on every
+  // waiting car (queue front or parked bay) that could STILL collect if sent out now — a
+  // gentle reminder the player has a useful move. Cleared the instant they act.
+  private updateIdleNudge(now: number) {
+    if (this.idleSince === 0) { this.idleSince = now; return; } // arm on first frame
+    const suppress =
+      this.tutStep > 0 || this.tutPaused || this.handMode || this.magnetMode ||
+      this.won || this.lost || this.guideMode; // guide already points at the next move
+    const idle = now - this.idleSince >= this.IDLE_NUDGE_MS;
+    const want = (!suppress && idle) ? this.idleTapCandidates() : [];
+
+    // Retire markers for cars no longer eligible.
+    for (const [v, objs] of this.idleNudges) {
+      if (!want.includes(v)) {
+        objs.forEach((o) => { this.tweens.killTweensOf(o); o.destroy(); });
+        this.idleNudges.delete(v);
+      }
+    }
+    // Add / reposition markers for eligible cars.
+    for (const v of want) {
+      const cx = v.container.x;
+      const cy = v.container.y - this.chestSize * 0.62;
+      let objs = this.idleNudges.get(v);
+      if (!objs) {
+        const ring = this.add
+          .circle(v.container.x, v.container.y, this.chestSize * 0.6)
+          .setStrokeStyle(4, 0xffe14a, 0.95)
+          .setDepth(DEPTH_TWINLINK + 1);
+        this.tweens.add({ targets: ring, scale: 1.18, alpha: 0.25, duration: 720, yoyo: true, repeat: -1, ease: "Sine.inOut" });
+        const hand = this.add
+          .text(cx, cy, "👆", { fontSize: "26px" })
+          .setOrigin(0.5)
+          .setDepth(DEPTH_TWINLINK + 2);
+        this.tweens.add({ targets: hand, y: cy + 10, duration: 560, yoyo: true, repeat: -1, ease: "Sine.inOut" });
+        objs = [ring, hand];
+        this.idleNudges.set(v, objs);
+      } else {
+        // Keep the marker glued to its car (queue/bay may shift while it lingers).
+        const [ring, hand] = objs as [Phaser.GameObjects.Arc, Phaser.GameObjects.Text];
+        ring.setPosition(v.container.x, v.container.y);
+        hand.x = cx; // y is tween-driven around cy; nudge base only if it moved a lot
+        if (Math.abs(hand.y - cy) > this.chestSize) hand.y = cy;
+      }
+    }
+  }
+
+  // Waiting cars the player could usefully send out RIGHT NOW: a queue-front (launchable)
+  // car or a parked bay car whose colour is currently reachable and that has room on the ray.
+  private idleTapCandidates(): ChestView[] {
+    const out: ChestView[] = [];
+    const onRay = this.active.length + this.pending.length;
+    const freeSlots = this.slots.reduce((n, s) => n + (s ? 0 : 1), 0);
+    // (1) Front cars of the queue columns.
+    for (const col of this.invColumns) {
+      const v = col[0];
+      if (!v) continue;
+      const group = this.groupOf(v);
+      // launchable = no stranger sits ahead of any member (same front-prefix rule as launch).
+      const launchable = group.every((m) => {
+        const p = this.findInInventory(m);
+        return !!p && p.col.slice(0, p.r).every((c) => group.includes(c));
+      });
+      if (!launchable) continue;
+      if (freeSlots < group.length) continue;
+      if (onRay + group.length > MAX_ON_TRACK) continue;
+      if (group.some((m) => this.carCanCollect(m))) out.push(v);
+    }
+    // (2) Parked bay cars (a returned car sitting in its slot, not one out on the ray).
+    for (const v of this.slots) {
+      if (!v) continue;
+      const outNow = this.pending.includes(v) || this.active.some((a) => a.view === v);
+      if (outNow) continue;
+      const group = this.groupOf(v).filter((m) => this.slots.includes(m));
+      if (onRay + group.length > MAX_ON_TRACK) continue;
+      if (this.carCanCollect(v)) out.push(v);
+    }
+    return out;
   }
 
   private updateSlotWarning() {
@@ -2727,7 +2829,7 @@ export class GameScene extends Phaser.Scene {
   private openSettings() {
     const D = 200;
     const pw = 300;
-    const ph = 300;
+    const ph = 348;
     const x0 = GAME_W / 2 - pw / 2;
     const y0 = GAME_H / 2 - ph / 2;
     const dim = this.add
@@ -2774,17 +2876,40 @@ export class GameScene extends Phaser.Scene {
       return btn;
     };
     Audio.unlock(); // opening settings is a user gesture — safe to init audio
-    const sfxBtn = mkToggle(y0 + 90, "🔊 Sound FX", () => Audio.isSfxOn, (v) => Audio.setSfx(v));
+    const sfxBtn = mkToggle(y0 + 84, "🔊 Sound FX", () => Audio.isSfxOn, (v) => Audio.setSfx(v));
     // Step guide (user 2026-07-30): default OFF; when ON the game points at the next move.
-    const guideBtn = mkToggle(y0 + 132, "🧭 Chỉ dẫn từng bước", () => this.guideMode, (v) => {
+    const guideBtn = mkToggle(y0 + 124, "🧭 Chỉ dẫn từng bước", () => this.guideMode, (v) => {
       this.guideMode = v;
       try { localStorage.setItem("hopin_guide", v ? "1" : "0"); } catch { /* ignore */ }
       if (!v) this.clearGuidePointer();
     });
 
+    // Reset progress — replay from Level 1 (keeps gold; re-arms the tutorials). Two-tap
+    // confirm so a stray tap can't wipe the player's climb (user 2026-07-31).
+    let resetArmed = false;
+    const reset = this.add
+      .text(GAME_W / 2, y0 + 172, "🔄 Chơi lại từ đầu", {
+        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "15px",
+        color: "#ffffff", backgroundColor: "#b23a2a", padding: { x: 16, y: 7 },
+      })
+      .setOrigin(0.5)
+      .setDepth(D + 2)
+      .setInteractive({ useHandCursor: true });
+    reset.on("pointerdown", () => {
+      if (!resetArmed) {
+        resetArmed = true;
+        reset.setText("⚠ Xoá tiến trình? Bấm lần nữa");
+        this.time.delayedCall(2600, () => {
+          if (reset.active) { resetArmed = false; reset.setText("🔄 Chơi lại từ đầu"); }
+        });
+        return;
+      }
+      this.resetProgress();
+    });
+
     // Jump back to the level picker.
     const select = this.add
-      .text(GAME_W / 2, y0 + 198, "🗺  Levels", {
+      .text(GAME_W / 2, y0 + 216, "🗺  Levels", {
         fontFamily: "Arial, sans-serif",
         fontStyle: "bold",
         fontSize: "16px",
@@ -2813,12 +2938,24 @@ export class GameScene extends Phaser.Scene {
       title.destroy();
       sfxBtn.destroy();
       guideBtn.destroy();
+      reset.destroy();
       select.destroy();
       close.destroy();
     };
     dim.on("pointerdown", kill);
     close.on("pointerdown", kill);
     select.on("pointerdown", () => this.scene.start("select"));
+  }
+
+  // Wipe level progress so the player restarts at Level 1. Keeps gold/boosters bought,
+  // but re-arms the one-time tutorials & intros so the fresh run explains itself again.
+  private resetProgress() {
+    try {
+      localStorage.setItem("pf_progress", "1");
+      localStorage.setItem("pf_current", "1");
+      ["pf_twin_intro", "pf_rock_intro", "pf_boost_gifted"].forEach((k) => localStorage.removeItem(k));
+    } catch { /* storage unavailable — nothing to reset */ }
+    this.scene.start("game", { level: 1 });
   }
 
   // Small contextual notice just above the waiting bays.
@@ -3188,18 +3325,23 @@ export class GameScene extends Phaser.Scene {
       if (freeSlots < need) { this.smallNotice("All waiting slots are locked!"); return; }
       if (this.active.length + this.pending.length + need > MAX_ON_TRACK) { this.trackFullNotice(); return; }
       this.playPop();
+      this.idleSince = this.time.now; // player acted → restart the idle-nudge timer
       // TELEMETRY: a queue tap is the player's core DECISION — log it with context (streamed live).
       const _p0 = this.findInInventory(group[0]); const launchEv = { ev: "launch", col: _p0 ? this.invColumns.indexOf(_p0.col) : -1, t: Math.round((typeof performance !== "undefined" ? performance.now() : 0) - this.playStart), colors: group.map((v) => v.chest.color), counts: group.map((v) => v.chest.count), buried: group.some((v) => !!(v.chest as unknown as { buried?: boolean }).buried), freeSlotsBefore: freeSlots, onRay: this.active.length + this.pending.length, twin: group.length > 1 };
       this.playLog.push(launchEv);
       this.postLog(launchEv);
       { const p0 = this.findInInventory(group[0]); if (p0) this.onGuideAction("q" + this.invColumns.indexOf(p0.col)); } // guide plan: player launched column j
-      for (const v of group) {
+      // A twin/triple must claim ADJACENT bays. If the free slots are scattered between
+      // locked ones, shift the locked cars RIGHT first so a contiguous run opens on the left
+      // (user 2026-07-31 — "nhường 2/3 ô trống cho xe đôi, xe 3"). Singles keep first-free.
+      const startSlot = need >= 2 ? this.openAdjacentSlotsForGroup(need) : -1;
+      group.forEach((v, k) => {
         const p = this.findInInventory(v)!;
         p.col.splice(p.r, 1);
         (v.container.getData("hit") as Phaser.GameObjects.Rectangle).disableInteractive();
         v.container.clearMask();
         this.revealBuried(v);
-        const si = this.slots.findIndex((s) => s === null);
+        const si = need >= 2 ? startSlot + k : this.slots.findIndex((s) => s === null);
         this.parkIntoSlot(v, si); // HOP 1: queue → waiting slot (claims slots[si] = v)
         // HOP 2: once it's up in the slot, spring it onto the ray (slot stays reserved/locked).
         this.time.delayedCall(340, () => {
@@ -3207,7 +3349,7 @@ export class GameScene extends Phaser.Scene {
           const parked = this.slots[si] === v && !this.pending.includes(v) && !this.active.some((a) => a.view === v);
           if (parked) this.relaunchFromSlot(si, true); // auto hop-2 of the queue launch — not a player bay tap (telemetry)
         });
-      }
+      });
       this.notePeak();
       this.layoutInventory(true);
       this.updateSlotWarning();
@@ -3284,6 +3426,7 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     this.playPop(); // cheerful "pop" as the car springs out of its bay
+    if (!auto) this.idleSince = this.time.now; // real bay tap → restart the idle-nudge timer
     for (const m of group) (m as unknown as { _capOut?: number })._capOut = m.chest.count; // telemetry trip: seats khi ra ray
     if (!auto) { this.postLog({ ev: "bayTap", colors: group.map((m) => m.chest.color), counts: group.map((m) => m.chest.count), slot: slotIndex }); this.onGuideAction("bay" + slotIndex); } // slam: tapping a bay is the player's 2nd decision type
     for (const v of group) {
@@ -3506,6 +3649,7 @@ export class GameScene extends Phaser.Scene {
     if (this.trayMode && TRAY_BATCH) { this.endBatchStaleCheck(time); this.endBatchIfDone(); this.updateGoButton(); }
     if (this.trayMode) this.checkTrayStuck(); // one-way bays: all 5 blocked & idle → lose
     if (this.slamMode) this.updateSlotLocks(); // show 🔒 on bays whose car is out on the ray
+    if (this.slamMode) this.updateIdleNudge(time); // pulse "tap me" on a waiting car after a lull
 
     // Live "cars on the ray" count on the start signal.
     if (this.signalCount) this.signalCount.setText(`${this.active.length}/${this.onTrackCap()}`);
@@ -5193,6 +5337,45 @@ export class GameScene extends Phaser.Scene {
       const hit = view.container.getData("hit") as Phaser.GameObjects.Rectangle;
       hit.removeAllListeners("pointerdown");
       hit.on("pointerdown", () => this.relaunchFromSlot(i));
+    });
+  }
+
+  // SLAM: guarantee `need` ADJACENT free bays for a twin/triple. If a contiguous free run
+  // already exists, use it as-is; otherwise pack every locked/parked car to the RIGHT so
+  // the free bays collapse into one run on the LEFT. Returns that run's start index.
+  // Caller must have already verified there are >= `need` free bays.
+  private openAdjacentSlotsForGroup(need: number): number {
+    const total = this.slots.length;
+    for (let i = 0; i + need <= total; i++) {
+      let ok = true;
+      for (let k = 0; k < need; k++) if (this.slots[i + k]) { ok = false; break; }
+      if (ok) return i; // an adjacent run already exists — no reshuffle
+    }
+    this.packSlotsRight();
+    return 0; // free bays now occupy slots 0..(free-1)
+  }
+
+  // SLAM: right-align every occupied bay (order preserved) so free bays are contiguous on
+  // the LEFT — opens adjacent room for an incoming twin/triple. A car OUT on the ray keeps
+  // its reservation (only its slot index + traySlot move; the ghost redraws & it returns to
+  // the new bay); a PARKED car slides across and gets its relaunch tap rewired.
+  private packSlotsRight() {
+    const cars = this.slots.filter((s): s is ChestView => s !== null);
+    const total = this.slots.length;
+    const first = total - cars.length;
+    for (let i = 0; i < total; i++) this.slots[i] = null;
+    cars.forEach((view, k) => {
+      const idx = first + k;
+      this.slots[idx] = view;
+      view.traySlot = idx;
+      const out = this.pending.includes(view) || this.active.some((a) => a.view === view);
+      if (out) return; // reservation only — leave the on-ray car & its (disabled) tap alone
+      if (view.container.scene && Math.abs(view.container.x - this.slotXs[idx]) > 0.5) {
+        this.tweens.add({ targets: view.container, x: this.slotXs[idx], y: this.slotY, duration: 240, ease: "Cubic.out" });
+      }
+      const hit = view.container.getData("hit") as Phaser.GameObjects.Rectangle;
+      hit.removeAllListeners("pointerdown");
+      hit.on("pointerdown", () => this.relaunchFromSlot(idx));
     });
   }
 
