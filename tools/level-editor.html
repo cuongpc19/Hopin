@@ -977,11 +977,11 @@ function renderOutput() {
   out.value = currentTab === "json" ? JSON.stringify(levelObject(), null, 2) : toTemplate();
 }
 
-// ---- Viền = coloured BACKGROUND panel behind the subject ----
-// "Có viền" fills EVERY empty cell of the board with one colour (the missing area around the
-// subject — user 2026-08-01 "fill vào phần ngoài còn thiếu"), so the subject sits on a full
-// coloured background. `borderId` = its colour (EMPTY = none); `borderCells` = exactly the cells
-// the fill added, so removing/changing it NEVER touches the subject (even if same colour).
+// ---- Viền = tight RECTANGLE around the subject (user 2026-08-01: "khung chữ nhật sát bbox") ----
+// "Có viền" fills the EMPTY cells inside the subject's smallest bounding rectangle → a tight
+// coloured panel; cells OUTSIDE the bbox stay grass. `borderId` = its colour (EMPTY = none);
+// `borderCells` = exactly the cells the fill added, so removing/changing it never touches the
+// subject (even if the border colour matches a subject colour).
 let borderId = EMPTY;
 let borderCells = [];
 // Detect an existing background fill on load: only a REAL panel fills ALL FOUR board corners
@@ -997,14 +997,28 @@ function syncBorderCells() {
   if (borderId === EMPTY) return;
   for (let i = 0; i < board.length; i++) if (board[i] === borderId) borderCells.push(i);
 }
+// Smallest rectangle covering the subject (all non-empty cells).
+function subjectBBox() {
+  let minr = rows, maxr = -1, minc = cols, maxc = -1;
+  for (let i = 0; i < board.length; i++) {
+    if (board[i] < 0) continue;
+    const r = (i / cols) | 0, c = i % cols;
+    if (r < minr) minr = r; if (r > maxr) maxr = r;
+    if (c < minc) minc = c; if (c > maxc) maxc = c;
+  }
+  return maxr < 0 ? null : { minr, maxr, minc, maxc };
+}
 // Set the border to `toId` (EMPTY = remove it): clear the previous fill (only its own cells),
-// then paint every EMPTY cell with the new colour → a full background behind the subject.
+// then paint the EMPTY cells INSIDE the subject's bounding rectangle → a tight rectangle.
 function applyBorder(toId) {
   for (const i of borderCells) if (board[i] === borderId) board[i] = EMPTY;
   borderCells = [];
   borderId = EMPTY;
   if (toId !== EMPTY) {
-    for (let i = 0; i < board.length; i++) if (board[i] < 0) { board[i] = toId; borderCells.push(i); }
+    const bb = subjectBBox();
+    if (bb) for (let r = bb.minr; r <= bb.maxr; r++) for (let c = bb.minc; c <= bb.maxc; c++) {
+      const i = r * cols + c; if (board[i] < 0) { board[i] = toId; borderCells.push(i); }
+    }
   }
   borderId = toId;
   renderBoard(); refresh();
