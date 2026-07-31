@@ -1012,8 +1012,13 @@ export class GameScene extends Phaser.Scene {
       // (bug fixed 2026-07-31: integer-floored `cols*cell` made a 31×31 render smaller than a
       // 25×25). Only the per-slime size changes with the count.
       const STD = Math.max(25, cols, rows);
-      const availW = this.beltRight - this.beltLeft - roadW - 2 * gap; // interior between the road's inner edges
-      const availH = this.beltBottom - this.beltTop - roadW - 2 * gap;
+      // The road's INNER edge is a rounded rect (corner radius ≈ roadRadius − roadW/2). A plain
+      // rectangular grid must clear those rounded corners or its corner tiles poke out past the
+      // ring (user 2026-08-01 "board ăn ra ngoài cả viền"). Inset each side by ~0.2·roadRadius —
+      // enough that a corner tile sits inside the arc — instead of just the tiny grass gap.
+      const corner = Math.max(gap, Math.round(this.roadRadius * 0.2));
+      const availW = this.beltRight - this.beltLeft - roadW - 2 * corner;
+      const availH = this.beltBottom - this.beltTop - roadW - 2 * corner;
       const fillBox = Math.min(availW, availH);
       this.cell = Math.max(6, fillBox / STD);
       // The cell a 25×25 would use here → keeps runner critters a constant size on big boards.
