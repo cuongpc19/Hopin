@@ -252,25 +252,11 @@ if (FILL_BG) {
     bgId = parseInt(BG_ID, 10);
   } else if (BG_ID === "bright") {
     bgId = mostDistinct(BRIGHT_IDS.filter((id) => id !== 8 && id !== 14 && !used.includes(id)));
-    levelLightBoard = true;
-  } else {
-    // detect dark outline: perimeter subject cells that are dark
-    let perim = 0, dark = 0;
-    for (let i = 0; i < board.length; i++) {
-      if (board[i] < 0) continue;
-      const r = (i / BOARD_SIZE) | 0, c = i % BOARD_SIZE;
-      const edge = r === 0 || c === 0 || r === BOARD_SIZE - 1 || c === BOARD_SIZE - 1 ||
-        board[i - 1] < 0 || board[i + 1] < 0 || board[i - BOARD_SIZE] < 0 || board[i + BOARD_SIZE] < 0;
-      if (!edge) continue;
-      perim++; if (lum(board[i]) < 95) dark++;
-    }
-    if (perim > 0 && dark / perim >= 0.45) {
-      const LIGHT = [8, 9, 14, 15, 17].filter((id) => !used.includes(id));
-      bgId = LIGHT.length ? mostDistinct(LIGHT) : 8;
-      levelLightBoard = true;
-      console.log(`dark outline detected (${Math.round(100 * dark / perim)}% perimeter) → light bg id ${bgId} + lightBoard`);
-    }
+    levelLightBoard = true; // chỉ còn kích hoạt khi ÉP TAY BG_ID=bright
   }
+  // 2026-08-01 (user): BOARD TỐI cho TẤT CẢ level viền màu — auto-lightBoard theo
+  // dark-outline đã GỠ (viền giờ luôn là màu sống từ PREFER_DARK, tương phản tự có).
+  void lum; void mostDistinct;
   // RULE VIỀN CHỐT (border.mjs): viền = CHỮ NHẬT bbox+1 đổ đầy (không halo, không thu
   // nhỏ chủ thể); tổng viền ≤30% board — vượt = ảnh KHÔNG ĐẠT (exit 2, caller đổi ảnh
   // gọn hơn); màu viền cấm trùng màu chủ thể SÁT ranh (8 hướng). bgId ở trên chỉ còn là

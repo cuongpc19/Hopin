@@ -648,7 +648,6 @@
         "count": 86
       }
     ],
-    "lightBoard": true,
     "slam": true
   },
   "2": {
@@ -2035,7 +2034,6 @@
         "count": 30
       }
     ],
-    "lightBoard": true,
     "slam": true,
     "img": "2_owl_animals2.png"
   },
@@ -2760,7 +2758,6 @@
         "count": 12
       }
     ],
-    "lightBoard": true,
     "slam": true,
     "img": "5_artist_heroes.png"
   },
@@ -3762,13 +3759,11 @@
       },
       {
         "color": 14,
-        "count": 26,
-        "buried": true
+        "count": 26
       },
       {
         "color": 14,
-        "count": 26,
-        "buried": true
+        "count": 26
       },
       {
         "color": 14,
@@ -3780,8 +3775,7 @@
       },
       {
         "color": 7,
-        "count": 13,
-        "buried": true
+        "count": 13
       },
       {
         "color": 5,
@@ -3789,8 +3783,7 @@
       },
       {
         "color": 8,
-        "count": 3,
-        "buried": true
+        "count": 3
       },
       {
         "color": 1,
@@ -3810,8 +3803,7 @@
       },
       {
         "color": 10,
-        "count": 26,
-        "buried": true
+        "count": 26
       },
       {
         "color": 4,
@@ -3819,8 +3811,7 @@
       },
       {
         "color": 0,
-        "count": 7,
-        "buried": true
+        "count": 7
       },
       {
         "color": 10,
@@ -3852,8 +3843,7 @@
       },
       {
         "color": 9,
-        "count": 1,
-        "buried": true
+        "count": 1
       },
       {
         "color": 2,
@@ -3869,8 +3859,7 @@
       },
       {
         "color": 2,
-        "count": 26,
-        "buried": true
+        "count": 26
       },
       {
         "color": 2,
@@ -3880,11 +3869,7 @@
         "color": 6,
         "count": 9
       }
-    ],
-    "lightBoard": true,
-    "slam": true,
-    "lanes": 3,
-    "img": "10_monster_heroes.png"
+    ]
   },
   "6": {
     "track": "square",
@@ -5323,7 +5308,6 @@
         "count": 26
       }
     ],
-    "lightBoard": true,
     "slam": true,
     "img": "3_monkey_animals2.png"
   },
@@ -8593,7 +8577,6 @@
         "count": 27
       }
     ],
-    "lightBoard": true,
     "slam": true,
     "img": "3_pig_animals2.png"
   },
@@ -9676,7 +9659,6 @@
         "count": 19
       }
     ],
-    "lightBoard": true,
     "slam": true,
     "img": "4_robot.png"
   },
@@ -10785,7 +10767,6 @@
         "count": 26
       }
     ],
-    "lightBoard": true,
     "slam": true,
     "img": "11_house_colorful.png"
   },
@@ -11864,7 +11845,6 @@
         "count": 27
       }
     ],
-    "lightBoard": true,
     "slam": true,
     "img": "11_tower_blocks.png"
   },
@@ -12609,7 +12589,6 @@
         "count": 6
       }
     ],
-    "lightBoard": true,
     "slam": true,
     "layer2": [
       -1,
@@ -14319,7 +14298,6 @@
         "count": 36
       }
     ],
-    "lightBoard": true,
     "slam": true,
     "img": "3_lamp_objects.png"
   },
@@ -17601,7 +17579,6 @@
         "count": 25
       }
     ],
-    "lightBoard": true,
     "slam": true,
     "img": "7_owl_animals1.png"
   },
@@ -22727,7 +22704,6 @@
         "buried": true
       }
     ],
-    "lightBoard": true,
     "slam": true,
     "hidden": [
       -1,
@@ -24706,7 +24682,6 @@
         "count": 31
       }
     ],
-    "lightBoard": true,
     "slam": true,
     "hidden": [
       -1,
@@ -26383,7 +26358,6 @@
         "count": 35
       }
     ],
-    "lightBoard": true,
     "slam": true,
     "hidden": [
       -1,
@@ -28107,7 +28081,6 @@
         "count": 25
       }
     ],
-    "lightBoard": true,
     "slam": true,
     "hidden": [
       -1,
@@ -255836,7 +255809,6 @@
         "count": 30
       }
     ],
-    "lightBoard": true,
     "slam": true,
     "layer2": [
       -1,
@@ -261233,7 +261205,6 @@
         "count": 22
       }
     ],
-    "lightBoard": true,
     "img": "5_pirate.png",
     "slam": true,
     "layer2": [
@@ -262573,7 +262544,6 @@
         "count": 30
       }
     ],
-    "lightBoard": true,
     "slam": true,
     "layer2": [
       -1,
@@ -263929,7 +263899,6 @@
         "count": 19
       }
     ],
-    "lightBoard": true,
     "img": "3_rocket.png",
     "slam": true,
     "layer2": [
@@ -265305,7 +265274,6 @@
         "count": 24
       }
     ],
-    "lightBoard": true,
     "img": "4_house.png",
     "slam": true,
     "layer2": [
@@ -267984,7 +267952,6 @@
         "count": 15
       }
     ],
-    "lightBoard": true,
     "slam": true,
     "layer2": [
       -1,
@@ -272086,7 +272053,6 @@
         "count": 1
       }
     ],
-    "lightBoard": true,
     "slam": true,
     "img": "6_dog.png"
   },
@@ -272823,7 +272789,6 @@
         "pairId": 4
       }
     ],
-    "lightBoard": true,
     "slam": true,
     "img": "3_bee.png"
   },
@@ -276241,7 +276206,6 @@
         "count": 26
       }
     ],
-    "lightBoard": true,
     "img": "5_bus.png",
     "slam": true,
     "layer2": [
@@ -277604,7 +277568,6 @@
         "count": 24
       }
     ],
-    "lightBoard": true,
     "slam": true,
     "img": "4_doctor.png",
     "layer2": [
