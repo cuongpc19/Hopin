@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { GAME_W, GAME_H } from "./GameScene";
-import { levelDifficulty, type Difficulty } from "../game/level";
+import { levelDifficulty } from "../game/level";
 import {
   getProgress,
   isEventUnlocked,
@@ -13,30 +13,14 @@ import {
 } from "../game/cloverEvent";
 
 const LEVEL_COUNT = 185; // L1-185 (kid pack L200-300 + rock-wall/logic L301-330 removed 2026-07-30)
-const SPACING = 104; // vertical gap between level nodes
-const BASE_R = 34; // base hex radius (harder tiers are bigger)
 
-interface NodeHit {
-  level: number;
-  x: number;
-  worldY: number;
-  r: number;
-  locked: boolean; // sequential mode: not yet reachable (level > progress)
-}
-
-// Home screen: a long, SCROLLABLE "climb the map" of hexagon level nodes. Drag to
-// scroll (replay earlier levels / preview later ones). The current level glows;
-// HARD (every 5th) and SUPER-HARD (every 15th) levels stand out with colour,
-// an icon badge and a tag.
+// Home screen (redesign 2026-08-01, user): BỎ bản đồ dây-level cuộn — nền là bức tranh
+// background2 (xe vàng + slime giữa rừng), dưới xe có Ô LEVEL hiển thị level hiện tại
+// (tap = chơi luôn, nút PLAY bên dưới vẫn giữ). Tier HARD/SUPER hiện tag ở ô + banner
+// cảnh báo khi vào level (GameScene.showTierBanner).
 export class LevelSelectScene extends Phaser.Scene {
   private gold = 0;
-  private map!: Phaser.GameObjects.Container;
-  private nodes: NodeHit[] = [];
-  private scrollC = 0;
-  private scrollMin = 0;
-  private scrollMax = 0;
   private viewTop = 0;
-  private viewBottom = 0;
 
   constructor() {
     super("select");
@@ -44,7 +28,7 @@ export class LevelSelectScene extends Phaser.Scene {
 
   preload() {
     this.load.image("background", "art/background.png"); // shared theme background
-    this.load.image("backgroundHome", "art/backgroundHome.png"); // premium dark Home art
+    this.load.image("background2", "art/background2.jpg"); // Home mới: xe + slime giữa rừng (user 2026-08-01)
     this.load.image("avatar", "art/slime-3.png"); // a cute face for the profile chip
     this.load.image("star-icon", "art/star.png"); // xu sao — icon vàng thống nhất (user 2026-08-01)
     // Start-nav mascot. Placeholder for now → swap to the real cute-slime art when ready.
@@ -65,284 +49,94 @@ export class LevelSelectScene extends Phaser.Scene {
     // players from before pf_current existed. (user 2026-07-31)
     const current = Phaser.Math.Clamp(this.readInt("pf_current", progress), 1, LEVEL_COUNT);
 
-    // Lucky Clover event bar sits between the top bar and the map when active.
+    // Lucky Clover event bar sits under the top bar when active.
     const showEvent = isEventUnlocked() && !isEventComplete();
     this.viewTop = showEvent ? 194 : 88;
-    this.viewBottom = GAME_H - 152;
-    this.nodes = [];
+    void this.viewTop; // giữ lại cho các popup sau này định vị
+    void progress; // tiến độ cao nhất vẫn lưu pf_progress (Ô LEVEL hiển thị pf_current)
 
     this.buildBackground();
-    this.buildMap(progress, current);
     this.buildTopBar();
+    this.buildStage(current);
     this.buildPlay(current);
     this.buildBottomNav();
-    this.setupScroll();
     if (showEvent) this.buildEventBar();
-
-    // Discoverability: make it clear every level is pickable.
-    this.add
-      .text(GAME_W / 2, this.viewTop - 12, "Tap any level to play · Drag to scroll", {
-        fontFamily: "Arial, sans-serif",
-        fontStyle: "bold",
-        fontSize: "12px",
-        color: "#eaf6df",
-        stroke: "#12305e",
-        strokeThickness: 3,
-      })
-      .setOrigin(0.5)
-      .setDepth(70);
   }
 
   // ---- Background -----------------------------------------------------
   private buildBackground() {
-    // Premium dark Home art (already moody/twilight) → only a LIGHT veil + vignette so
-    // the golden path + gem nodes pop, without over-darkening the picture.
-    const key = this.textures.exists("backgroundHome") ? "backgroundHome" : "background";
+    // background2: tranh sáng (xe + slime giữa rừng) — COVER toàn màn (crop 2 bên),
+    // chỉ vignette nhẹ trên/dưới cho HUD với nav nổi chữ, KHÔNG phủ veil tối.
+    const key = this.textures.exists("background2") ? "background2" : "background";
     const img = this.add.image(GAME_W / 2, GAME_H / 2, key).setDepth(-100);
-    img.setDisplaySize(GAME_W, GAME_H);
-    const veil = this.add.graphics().setDepth(-99);
-    veil.fillStyle(0x061308, 0.22);
-    veil.fillRect(0, 0, GAME_W, GAME_H);
-    // Soft top/bottom vignette to focus the eye on the centre climb.
+    const sc = Math.max(GAME_W / img.width, GAME_H / img.height);
+    img.setScale(sc);
     const vig = this.add.graphics().setDepth(-98);
-    vig.fillStyle(0x020704, 0.4);
-    vig.fillRect(0, 0, GAME_W, 60);
-    vig.fillRect(0, GAME_H - 80, GAME_W, 80);
+    vig.fillStyle(0x0a2410, 0.35);
+    vig.fillRect(0, 0, GAME_W, 64);
+    vig.fillRect(0, GAME_H - 84, GAME_W, 84);
   }
 
-  // ---- Scrollable level map -------------------------------------------
-  private worldY(level: number) {
-    return -(level - 1) * SPACING; // level 1 at 0, higher levels rise (negative)
-  }
-  private waveX(level: number) {
-    return GAME_W / 2 + Math.sin(level * 0.7) * 46; // gentle side-to-side wave
-  }
-
-  private buildMap(progress: number, current: number) {
-    const map = this.add.container(0, 0).setDepth(5);
-    this.map = map;
-
-    // The winding path ("dây") behind the nodes. A smooth Catmull-Rom SPLINE (not a
-    // gappy polyline) stroked in layers so it reads as a clean rope that POPS against
-    // the forest: soft shadow → crisp dark casing → warm amber body → bright core.
-    const pts: Phaser.Math.Vector2[] = [];
-    pts.push(new Phaser.Math.Vector2(this.waveX(1), this.worldY(1) + 60)); // run off-screen at the base
-    for (let L = 1; L <= LEVEL_COUNT; L++) pts.push(new Phaser.Math.Vector2(this.waveX(L), this.worldY(L)));
-    pts.push(new Phaser.Math.Vector2(this.waveX(LEVEL_COUNT), this.worldY(LEVEL_COUNT) - 60)); // and off the top
-    const spline = new Phaser.Curves.Spline(pts);
-    const SAMPLES = LEVEL_COUNT * 6; // smooth enough across the whole climb
-    const road = this.add.graphics();
-    const stroke = (w: number, color: number, alpha = 1) => {
-      road.lineStyle(w, color, alpha);
-      spline.draw(road, SAMPLES);
-    };
-    stroke(28, 0x08170c, 0.45); // soft outer shadow
-    stroke(21, 0x3b2a12, 1);    // crisp dark casing → strong edge on the busy bg
-    stroke(14, 0xf0a828, 1);    // warm amber body
-    stroke(9, 0xffcb54, 1);     // inner glow
-    stroke(4, 0xfff0c2, 0.95);  // bright core highlight
-    map.add(road);
-
-    for (let L = 1; L <= LEVEL_COUNT; L++) this.makeNode(map, L, progress, current);
-
-    // Clip the map to the window between the HUD and the Play button.
-    const mg = this.make.graphics();
-    mg.fillStyle(0xffffff, 1);
-    mg.fillRect(0, this.viewTop, GAME_W, this.viewBottom - this.viewTop);
-    map.setMask(mg.createGeometryMask());
-
-    // Scroll clamps + initial position (centre the current level in the window).
-    const viewMid = (this.viewTop + this.viewBottom) / 2;
-    const bottomPad = 60; // lift the tree so level 1 clears the bottom edge (fully visible)
-    this.scrollMin = this.viewBottom - bottomPad; // level 1 rests just above the bottom
-    this.scrollMax = this.viewTop + (LEVEL_COUNT - 1) * SPACING; // level N reaches the top
-    this.scrollC = Phaser.Math.Clamp(viewMid + (current - 1) * SPACING, this.scrollMin, this.scrollMax);
-    map.y = this.scrollC;
-  }
-
-  private diffColors(_d: Difficulty): { face: number; edge: number; hi: number } {
-    // Unified PREMIUM tone: one deep emerald-teal gem for every level, gold-rimmed
-    // (added in makeNode) — minimal & luxe. Difficulty still reads via node size + the
-    // 🔥/💀 icon + HARD/SUPER tag; the CURRENT level stays gold to pop.
-    return { face: 0x1c8f79, edge: 0x0a3b30, hi: 0x8fe8d0 };
-  }
-
-  private makeNode(map: Phaser.GameObjects.Container, level: number, progress: number, curLevel: number) {
-    const d = levelDifficulty(level);
-    const cleared = level < progress; // beaten history (highest reached) → star badge
-    const current = level === curLevel; // where the player is NOW → gold highlight (wins over cleared)
-    // Sequential mode locks anything past the reached level; "Any Level" unlocks all.
-    const locked = !this.freeSelect() && level > progress;
-    const x = this.waveX(level);
-    const y = this.worldY(level);
-    const R = BASE_R + (d === "superhard" ? 9 : d === "hard" ? 5 : 0); // harder = bigger
-
-    const col = locked
-      ? { face: 0x8b98a1, edge: 0x566068, hi: 0xc4cdd3 } // greyed-out lock
-      : current
-        ? { face: 0xffc63a, edge: 0xcf8410, hi: 0xffe9a8 }
-        : this.diffColors(d);
-
-    // SUPER-HARD gets a pulsing danger ring; the current level a warm glow. (Not when locked.)
-    if (d === "superhard" && !locked) {
-      const ring = this.add.circle(x, y, R + 12, 0xff2f6e, 0.28);
-      map.add(ring);
-      this.tweens.add({ targets: ring, scale: 1.14, alpha: 0.12, duration: 850, yoyo: true, repeat: -1, ease: "Sine.inOut" });
-    }
-    if (current) {
-      const glow = this.add.circle(x, y, R + 20, 0xffe14a, 0.42);
-      map.add(glow);
-      this.tweens.add({ targets: glow, scale: 1.16, alpha: 0.16, duration: 900, yoyo: true, repeat: -1, ease: "Sine.inOut" });
-    }
-
-    const g = this.add.graphics();
-    this.hex(g, x, y + 6, R + 2, 0x02080c, 0.5); // deeper drop shadow → lifts off the dark stage
-    this.hex(g, x, y, R + 1.5, 0x02100a, 0.9); // thin dark casing (crisp silhouette)
-    this.hex(g, x, y, R, col.edge); // outer edge ring
-    this.hex(g, x, y, R - 4.5, col.face); // face
-    this.hex(g, x, y + R * 0.34, R * 0.66, col.edge, 0.35); // soft lower shade → rounded volume
-    this.hex(g, x, y - R * 0.3, R * 0.62, col.hi, 0.68); // glossy top bevel (brighter)
-    // Thin bright rim on the upper edge for a coated sheen.
-    g.lineStyle(2, 0xffffff, 0.4);
-    this.hexStroke(g, x, y - 0.5, R - 1.5);
-    g.lineStyle(current ? 4 : d === "normal" ? 2.5 : 3.5, current ? 0xfff4cf : col.edge, 1);
-    this.hexStroke(g, x, y, R);
-    // Gold hairline rim on every gem (skip locked) — a unifying luxe accent, matches
-    // the golden path. Sits just outside the coloured edge.
-    if (!locked) {
-      g.lineStyle(1.5, current ? 0xfff0b0 : 0xf0c463, current ? 1 : 0.9);
-      this.hexStroke(g, x, y, R + 2);
-    }
-    if (locked) g.setAlpha(0.6);
-    else if (cleared && !current) g.setAlpha(0.72); // beaten levels dim back
-    map.add(g);
-
-    const num = this.add
-      .text(x, y + 1, String(level), {
-        fontFamily: "Arial, sans-serif",
-        fontStyle: "bold",
-        fontSize: current ? "30px" : d === "normal" ? "23px" : "26px",
-        color: "#ffffff",
-        stroke: "#0e2a1a",
-        strokeThickness: current ? 6 : 5,
-      })
-      .setOrigin(0.5);
-    if (locked) num.setAlpha(0.55);
-    else if (cleared && !current) num.setAlpha(0.85);
-    map.add(num);
-
-    // Beaten → star badge; current → warm glow (above). Locked levels just dim (no lock icon).
-    if (cleared && !current) {
-      const star = this.add.text(x + R - 6, y - R + 4, "⭐", { fontSize: "16px" }).setOrigin(0.5);
-      map.add(star);
-    }
-
-    // Difficulty flair — always visible so hard tiers read at a glance.
-    if (d !== "normal") {
-      const icon = this.add.text(x, y - R - 4, d === "superhard" ? "💀" : "🔥", { fontSize: "20px" }).setOrigin(0.5, 1);
-      if (locked) icon.setAlpha(0.5);
-      map.add(icon);
-      this.diffTag(map, x, y + R + 3, d);
-    }
-
-    this.nodes.push({ level, x, worldY: y, r: R, locked });
-  }
-
-  private diffTag(map: Phaser.GameObjects.Container, x: number, y: number, d: Difficulty) {
-    const label = d === "superhard" ? "SUPER HARD" : "HARD";
-    const color = d === "superhard" ? 0xd11e5e : 0xe06a12;
+  // ---- Sân khấu Home (user 2026-08-01: BỎ dây level/bản đồ cuộn) ------------
+  // Nền background2 đã có sẵn xe + slime giữa rừng; dưới xe là Ô LEVEL (pill vàng
+  // "LEVEL N", tap = chơi luôn) + tag 🔥HARD/💀SUPER khi level hiện tại thuộc tier đó.
+  private buildStage(current: number) {
+    const D = 40;
+    const d = levelDifficulty(current);
+    const px = GAME_W / 2;
+    const py = GAME_H * 0.755; // ngay dưới gầm xe trong ảnh nền
+    const label = `LEVEL ${current}`;
     const t = this.add
-      .text(x, y + 2, label, { fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "12px", color: "#ffffff" })
-      .setOrigin(0.5, 0);
-    const w = t.width + 18;
-    const bg = this.add.graphics();
-    bg.fillStyle(color, 1);
-    bg.fillRoundedRect(x - w / 2, y, w, 20, 10);
-    bg.lineStyle(2, 0xffffff, 0.9);
-    bg.strokeRoundedRect(x - w / 2, y, w, 20, 10);
-    map.add(bg);
-    map.add(t);
-  }
+      .text(px, py, label, {
+        fontFamily: '"Lilita One", "Arial Black", Arial, sans-serif',
+        fontSize: "30px",
+        color: "#ffffff",
+        stroke: "#8a5a12",
+        strokeThickness: 6,
+      })
+      .setOrigin(0.5)
+      .setDepth(D + 2);
+    const w = Math.max(196, t.width + 56);
+    const h = 56;
+    const g = this.add.graphics().setDepth(D);
+    g.fillStyle(0xb9760d, 1);
+    g.fillRoundedRect(px - w / 2, py - h / 2 + 4, w, h, 18); // đế nổi khối
+    g.fillStyle(0xf9c22e, 1);
+    g.fillRoundedRect(px - w / 2, py - h / 2, w, h, 18);
+    g.fillStyle(0xffd95e, 0.8); // gloss nửa trên (đồng bộ banner màn thắng)
+    g.fillRoundedRect(px - w / 2 + 5, py - h / 2 + 4, w - 10, 24, 12);
+    g.lineStyle(3, 0xfff0c0, 0.9);
+    g.strokeRoundedRect(px - w / 2, py - h / 2, w, h, 18);
+    this.tweens.add({ targets: t, scale: 1.05, duration: 700, yoyo: true, repeat: -1, ease: "Sine.inOut" });
 
-  // Flat-top hexagon fill / stroke.
-  private hexPath(g: Phaser.GameObjects.Graphics, cx: number, cy: number, r: number) {
-    g.beginPath();
-    for (let k = 0; k < 6; k++) {
-      const a = (Math.PI / 3) * k;
-      const px = cx + Math.cos(a) * r;
-      const py = cy + Math.sin(a) * r;
-      if (k === 0) g.moveTo(px, py);
-      else g.lineTo(px, py);
+    // tag tier ngay dưới ô — cùng ngôn ngữ với banner cảnh báo trong GameScene
+    if (d !== "normal") {
+      const tag = this.add
+        .text(px, py + h / 2 + 17, d === "superhard" ? "💀 SUPER HARD" : "🔥 HARD", {
+          fontFamily: "Arial, sans-serif",
+          fontStyle: "bold",
+          fontSize: "14px",
+          color: "#ffffff",
+        })
+        .setOrigin(0.5)
+        .setDepth(D + 2);
+      const tw = tag.width + 22;
+      const tg = this.add.graphics().setDepth(D + 1);
+      tg.fillStyle(d === "superhard" ? 0xd11e5e : 0xe06a12, 1);
+      tg.fillRoundedRect(px - tw / 2, py + h / 2 + 6, tw, 22, 11);
+      tg.lineStyle(2, 0xffffff, 0.9);
+      tg.strokeRoundedRect(px - tw / 2, py + h / 2 + 6, tw, 22, 11);
     }
-    g.closePath();
-  }
-  private hex(g: Phaser.GameObjects.Graphics, cx: number, cy: number, r: number, color: number, alpha = 1) {
-    g.fillStyle(color, alpha);
-    this.hexPath(g, cx, cy, r);
-    g.fillPath();
-  }
-  private hexStroke(g: Phaser.GameObjects.Graphics, cx: number, cy: number, r: number) {
-    this.hexPath(g, cx, cy, r);
-    g.strokePath();
-  }
 
-  // ---- Drag-to-scroll + tap-to-play -----------------------------------
-  private setupScroll() {
-    let downY = 0;
-    let downScroll = 0;
-    let moved = 0;
-    let active = false;
-
-    // Use WORLD coords (worldX/worldY) throughout: the camera is zoomed by dpr, so
-    // pointer.x/y (screen space) are dpr× larger than the world coords the nodes
-    // live in — comparing those directly made taps miss every node.
-    this.input.on("pointerdown", (p: Phaser.Input.Pointer) => {
-      active = p.worldY >= this.viewTop && p.worldY <= this.viewBottom;
-      downY = p.worldY;
-      downScroll = this.scrollC;
-      moved = 0;
+    const hit = this.add
+      .rectangle(px, py, w, h, 0xffffff, 0.001)
+      .setDepth(D + 3)
+      .setInteractive({ useHandCursor: true });
+    hit.on("pointerdown", () => {
+      this.tweens.add({ targets: t, scale: 0.9, duration: 90, yoyo: true, onComplete: () => this.scene.start("game", { level: current }) });
     });
-    this.input.on("pointermove", (p: Phaser.Input.Pointer) => {
-      if (!active || !p.isDown) return;
-      const dy = p.worldY - downY;
-      moved = Math.max(moved, Math.abs(dy));
-      this.scrollC = Phaser.Math.Clamp(downScroll + dy, this.scrollMin, this.scrollMax);
-      this.map.y = this.scrollC;
-    });
-    const end = (p: Phaser.Input.Pointer) => {
-      if (active && moved < 8) this.tapAt(p.worldX, p.worldY); // a tap, not a drag → play that level
-      active = false;
-    };
-    this.input.on("pointerup", end);
-    this.input.on("pointerupoutside", end);
   }
 
-  private tapAt(px: number, py: number) {
-    if (py < this.viewTop || py > this.viewBottom) return;
-    for (const n of this.nodes) {
-      const sy = this.map.y + n.worldY;
-      if (Math.hypot(px - n.x, py - sy) <= n.r + 6) {
-        if (n.locked) {
-          // Sequential mode: can't jump ahead. Red deny pulse + hint.
-          const ring = this.add
-            .circle(n.x, sy, n.r, 0xffffff, 0.001)
-            .setStrokeStyle(4, 0xe23b3b, 0.9)
-            .setDepth(200);
-          this.tweens.add({ targets: ring, scale: 1.4, alpha: 0, duration: 240, onComplete: () => ring.destroy() });
-          this.toast("Locked — finish the levels in order");
-          return;
-        }
-        // quick "you picked it" pop, then launch that level
-        const ring = this.add
-          .circle(n.x, sy, n.r, 0xffffff, 0.001)
-          .setStrokeStyle(4, 0xffffff, 0.9)
-          .setDepth(200);
-        this.tweens.add({ targets: ring, scale: 1.5, alpha: 0, duration: 220, onComplete: () => ring.destroy() });
-        this.time.delayedCall(110, () => this.scene.start("game", { level: n.level }));
-        return;
-      }
-    }
-  }
 
   // ---- Top bar --------------------------------------------------------
   private buildTopBar() {

@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { COLORS, TEXT_LIGHT, shade } from "../game/palette";
 import {
+  levelDifficulty,
   makeLevel,
   HARD_ROCK,
   isObstacle,
@@ -595,6 +596,8 @@ export class GameScene extends Phaser.Scene {
     if (levelNum === 1) this.startTutorial(); // gentle intro guidance
     else if (this.maybeShowHardRockIntro()) { /* first hard-rock level → explain the rock */ }
     else this.maybeShowTwinIntro(); // first level with a twin pair → explain twin cars
+    // Cảnh báo tier khi VÀO level khó (user 2026-08-01): banner 🔥HARD/💀SUPER ~1.5s.
+    if (levelDifficulty(levelNum) !== "normal") this.showTierBanner(levelDifficulty(levelNum) === "superhard");
   }
 
   // ---- Hard-rock intro (first level that has hard rock) ---------------
@@ -658,6 +661,42 @@ export class GameScene extends Phaser.Scene {
     };
     ok.on("pointerdown", kill);
     dim.on("pointerdown", kill);
+  }
+
+  // ---- Banner cảnh báo tier (user 2026-08-01): vào level HARD/SUPER → dải màu ngang
+  // giữa màn "🔥 HARD LEVEL"/"💀 SUPER HARD" ~1.5s (tap để bỏ qua sớm), game đứng yên
+  // trong lúc hiện (tutPaused) rồi tự chạy tiếp.
+  private showTierBanner(superhard: boolean) {
+    const D = 420;
+    const cy = GAME_H * 0.38;
+    const color = superhard ? 0xd11e5e : 0xe06a12;
+    const label = superhard ? "💀 SUPER HARD" : "🔥 HARD LEVEL";
+    this.tutPaused = true;
+    const dim = this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0x000000, 0.45).setDepth(D).setInteractive();
+    const band = this.add.rectangle(GAME_W / 2, cy, GAME_W + 40, 88, color, 0.96).setDepth(D + 1).setScale(1, 0.1);
+    const edge = this.add.rectangle(GAME_W / 2, cy, GAME_W + 40, 96, 0xffffff, 0.18).setDepth(D).setScale(1, 0.1);
+    const tx = this.add
+      .text(GAME_W / 2, cy, label, {
+        fontFamily: '"Lilita One", "Arial Black", Arial, sans-serif',
+        fontSize: "34px",
+        color: "#ffffff",
+        stroke: superhard ? "#7a0f36" : "#8a3c06",
+        strokeThickness: 6,
+      })
+      .setOrigin(0.5)
+      .setDepth(D + 2)
+      .setScale(0.25);
+    this.tweens.add({ targets: [band, edge], scaleY: 1, duration: 240, ease: "Back.out" });
+    this.tweens.add({ targets: tx, scale: 1, duration: 360, ease: "Back.out", delay: 80 });
+    let goneT = false;
+    const kill = () => {
+      if (goneT) return;
+      goneT = true;
+      for (const o of [dim, band, edge, tx]) { this.tweens.killTweensOf(o); o.destroy(); }
+      this.tutPaused = false;
+    };
+    dim.on("pointerdown", kill);
+    this.time.delayedCall(1500, kill);
   }
 
   // ---- Level-1 tutorial ----------------------------------------------

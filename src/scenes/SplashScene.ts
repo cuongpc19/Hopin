@@ -17,7 +17,7 @@ export class SplashScene extends Phaser.Scene {
   }
 
   preload() {
-    this.load.image("splash", "art/hopin.png");
+    this.load.image("splash", "art/hopin2.jpg"); // poster mới (user 2026-08-01)
   }
 
   create() {
