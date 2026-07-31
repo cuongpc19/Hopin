@@ -150,7 +150,9 @@
     <!-- direct save into the game (only when opened via `npm run dev` → /editor) -->
     <div class="row" id="gameRow" style="margin-top:10px; display:none; border-top:1px dashed var(--line); padding-top:10px;">
       <label>▶ Vào game — Level số:</label>
+      <button id="gamePrev" title="Level trước (−1) — nạp nếu game đã có">▼</button>
       <input id="gameNum" type="number" min="1" value="1" style="width:64px" />
+      <button id="gameNext" title="Level sau (+1) — nạp nếu game đã có">▲</button>
       <select id="gamePick"><option value="">— level game đã có —</option></select>
       <button id="gameSave" class="primary">💾 Lưu vào game</button>
       <button id="gameDel" class="danger">Xoá khỏi game</button>
@@ -1136,13 +1138,33 @@ document.getElementById("gameDel").onclick = async () => {
     refreshGamePick(await fetchLevels());
   } catch (e) { alert("Xoá lỗi: " + e); }
 };
-document.getElementById("gamePick").onchange = async (e) => {
-  const n = e.target.value; if (!n) return;
-  const data = await fetchLevels();
-  const lv = data[n]; if (!lv) return;
+// Jump to game level `n`: set the number, and LOAD its design if the game already has it
+// (so you can flip through levels and edit each fast). If it doesn't exist yet, just set the
+// number + note it — the current editor content is kept so you can save a new level there.
+async function loadGameLevel(n) {
+  n = parseInt(n, 10);
+  if (!(n >= 1)) return;
   document.getElementById("gameNum").value = n;
-  applyLevel({ name: "Level " + n, cols: lv.cols, rows: lv.rows, board: lv.board, chests: lv.chests });
-};
+  const gp = document.getElementById("gamePick");
+  const st = document.getElementById("gameStatus");
+  const data = await fetchLevels();
+  const lv = data[n];
+  if (lv) {
+    applyLevel({ name: "Level " + n, cols: lv.cols, rows: lv.rows, board: lv.board, chests: lv.chests });
+    gp.value = String(n);
+    st.textContent = `Đang xem Level ${n} (từ game).`;
+  } else {
+    gp.value = "";
+    st.textContent = `Level ${n} chưa có trong game — số mới để lưu.`;
+  }
+}
+function stepGameLevel(delta) {
+  const cur = parseInt(document.getElementById("gameNum").value, 10) || 1;
+  loadGameLevel(Math.max(1, cur + delta));
+}
+document.getElementById("gamePrev").onclick = () => stepGameLevel(-1);
+document.getElementById("gameNext").onclick = () => stepGameLevel(1);
+document.getElementById("gamePick").onchange = (e) => { if (e.target.value) loadGameLevel(e.target.value); };
 
 // ---- Màu viền/nền picker (image build) ----
 // Fill #imgBgColor with "Tự động" + every game colour (id 0..BASE_N-1), each option tinted
