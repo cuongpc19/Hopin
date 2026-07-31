@@ -173,6 +173,12 @@
           <option value="dark">🌑 Tối (mặc định)</option>
           <option value="light">🌕 Sáng</option>
         </select>
+        <label style="margin-left:8px">Viền</label>
+        <select id="borderMode" title="Có viền = tô 1 khung chữ nhật màu sáng (tự chọn) lấp các ô trống bao quanh chủ thể; Không = chủ thể nổi trên nền cỏ">
+          <option value="off">Không viền</option>
+          <option value="on">Có viền</option>
+        </select>
+        <span id="bgSwatch" style="display:inline-block;width:20px;height:20px;border-radius:5px;border:1px solid #555;vertical-align:middle;"></span>
         <div class="spacer"></div>
         <button id="clear" class="danger">Xoá sạch</button>
       </div>
@@ -198,17 +204,13 @@
             <option value="keep">Giữ nguyên (lấp đầy)</option>
             <option value="flat">Gộp thành 1 màu</option>
           </select>
-          <label>Màu viền</label>
-          <select id="imgBgColor" title="Màu game cho nền/viền khi Nền = 'Gộp thành 1 màu' (mặc định: tự dò từ ảnh)">
-            <option value="-1">Tự động</option>
-          </select>
           <label class="chk"><input id="imgCrop" type="checkbox" checked /> Cắt sát</label>
           <button id="imgBuild" class="primary">Tạo slime từ ảnh</button>
         </div>
         <p class="hint">
           <b>Màu game</b> (mặc định, BẮT BUỘC để xe có art khớp): ép ảnh về K màu game khớp nhất (tối đa 11). <b>Màu ảnh</b>: chỉ để xem thử độ nét — palette lúc đó KHÔNG phải màu game nên xe sẽ thiếu art, đừng xuất level từ chế độ này.
           <b>Nền</b>: <i>Bỏ</i> (mặc định) = tách nền, để ô trống → nhân vật nổi trên nền cỏ game (silhouette). <i>Giữ nguyên</i> = quantize cả ảnh, lấp đầy bảng cả nền. <i>Gộp 1 màu</i> = nền gộp thành 1 tile. Bỏ/Gộp dò nền (lan từ mép) → đẹp với tranh phẳng viền rõ.
-          <b>Màu viền</b>: khi Nền = <i>Gộp 1 màu</i>, chọn 1 màu game cố định cho nền/viền (kể cả phần lề lấp quanh chủ thể) thay vì để tool tự dò — <i>Tự động</i> = như cũ.
+          Muốn thêm KHUNG chữ nhật sau chủ thể → dùng <b>Nền = Bỏ</b> rồi bật <b>Viền = Có</b> ở hàng trên (màu sáng tự chọn).
           <b>Cắt sát</b> tự crop vào chủ thể rồi căn giữa trong lưới 25×25. Ảnh chụp: tăng <b>Số màu</b> (12–16) cho nét hơn.
         </p>
       </div>
@@ -216,16 +218,6 @@
       <div class="row" style="margin-top:14px;">
         <label>Màu vẽ:</label>
         <div class="palette" id="palette"></div>
-      </div>
-
-      <div class="row" style="margin-top:10px;">
-        <label>Viền</label>
-        <select id="borderMode" title="Có viền = tô 1 khung chữ nhật (màu sáng tự chọn) lấp các ô trống bao quanh chủ thể; Không = chủ thể nổi trên nền cỏ">
-          <option value="off">Không viền</option>
-          <option value="on">Có viền (tự động sáng)</option>
-        </select>
-        <span id="bgSwatch" style="display:inline-block;width:22px;height:22px;border-radius:6px;border:1px solid #555;vertical-align:middle;"></span>
-        <span id="bgLabel" class="hint"></span>
       </div>
 
       <div class="board-wrap"><div id="board"></div></div>
@@ -656,7 +648,6 @@ function buildFromImage(img) {
   const K = Math.max(2, Math.min(kMax, +document.getElementById("imgK").value|0));
   const maxSide = IMG_INNER;   // subject fits in 23×23, then centred in the 25×25 canvas
   const bgOpt = document.getElementById("imgBgMode").value;   // "flat" | "bo" | "keep"
-  const bgPick = +document.getElementById("imgBgColor").value; // -1 = tự động, else a fixed game colour id
   const autoCrop = document.getElementById("imgCrop").checked;
   const iw = img.naturalWidth, ih = img.naturalHeight;
 
@@ -757,7 +748,7 @@ function buildFromImage(img) {
     for (const i of fg) board[i] = clusterId[nearestIdx(cellCol[i], centers)];
     if (bgFlat.length) {
       const bg = avgCol(bgFlat), vi = Math.round((1 - Math.min(1, lum(bg)/255)) * (vSorted.length - 1));
-      const bgId = bgPick >= 0 ? bgPick : vSorted[vi]; for (const i of bgFlat) board[i] = bgId;
+      const bgId = vSorted[vi]; for (const i of bgFlat) board[i] = bgId;
     }
     fullPalette = false;
     COLORS = BASE_COLORS.map(c => ({ ...c }));
@@ -771,7 +762,7 @@ function buildFromImage(img) {
                           .sort((a,b) => cov[b] - cov[a]).slice(0, K);
     const chosenRgb = chosen.map(id => baseRgb[id]);
     for (const i of fg) board[i] = chosen[nearestIdx(cellCol[i], chosenRgb)];
-    if (bgFlat.length) { const bgId = bgPick >= 0 ? bgPick : nearestIdx(avgCol(bgFlat), baseRgb); for (const i of bgFlat) board[i] = bgId; }
+    if (bgFlat.length) { const bgId = nearestIdx(avgCol(bgFlat), baseRgb); for (const i of bgFlat) board[i] = bgId; }
     fullPalette = false;
     COLORS = BASE_COLORS.map(c => ({ ...c }));
     paintColor = chosen[0];
@@ -1039,16 +1030,15 @@ function autoBrightBorderId() {
 }
 function updateBgReadout() {
   const sw = document.getElementById("bgSwatch");
-  const lb = document.getElementById("bgLabel");
+  const lb = document.getElementById("bgLabel"); // optional
   const tg = document.getElementById("borderMode");
   if (tg) tg.value = borderId === EMPTY ? "off" : "on";
-  if (!sw || !lb) return;
   if (borderId === EMPTY) {
-    sw.style.background = "repeating-linear-gradient(45deg,#444 0 6px,#222 6px 12px)";
-    lb.textContent = "chủ thể nổi trên nền cỏ";
+    if (sw) sw.style.background = "repeating-linear-gradient(45deg,#444 0 6px,#222 6px 12px)";
+    if (lb) lb.textContent = "chủ thể nổi trên nền cỏ";
   } else {
-    sw.style.background = COLORS[borderId] ? COLORS[borderId].hex : "#000";
-    lb.textContent = `khung ${borderId} · ${COLORS[borderId] ? COLORS[borderId].name : "?"}`;
+    if (sw) sw.style.background = COLORS[borderId] ? COLORS[borderId].hex : "#000";
+    if (lb) lb.textContent = `khung ${borderId} · ${COLORS[borderId] ? COLORS[borderId].name : "?"}`;
   }
 }
 
@@ -1193,37 +1183,11 @@ document.getElementById("gameNext").onclick = () => stepGameLevel(1);
 document.getElementById("gamePick").onchange = (e) => { if (e.target.value) loadGameLevel(e.target.value); };
 
 // ---- Màu viền/nền picker (image build) ----
-// Fill #imgBgColor with "Tự động" + every game colour (id 0..BASE_N-1), each option tinted
-// so the designer sees the swatch. Only meaningful when Nền = "Gộp 1 màu" (else disabled).
-function fillBgColorSelect() {
-  const sel = document.getElementById("imgBgColor");
-  if (!sel) return;
-  const keep = sel.value;
-  sel.innerHTML = '<option value="-1">Tự động</option>';
-  for (let i = 0; i < BASE_N; i++) {
-    const o = document.createElement("option");
-    o.value = i;
-    o.textContent = `${i} · ${BASE_COLORS[i].name}`;
-    o.style.background = BASE_COLORS[i].hex;
-    // readable text on the tinted option (dark colours → white text)
-    const [r, g, b] = hexToRgb(BASE_COLORS[i].hex);
-    o.style.color = (0.299 * r + 0.587 * g + 0.114 * b) < 140 ? "#fff" : "#111";
-    sel.appendChild(o);
-  }
-  sel.value = keep; // preserve the current pick across a rebuild
-}
-function syncBgColorEnabled() {
-  const sel = document.getElementById("imgBgColor");
-  const flat = document.getElementById("imgBgMode").value === "flat";
-  sel.disabled = !flat;
-  sel.style.opacity = flat ? "" : ".45";
-}
-document.getElementById("imgBgMode").addEventListener("change", syncBgColorEnabled);
 document.getElementById("boardType").onchange = (e) => { lightBoard = e.target.value === "light"; syncBoardTypeUI(); refresh(); };
 
 // ---- Boot ----
 loadDefault();
-fillBgColorSelect(); syncBgColorEnabled(); syncBoardTypeUI();
+syncBoardTypeUI();
 renderPalette(); renderBoard(); renderChests(); refresh();
 initGameApi();
 </script>
