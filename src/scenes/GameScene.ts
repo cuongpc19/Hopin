@@ -5640,13 +5640,25 @@ export class GameScene extends Phaser.Scene {
       this.addGold(reward);
       setWallet(this.gold);
     };
-    const close = () => {
+    // FLOW (user 2026-08-01): bấm CLAIM → đàn xu bay → xu vào ví xong chờ 1s → đi tiếp.
+    // Đi đâu: L1-9 → level kế; L10 trở lên → về Home.
+    let claiming = false;
+    const finishAndGo = () => {
       if (closed) return;
       closed = true;
-      applyReward();
+      applyReward(); // bảo hiểm — bình thường xu cuối đã cộng rồi
       for (const t of timers) t.remove();
       for (const o of objs) { this.tweens.killTweensOf(o); o.destroy(); }
-      this.startLevel(nextLevel);
+      if (this.levelNum < 10) this.startLevel(nextLevel);
+      else this.scene.start("select");
+    };
+    const claim = () => {
+      if (closed || claiming) return;
+      claiming = true;
+      flyCoins(() => {
+        const t = this.time.delayedCall(1000, finishAndGo);
+        timers.push(t);
+      });
     };
 
     // nền: LEVEL đang chơi chỉ còn THẤP THOÁNG sau lớp phủ tối 97% (user 2026-08-01
@@ -5656,7 +5668,7 @@ export class GameScene extends Phaser.Scene {
       .setDepth(399);
     objs.push(cover);
     const dim = this.add.rectangle(cx, cy, GAME_W + 240, GAME_H + 240, 0x000000, 0.001).setDepth(400).setInteractive();
-    dim.on("pointerdown", close);
+    dim.on("pointerdown", claim);
     objs.push(dim);
 
     // ví vàng góc trên-trái (pill trắng như video) — icon = XU SAO (star.png, user 2026-08-01)
@@ -5892,51 +5904,44 @@ export class GameScene extends Phaser.Scene {
       );
     }
 
-    // ---- ĐÀN XU BAY (user 2026-08-01): thưởng KHÔNG vào ví ngay — 7 xu sao bật ra từ
-    // chỗ "+40" rồi bay lên pill ví góc trên-trái; mỗi xu đáp = icon ví nảy + số đếm dần;
-    // xu cuối mới cộng thật (applyReward — đóng sớm thì close() tự cộng ngay).
-    {
+    // ---- ĐÀN XU BAY (user 2026-08-01): CHỈ chạy khi bấm CLAIM — 7 xu sao bật ra từ chỗ
+    // "+40" rồi bay lên pill ví; mỗi xu đáp = icon ví nảy + số đếm dần; xu cuối cộng thật
+    // (applyReward) rồi gọi onDone → chờ 1s → finishAndGo.
+    const flyCoins = (onDone: () => void) => {
       const NC = 7;
       const fromX = cx + 92, fromY = coinY + 46;
       const oldGold = this.gold;
-      timers.push(
-        this.time.addEvent({
-          delay: 850,
-          callback: () => {
-            if (closed || !this.textures.exists("star-icon")) { applyReward(); return; }
-            for (let k = 0; k < NC; k++) {
-              const c = this.add
-                .image(fromX + (Math.random() * 34 - 17), fromY + (Math.random() * 22 - 11), "star-icon")
-                .setDepth(405)
-                .setAlpha(0);
-              const cs = 24 / Math.max(c.width, c.height);
-              c.setScale(cs * 0.1);
-              objs.push(c);
-              this.tweens.add({
-                targets: c, alpha: 1, scaleX: cs, scaleY: cs, duration: 150, delay: k * 85, ease: "Back.out",
-                onComplete: () => {
-                  if (closed) { c.destroy(); return; }
-                  this.tweens.add({
-                    targets: c, x: 36, y: 35, scaleX: cs * 0.8, scaleY: cs * 0.8, duration: 430, ease: "Cubic.in",
-                    onComplete: () => {
-                      c.destroy();
-                      if (closed) return;
-                      if (walletIcon) {
-                        this.tweens.killTweensOf(walletIcon);
-                        walletIcon.setScale(walletBase);
-                        this.tweens.add({ targets: walletIcon, scale: walletBase * 1.28, duration: 80, yoyo: true, ease: "Quad.out" });
-                      }
-                      if (k + 1 >= NC) applyReward();
-                      else setWallet(oldGold + Math.round((reward * (k + 1)) / NC));
-                    },
-                  });
-                },
-              });
-            }
+      if (closed || !this.textures.exists("star-icon")) { applyReward(); onDone(); return; }
+      for (let k = 0; k < NC; k++) {
+        const c = this.add
+          .image(fromX + (Math.random() * 34 - 17), fromY + (Math.random() * 22 - 11), "star-icon")
+          .setDepth(405)
+          .setAlpha(0);
+        const cs = 24 / Math.max(c.width, c.height);
+        c.setScale(cs * 0.1);
+        objs.push(c);
+        this.tweens.add({
+          targets: c, alpha: 1, scaleX: cs, scaleY: cs, duration: 150, delay: k * 85, ease: "Back.out",
+          onComplete: () => {
+            if (closed) { c.destroy(); return; }
+            this.tweens.add({
+              targets: c, x: 36, y: 35, scaleX: cs * 0.8, scaleY: cs * 0.8, duration: 430, ease: "Cubic.in",
+              onComplete: () => {
+                c.destroy();
+                if (closed) return;
+                if (walletIcon) {
+                  this.tweens.killTweensOf(walletIcon);
+                  walletIcon.setScale(walletBase);
+                  this.tweens.add({ targets: walletIcon, scale: walletBase * 1.28, duration: 80, yoyo: true, ease: "Quad.out" });
+                }
+                if (k + 1 >= NC) { applyReward(); onDone(); }
+                else setWallet(oldGold + Math.round((reward * (k + 1)) / NC));
+              },
+            });
           },
-        })
-      );
-    }
+        });
+      }
+    };
 
     // ---- khối sự kiện Cỏ May Mắn (panel tím như "New Feature Unlock" của video) ----
     let claimY = cy + 262; // 2026-08-01: CLAIM hạ xuống thêm
@@ -5988,7 +5993,7 @@ export class GameScene extends Phaser.Scene {
     objs.push(cText);
     this.tweens.add({ targets: cText, scale: 1.08, duration: 620, yoyo: true, repeat: -1, ease: "Sine.inOut" });
     const hit = this.add.rectangle(cx, claimY, cbw, 50, 0xffffff, 0.001).setDepth(404).setInteractive({ useHandCursor: true });
-    hit.on("pointerdown", close);
+    hit.on("pointerdown", claim);
     objs.push(hit);
   }
 
