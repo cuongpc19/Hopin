@@ -199,15 +199,20 @@ class GameAudio {
     this.glide(this.sfxGain, base, base * 1.7, t, 0.05, 0.16, "sine"); // short soft pop
   }
 
-  // ---- SFX: xu bay vào ví (màn thắng) → "ding" đồng xu cổ điển: 2 nốt vút B5→E6 + lớp
-  // ánh kim mỏng phía trên; wobble nhẹ để đàn xu nghe leng keng lấp lánh, không lặp y hệt.
-  coin() {
+  // ---- SFX: xu bay vào ví (màn thắng) — bản HIỆN ĐẠI (user 2026-08-01, thay kiểu 2-nốt
+  // chiptune retro): "plink" thuỷ tinh — sine cơ bản decay mượt + partial chuông 2.76×
+  // + shimmer cao mảnh; MỖI XU ĐÁP LÊN MỘT NẤC pentatonic → cả tràng thành hợp âm rải
+  // đi lên nghe sang, không phải một tiếng lặp 13 lần.
+  coin(step = 0) {
     if (!this.ctx || !this.sfxGain) return;
     const t = this.ctx.currentTime;
-    const w = 0.97 + Math.random() * 0.06;
-    this.voice(this.sfxGain, 987.77 * w, t, 0.07, 0.3, "triangle");
-    this.voice(this.sfxGain, 1318.51 * w, t + 0.07, 0.3, 0.32, "triangle");
-    this.voice(this.sfxGain, 2637.02 * w, t + 0.07, 0.16, 0.09, "sine"); // ánh kim
+    const PENTA = [0, 2, 4, 7, 9];
+    const s = Math.min(step, 9); // trần 2 quãng — không chói
+    const semi = PENTA[s % 5] + 12 * Math.floor(s / 5);
+    const f = 1046.5 * Math.pow(2, semi / 12) * (0.995 + Math.random() * 0.01); // gốc C6
+    this.voice(this.sfxGain, f, t, 0.3, 0.3, "sine"); // thân plink
+    this.voice(this.sfxGain, f * 2.76, t, 0.12, 0.07, "sine"); // partial chuông
+    this.glide(this.sfxGain, f * 3.1, f * 4.3, t, 0.06, 0.045, "sine"); // shimmer
   }
 
   // ---- SFX: a car fills up and drives off → a bright ascending sparkle-chime,

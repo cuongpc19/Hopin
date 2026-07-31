@@ -5929,7 +5929,7 @@ export class GameScene extends Phaser.Scene {
               onComplete: () => {
                 c.destroy();
                 if (closed) return;
-                Audio.coin(); // leng keng mỗi xu đáp ví
+                Audio.coin(k); // plink đi lên từng nấc theo thứ tự xu đáp
                 if (walletIcon) {
                   this.tweens.killTweensOf(walletIcon);
                   walletIcon.setScale(walletBase);
