@@ -983,19 +983,12 @@ function renderOutput() {
 // (user 2026-08-01: "hình chữ nhật nhỏ nhất bao quanh chủ thể"). `borderId` tracks its colour
 // (EMPTY = none). Subject = every non-empty cell that isn't the current border fill.
 let borderId = EMPTY;
-function borderCellIdx() {
-  const s = [];
-  for (let c = 0; c < cols; c++) { s.push(c); s.push((rows - 1) * cols + c); }
-  for (let r = 1; r < rows - 1; r++) { s.push(r * cols); s.push(r * cols + cols - 1); }
-  return s;
-}
-// Best-guess an existing background when a level is loaded (edge-ring majority colour).
+// Detect an existing border/background fill: only a REAL panel fills ALL FOUR board corners
+// with one colour. (Edge-majority was wrong — a subject touching the edge looked like a border,
+// which then broke the toggle. user 2026-08-01 "setup viền k ăn".)
 function detectBgId() {
-  const tally = {};
-  for (const i of borderCellIdx()) { const v = board[i]; tally[v] = (tally[v] || 0) + 1; }
-  let best = EMPTY, bn = -1;
-  for (const k in tally) if (tally[k] > bn) { bn = tally[k]; best = +k; }
-  return best;
+  const cs = [board[0], board[cols - 1], board[(rows - 1) * cols], board[rows * cols - 1]];
+  return (cs[0] >= 0 && cs.every(v => v === cs[0])) ? cs[0] : EMPTY;
 }
 // Smallest rectangle covering the SUBJECT (non-empty cells that aren't the border fill).
 function subjectBBox() {
