@@ -5597,9 +5597,9 @@ export class GameScene extends Phaser.Scene {
     const next = this.levelNum + 1;
     // Gold is granted only the FIRST time a level is cleared (no replay farming).
     const firstClear = this.claimFirstClearReward(this.levelNum);
-    // Mọi ván thắng +WIN_GOLD (video mẫu). firstClear vẫn dùng cho clover/đánh dấu tiến độ.
+    // Mọi ván thắng +WIN_GOLD (video mẫu). KHÔNG cộng ví ngay — màn thắng bay đàn xu từ
+    // "+40" lên pill ví rồi mới cộng (showWinModal.applyReward; user 2026-08-01).
     const reward = WIN_GOLD;
-    this.addGold(reward);
     this.unlockProgress(next); // record on the picker that this level is beaten
 
     // Lucky Clover event: award clovers + auto-grant any milestone rewards reached.
@@ -5628,9 +5628,22 @@ export class GameScene extends Phaser.Scene {
     const timers: Phaser.Time.TimerEvent[] = [];
     let closed = false;
     const nextLevel = this.levelNum + 1;
+    // Ví chỉ được cộng SAU màn bay xu (hoặc ngay khi đóng sớm) — đúng một lần.
+    let goldTextObj: Phaser.GameObjects.Text | null = null;
+    let walletIcon: Phaser.GameObjects.Image | null = null;
+    let walletBase = 1;
+    let rewardApplied = false;
+    const setWallet = (n: number) => goldTextObj?.setText((walletIcon ? "" : "🪙 ") + n);
+    const applyReward = () => {
+      if (rewardApplied) return;
+      rewardApplied = true;
+      this.addGold(reward);
+      setWallet(this.gold);
+    };
     const close = () => {
       if (closed) return;
       closed = true;
+      applyReward();
       for (const t of timers) t.remove();
       for (const o of objs) { this.tweens.killTweensOf(o); o.destroy(); }
       this.startLevel(nextLevel);
@@ -5652,22 +5665,21 @@ export class GameScene extends Phaser.Scene {
     goldPill.fillRoundedRect(16, 18, 112, 34, 17);
     objs.push(goldPill);
     if (this.textures.exists("star-icon")) {
-      const starIc = this.add.image(36, 35, "star-icon").setDepth(402);
-      starIc.setScale(28 / Math.max(starIc.width, starIc.height));
-      objs.push(starIc);
-      objs.push(
-        this.add
-          .text(52, 35, `${this.gold}`, { fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "16px", color: "#5a4a1a" })
-          .setOrigin(0, 0.5)
-          .setDepth(402)
-      );
+      walletIcon = this.add.image(36, 35, "star-icon").setDepth(402);
+      walletBase = 28 / Math.max(walletIcon.width, walletIcon.height);
+      walletIcon.setScale(walletBase);
+      objs.push(walletIcon);
+      goldTextObj = this.add
+        .text(52, 35, `${this.gold}`, { fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "16px", color: "#5a4a1a" })
+        .setOrigin(0, 0.5)
+        .setDepth(402);
+      objs.push(goldTextObj);
     } else {
-      objs.push(
-        this.add
-          .text(34, 35, `🪙 ${this.gold}`, { fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "16px", color: "#5a4a1a" })
-          .setOrigin(0, 0.5)
-          .setDepth(402)
-      );
+      goldTextObj = this.add
+        .text(34, 35, `🪙 ${this.gold}`, { fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "16px", color: "#5a4a1a" })
+        .setOrigin(0, 0.5)
+        .setDepth(402);
+      objs.push(goldTextObj);
     }
 
     // ---- HERO: xe giữa + slime chạy-nhún-nhảy tót lên, LẶP vô hạn ----
@@ -5877,6 +5889,52 @@ export class GameScene extends Phaser.Scene {
           .text(cx + 92, coinY + 46, `+${reward}`, { fontFamily: '"Lilita One", "Arial Black", Arial, sans-serif', fontSize: "40px", color: "#ffffff", stroke: "#7a5205", strokeThickness: 6 })
           .setOrigin(0.5)
           .setDepth(403)
+      );
+    }
+
+    // ---- ĐÀN XU BAY (user 2026-08-01): thưởng KHÔNG vào ví ngay — 7 xu sao bật ra từ
+    // chỗ "+40" rồi bay lên pill ví góc trên-trái; mỗi xu đáp = icon ví nảy + số đếm dần;
+    // xu cuối mới cộng thật (applyReward — đóng sớm thì close() tự cộng ngay).
+    {
+      const NC = 7;
+      const fromX = cx + 92, fromY = coinY + 46;
+      const oldGold = this.gold;
+      timers.push(
+        this.time.addEvent({
+          delay: 850,
+          callback: () => {
+            if (closed || !this.textures.exists("star-icon")) { applyReward(); return; }
+            for (let k = 0; k < NC; k++) {
+              const c = this.add
+                .image(fromX + (Math.random() * 34 - 17), fromY + (Math.random() * 22 - 11), "star-icon")
+                .setDepth(405)
+                .setAlpha(0);
+              const cs = 24 / Math.max(c.width, c.height);
+              c.setScale(cs * 0.1);
+              objs.push(c);
+              this.tweens.add({
+                targets: c, alpha: 1, scaleX: cs, scaleY: cs, duration: 150, delay: k * 85, ease: "Back.out",
+                onComplete: () => {
+                  if (closed) { c.destroy(); return; }
+                  this.tweens.add({
+                    targets: c, x: 36, y: 35, scaleX: cs * 0.8, scaleY: cs * 0.8, duration: 430, ease: "Cubic.in",
+                    onComplete: () => {
+                      c.destroy();
+                      if (closed) return;
+                      if (walletIcon) {
+                        this.tweens.killTweensOf(walletIcon);
+                        walletIcon.setScale(walletBase);
+                        this.tweens.add({ targets: walletIcon, scale: walletBase * 1.28, duration: 80, yoyo: true, ease: "Quad.out" });
+                      }
+                      if (k + 1 >= NC) applyReward();
+                      else setWallet(oldGold + Math.round((reward * (k + 1)) / NC));
+                    },
+                  });
+                },
+              });
+            }
+          },
+        })
       );
     }
 
