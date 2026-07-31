@@ -136,19 +136,8 @@
 
   <!-- ============ LEVEL MANAGER ============ -->
   <div class="panel levelbar">
-    <div class="row">
-      <label>Đang design:</label>
-      <input id="lvName" placeholder="Tên level" style="width:150px" />
-      <select id="lvPick"></select>
-      <button id="lvSave" class="primary">💾 Lưu level</button>
-      <button id="lvNew">＋ Level mới</button>
-      <button id="lvDup">⧉ Nhân bản</button>
-      <button id="lvDel" class="danger">Xoá level</button>
-      <div class="spacer"></div>
-      <span id="lvStatus" class="hint"></span>
-    </div>
     <!-- direct save into the game (only when opened via `npm run dev` → /editor) -->
-    <div class="row" id="gameRow" style="margin-top:10px; display:none; border-top:1px dashed var(--line); padding-top:10px;">
+    <div class="row" id="gameRow" style="display:none;">
       <label>▶ Vào game — Level số:</label>
       <button id="gamePrev" title="Level trước (−1) — nạp nếu game đã có">▼</button>
       <input id="gameNum" type="number" min="1" value="1" style="width:64px" />
@@ -949,30 +938,6 @@ function levelObject() {
   return o;
 }
 
-// ---- Level store (multiple named levels in localStorage) ----
-const STORE_KEY = "pf_levels_v1";
-function loadStore() { try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; } catch { return {}; } }
-function saveStore(s) { localStorage.setItem(STORE_KEY, JSON.stringify(s)); }
-function nextLevelName() {
-  const store = loadStore(); let n = 1;
-  while (store["Level " + n]) n++;
-  return "Level " + n;
-}
-function refreshPicker() {
-  const store = loadStore();
-  const names = Object.keys(store);
-  const pick = document.getElementById("lvPick");
-  pick.innerHTML = '<option value="">— chọn bản đã lưu —</option>' +
-    names.map(n => `<option value="${n}" ${n === levelName ? "selected" : ""}>${n}</option>`).join("");
-  document.getElementById("lvName").value = levelName;
-  const saved = names.includes(levelName);
-  document.getElementById("lvStatus").innerHTML =
-    `${names.length} level đã lưu · <b>${levelName}</b> ${saved ? "✓ đã lưu" : "• chưa lưu"}`;
-  // "Lưu vào game" defaults to the number of the level being designed ("Level 4" → 4)
-  const m = (levelName || "").match(/(\d+)/);
-  const gn = document.getElementById("gameNum");
-  if (m && gn) gn.value = m[1];
-}
 function applyLevel(obj) {
   levelName = obj.name || levelName;
   cols = obj.cols; rows = obj.rows; board = obj.board.slice();
@@ -980,7 +945,7 @@ function applyLevel(obj) {
   lightBoard = !!obj.lightBoard;
   restorePalette(obj.palette, obj.paletteFull); selected = -1;
   syncSizeUI(); syncBoardTypeUI();
-  renderPalette(); renderBoard(); renderChests(); refresh(); refreshPicker();
+  renderPalette(); renderBoard(); renderChests(); refresh();
 }
 // Reflect the board theme in the select + tint the editor board-wrap so you preview how
 // tiles read on a dark navy vs light sand mat.
@@ -1060,46 +1025,6 @@ document.getElementById("download").onclick = () => {
   const blob = new Blob([JSON.stringify(levelObject(), null, 2)], { type: "application/json" });
   const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
   a.download = (levelName || "level").replace(/[^a-z0-9_-]+/gi, "-").toLowerCase() + ".json"; a.click();
-};
-
-// ---- Level manager events ----
-document.getElementById("lvName").onchange = (e) => {
-  const v = e.target.value.trim(); if (v) levelName = v; refreshPicker();
-};
-document.getElementById("lvSave").onclick = () => {
-  const v = document.getElementById("lvName").value.trim();
-  if (!v) return alert("Đặt tên level trước đã.");
-  levelName = v;
-  const store = loadStore();
-  store[levelName] = levelObject();
-  saveStore(store); refreshPicker();
-  const b = document.getElementById("lvSave"); const t = b.textContent; b.textContent = "Đã lưu ✓"; setTimeout(() => b.textContent = t, 1200);
-};
-document.getElementById("lvNew").onclick = () => {
-  if (!confirm("Tạo level mới? (nhớ lưu level hiện tại nếu cần)")) return;
-  levelName = nextLevelName();
-  COLORS = BASE_COLORS.map(c => ({ ...c })); fullPalette = false; lightBoard = false;
-  loadDefault(); chests = []; selected = -1; paintColor = 0;
-  syncSizeUI(); syncBoardTypeUI();
-  renderPalette(); renderBoard(); renderChests(); refresh(); refreshPicker();
-};
-document.getElementById("lvDup").onclick = () => {
-  levelName = nextLevelName();
-  renderChests(); refresh(); refreshPicker();
-  alert("Đã nhân bản thành “" + levelName + "”. Bấm 💾 Lưu để giữ lại.");
-};
-document.getElementById("lvDel").onclick = () => {
-  const store = loadStore();
-  if (!store[levelName]) return alert("Level này chưa được lưu.");
-  if (!confirm("Xoá level “" + levelName + "” khỏi bản lưu?")) return;
-  delete store[levelName]; saveStore(store);
-  const rest = Object.keys(store);
-  if (rest.length) applyLevel(store[rest[0]]); else refreshPicker();
-};
-document.getElementById("lvPick").onchange = (e) => {
-  const n = e.target.value; if (!n) return;
-  const store = loadStore();
-  if (store[n]) applyLevel(store[n]);
 };
 
 // ---- Save straight into the game (only when served by `npm run dev` at /editor) ----
@@ -1215,7 +1140,7 @@ document.getElementById("boardType").onchange = (e) => { lightBoard = e.target.v
 // ---- Boot ----
 loadDefault();
 fillBgColorSelect(); syncBgColorEnabled(); syncBoardTypeUI();
-renderPalette(); renderBoard(); renderChests(); refresh(); refreshPicker();
+renderPalette(); renderBoard(); renderChests(); refresh();
 initGameApi();
 </script>
 </body>
