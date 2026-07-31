@@ -216,6 +216,27 @@ class GameAudio {
     this.voice(this.sfxGain, f * 2.1, t + 0.01, 0.07, 0.025, "sine"); // ánh xu mảnh
   }
 
+  // ---- JINGLE thắng ván (màn LEVEL COMPLETE, user 2026-08-01): fanfare game-style ~2s —
+  // 4 nốt chạy vút lên → hợp âm C-trưởng ngân + bass → đuôi giai điệu nhí nhảnh E-D-C
+  // trên cao + shimmer glissando. To hơn SFX thường một chút cho ra chất ăn mừng.
+  // ⚖ BẢN QUYỀN AN TOÀN: soạn nguyên bản 100% bằng synth (không sample/file nhạc); chỉ dùng
+  // chất liệu nhạc lý chung (arpeggio + hợp âm trưởng — không bảo hộ được), KHÔNG mô phỏng
+  // giai điệu/tiết tấu của fanfare nổi tiếng nào (Mario/FF... có cấu trúc đặc trưng khác hẳn).
+  victory() {
+    if (!this.ctx || !this.sfxGain) return;
+    const t = this.ctx.currentTime;
+    const g = this.sfxGain;
+    const run = [NOTE.G4, NOTE.C5, NOTE.E5, NOTE.G5];
+    run.forEach((f, i) => this.voice(g, f, t + i * 0.09, 0.16, 0.32, "triangle"));
+    const ct = t + 0.38; // hợp âm chiến thắng
+    this.voice(g, NOTE.C3, ct, 1.15, 0.42, "sine"); // bass
+    for (const f of [NOTE.C5, NOTE.E5, NOTE.G5, NOTE.C5 * 2]) this.voice(g, f, ct, 0.95, 0.15, "triangle");
+    this.voice(g, NOTE.E5 * 2, ct + 0.35, 0.14, 0.2, "triangle"); // đuôi E-D-C
+    this.voice(g, NOTE.D5 * 2, ct + 0.5, 0.14, 0.17, "triangle");
+    this.voice(g, NOTE.C5 * 2, ct + 0.65, 0.55, 0.24, "triangle");
+    this.glide(g, 800, 2500, t + 0.3, 0.5, 0.06, "sine"); // shimmer
+  }
+
   // ---- SFX: a car fills up and drives off → a bright ascending sparkle-chime,
   // clearly different from the pickup pop.
   finish() {

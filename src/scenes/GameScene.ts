@@ -5622,6 +5622,7 @@ export class GameScene extends Phaser.Scene {
   // có thì placeholder makeCoinTexture); khối sự kiện Cỏ May Mắn nền tím; nút CLAIM xanh.
   // Tap bất kỳ đâu (hoặc CLAIM) → vào thẳng level tiếp theo như cũ.
   private showWinModal(reward: number, cloverAward: ReturnType<typeof awardClovers> | undefined) {
+    Audio.victory(); // fanfare chúc mừng (jingle nguyên bản — an toàn bản quyền)
     const cx = GAME_W / 2;
     const cy = GAME_H / 2;
     const objs: Phaser.GameObjects.GameObject[] = [];
