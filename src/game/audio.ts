@@ -229,22 +229,27 @@ class GameAudio {
     // trải 2 quãng + bass đôi + shimmer kép + chuông đuôi. ~2.6s.
     const t = this.ctx.currentTime;
     const g = this.sfxGain;
+    // (v3 "vui tai" 2026-08-01) boing hoạt hình + 2 nốt nhún staccato lấy đà trước khi chạy
+    this.glide(g, NOTE.C5 * 0.75, NOTE.C5 * 1.05, t, 0.09, 0.16, "sine"); // boing nhỏ
+    this.voice(g, NOTE.C5, t + 0.02, 0.06, 0.2, "triangle");
+    this.voice(g, NOTE.E5, t + 0.1, 0.06, 0.2, "triangle");
+    const t0 = t + 0.18; // chạy kép bắt đầu sau cú nhún
     // chạy kép vút lên (giai điệu + bè dưới quãng 3)
     const run = [NOTE.G4, NOTE.C5, NOTE.E5, NOTE.G5];
     const har = [NOTE.E4, NOTE.G4, NOTE.C5, NOTE.E5];
-    run.forEach((f, i) => this.voice(g, f, t + i * 0.085, 0.15, 0.32, "triangle"));
-    har.forEach((f, i) => this.voice(g, f, t + i * 0.085, 0.15, 0.15, "triangle"));
+    run.forEach((f, i) => this.voice(g, f, t0 + i * 0.085, 0.15, 0.32, "triangle"));
+    har.forEach((f, i) => this.voice(g, f, t0 + i * 0.085, 0.15, 0.15, "triangle"));
     // HIT 1: C trưởng + thump trống trầm
-    const c1 = t + 0.36;
+    const c1 = t0 + 0.36;
     this.glide(g, 160, 55, c1, 0.24, 0.5, "sine"); // thump timpani
     this.voice(g, NOTE.C3, c1, 0.45, 0.4, "sine");
     for (const f of [NOTE.C5, NOTE.E5, NOTE.G5]) this.voice(g, f, c1, 0.38, 0.15, "triangle");
     // NÂNG: G trưởng (bậc V — lấy đà khải hoàn)
-    const c2 = t + 0.76;
+    const c2 = t0 + 0.76;
     this.voice(g, NOTE.G2, c2, 0.38, 0.36, "sine");
     for (const f of [NOTE.G4, NOTE.B3 * 2, NOTE.D5]) this.voice(g, f, c2, 0.32, 0.14, "triangle");
     // HIT CUỐI: C trưởng trải 2 quãng + bass đôi + thump + shimmer kép + chuông đuôi
-    const c3 = t + 1.1;
+    const c3 = t0 + 1.1;
     this.glide(g, 180, 50, c3, 0.3, 0.55, "sine");
     this.voice(g, NOTE.C2, c3, 1.5, 0.4, "sine");
     this.voice(g, NOTE.C3, c3, 1.5, 0.28, "sine");
@@ -252,6 +257,10 @@ class GameAudio {
     this.glide(g, 900, 3200, c3, 0.7, 0.07, "sine");
     this.glide(g, 1400, 4200, c3 + 0.15, 0.6, 0.05, "sine");
     this.voice(g, NOTE.G5 * 2, c3 + 0.5, 0.6, 0.11, "sine"); // chuông đuôi cao
+    // đuôi ECHO NGHỊCH (vui tai): 4 nốt staccato nhảy lóc cóc đáp lại trên cao
+    const e0 = c3 + 0.55;
+    const echo = [NOTE.E5 * 2, NOTE.G5 * 2, NOTE.E5 * 2, NOTE.C5 * 2];
+    echo.forEach((f, i) => this.voice(g, f, e0 + i * 0.11, 0.07, 0.14, "triangle"));
   }
 
   // ---- SFX: a car fills up and drives off → a bright ascending sparkle-chime,
