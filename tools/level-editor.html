@@ -429,8 +429,11 @@ function renderPalette() {
 // ---- Board UI ----
 function renderBoard() {
   const el = document.getElementById("board");
-  // shrink cells for large boards so a 40×40 grid still fits on screen
-  const px = Math.max(9, Math.min(30, Math.floor(560 / Math.max(cols, rows))));
+  // Match the GAME's sizing: pin the cell to a 25-baseline so EVERY board ≥25 fills the SAME
+  // outer square (only the cell shrinks); boards <25 stay physically smaller. Fractional px is
+  // fine in CSS grid. (user 2026-08-01: "31×31 phải same 25×25".)
+  const PREVIEW = 560; // target outer width for a ≥25 board
+  const px = Math.max(6, Math.min(PREVIEW / 25, PREVIEW / Math.max(cols, rows)));
   el.style.gridTemplateColumns = `repeat(${cols}, ${px}px)`;
   el.innerHTML = "";
   for (let i = 0; i < board.length; i++) {
