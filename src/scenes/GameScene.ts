@@ -5644,8 +5644,9 @@ export class GameScene extends Phaser.Scene {
     );
 
     // ---- HERO: xe giữa + slime chạy-nhún-nhảy tót lên, LẶP vô hạn ----
-    const heroCY = cy - 205;
-    const glow = this.add.ellipse(cx, heroCY + 46, 240, 54, 0xf5b52a, 0.28).setDepth(401);
+    // (2026-08-01 user: cả bố cục DỊCH XUỐNG + ZOOM to hơn — màn cũ dồn lên trên, dưới trống)
+    const heroCY = cy - 150;
+    const glow = this.add.ellipse(cx, heroCY + 54, 270, 60, 0xf5b52a, 0.28).setDepth(401);
     objs.push(glow);
     this.tweens.add({ targets: glow, scaleX: 1.12, alpha: 0.4, duration: 900, yoyo: true, repeat: -1, ease: "Sine.inOut" });
     const pool = [...new Set(this.level.chests.map((c) => c.color).filter((c) => c >= 0 && c < 19))];
@@ -5653,7 +5654,7 @@ export class GameScene extends Phaser.Scene {
     const slimeCols = facePool.length ? facePool : [0, 3, 4];
     const carKey = this.textures.exists(`car-${pool[0] ?? 0}`) ? `car-${pool[0] ?? 0}` : "car-0";
     const car = this.add.image(cx, heroCY, carKey).setDepth(402);
-    car.setScale(112 / Math.max(car.width, car.height));
+    car.setScale(132 / Math.max(car.width, car.height));
     objs.push(car);
     this.tweens.add({ targets: car, y: heroCY - 5, duration: 640, yoyo: true, repeat: -1, ease: "Sine.inOut" });
 
@@ -5686,7 +5687,7 @@ export class GameScene extends Phaser.Scene {
       const col = slimeCols[k % slimeCols.length];
       const sKey = this.textures.exists(`slime-${col}`) ? `slime-${col}` : "slime-0";
       const fromLeft = k % 2 === 0;
-      const s = 40;
+      const s = 46;
       const legMk = () => {
         const g = this.add.graphics();
         g.fillStyle(0x2f2f38, 1);
@@ -5699,13 +5700,13 @@ export class GameScene extends Phaser.Scene {
       legR.setPosition(9, s * 0.3);
       const body = this.add.image(0, 0, sKey);
       body.setDisplaySize(s, s);
-      const cont = this.add.container(fromLeft ? -30 : GAME_W + 30, heroCY + 40, [legL, legR, body]).setDepth(403);
+      const cont = this.add.container(fromLeft ? -34 : GAME_W + 34, heroCY + 48, [legL, legR, body]).setDepth(403);
       cont.rotation = fromLeft ? 0.14 : -0.14;
       objs.push(cont);
       this.tweens.add({ targets: legL, y: s * 0.3 + 7, duration: 80, yoyo: true, repeat: -1 });
       this.tweens.add({ targets: legR, y: s * 0.3 + 7, duration: 80, yoyo: true, repeat: -1, delay: 40 });
       this.tweens.add({ targets: body, y: -4, duration: 80, yoyo: true, repeat: -1, ease: "Sine.inOut" });
-      const standX = cx + (fromLeft ? -78 : 78);
+      const standX = cx + (fromLeft ? -88 : 88);
       let si = 0;
       const step = () => {
         if (closed) return;
@@ -5730,8 +5731,8 @@ export class GameScene extends Phaser.Scene {
           cont.setScale(0.86, 1.2);
           this.tweens.add({ targets: cont, x: cx, duration: 360, ease: "Linear" });
           this.tweens.add({
-            targets: cont, y: car.y - 66, duration: 180, ease: "Quad.out",
-            onComplete: () => this.tweens.add({ targets: cont, y: car.y - 22, duration: 180, ease: "Quad.in", onComplete: step }),
+            targets: cont, y: car.y - 76, duration: 180, ease: "Quad.out",
+            onComplete: () => this.tweens.add({ targets: cont, y: car.y - 26, duration: 180, ease: "Quad.in", onComplete: step }),
           });
         },
         () => this.tweens.add({ targets: cont, scaleX: 1.25, scaleY: 0.7, duration: 85, yoyo: true, ease: "Quad.out", onComplete: step }),
@@ -5753,17 +5754,17 @@ export class GameScene extends Phaser.Scene {
     timers.push(this.time.addEvent({ delay: 1150, loop: true, callback: spawnHeroSlime }));
 
     // ---- banner LEVEL COMPLETE! (cam-vàng như video) ----
-    const bw = Math.min(GAME_W - 70, 300);
-    const bannerY = cy - 96;
+    const bw = Math.min(GAME_W - 56, 330);
+    const bannerY = cy - 32;
     const banner = this.add.graphics().setDepth(402);
     banner.fillStyle(0xf59b1b, 1);
-    banner.fillRoundedRect(cx - bw / 2, bannerY - 27, bw, 54, 26);
+    banner.fillRoundedRect(cx - bw / 2, bannerY - 30, bw, 60, 29);
     banner.lineStyle(4, 0xc77208, 1);
-    banner.strokeRoundedRect(cx - bw / 2, bannerY - 27, bw, 54, 26);
+    banner.strokeRoundedRect(cx - bw / 2, bannerY - 30, bw, 60, 29);
     banner.setAlpha(0);
     objs.push(banner);
     const bText = this.add
-      .text(cx, bannerY, "LEVEL COMPLETE!", { fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "24px", color: "#ffffff", stroke: "#a35c05", strokeThickness: 4 })
+      .text(cx, bannerY, "LEVEL COMPLETE!", { fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "27px", color: "#ffffff", stroke: "#a35c05", strokeThickness: 4 })
       .setOrigin(0.5)
       .setDepth(403)
       .setScale(0.2);
@@ -5771,33 +5772,41 @@ export class GameScene extends Phaser.Scene {
     this.tweens.add({ targets: banner, alpha: 1, duration: 260 });
     this.tweens.add({ targets: bText, scale: 1, duration: 380, ease: "Back.out" });
 
-    // ---- XU VÀNG toả tia — LUÔN hiện như video (fix 2026-08-01 "chưa thấy coin":
-    // cả cụm từng nằm trong if(reward>0) nên CHƠI LẠI level cũ, reward=0, xu biến mất).
-    // Dòng "+N" vẫn chỉ hiện khi first-clear có thưởng.
-    const coinY = cy + 16;
+    // ---- XU VÀNG — LUÔN hiện như video; "+N" chỉ khi first-clear có thưởng.
+    // Ánh sáng quanh xu làm lại (2026-08-01 user chê "chong chóng" cũ xấu): 16 NAN TIA
+    // THON NHỌN (tam giác vót đầu, dài-ngắn xen kẽ, alpha nhẹ) + halo kép thở lệch pha.
+    const coinY = cy + 98;
     {
       const rays = this.add.graphics().setDepth(401);
       rays.setPosition(cx, coinY);
-      rays.fillStyle(0xf5c542, 0.16);
-      for (let i = 0; i < 10; i++) {
-        const a = (Math.PI * 2 * i) / 10;
-        rays.slice(0, 0, 118, a - 0.13, a + 0.13, false);
-        rays.fillPath();
+      for (let i = 0; i < 16; i++) {
+        const a = (Math.PI * 2 * i) / 16;
+        const inner = 62;
+        const len = i % 2 === 0 ? 132 : 98; // dài-ngắn xen kẽ
+        const halfW = i % 2 === 0 ? 0.085 : 0.06; // nan mảnh
+        rays.fillStyle(0xffe08a, i % 2 === 0 ? 0.13 : 0.09);
+        rays.fillTriangle(
+          Math.cos(a - halfW) * inner, Math.sin(a - halfW) * inner,
+          Math.cos(a + halfW) * inner, Math.sin(a + halfW) * inner,
+          Math.cos(a) * len, Math.sin(a) * len // vót nhọn ở đầu ngoài
+        );
       }
       objs.push(rays);
-      this.tweens.add({ targets: rays, angle: 360, duration: 26000, repeat: -1 });
-      const halo = this.add.circle(cx, coinY, 58, 0xf5c542, 0.2).setDepth(401);
-      objs.push(halo);
-      this.tweens.add({ targets: halo, scale: 1.18, alpha: 0.32, duration: 800, yoyo: true, repeat: -1, ease: "Sine.inOut" });
+      this.tweens.add({ targets: rays, angle: 360, duration: 30000, repeat: -1 });
+      const haloOut = this.add.circle(cx, coinY, 92, 0xf5c542, 0.09).setDepth(400);
+      const haloIn = this.add.circle(cx, coinY, 66, 0xffd76a, 0.16).setDepth(401);
+      objs.push(haloOut, haloIn);
+      this.tweens.add({ targets: haloOut, scale: 1.14, alpha: 0.15, duration: 1100, yoyo: true, repeat: -1, ease: "Sine.inOut" });
+      this.tweens.add({ targets: haloIn, scale: 1.1, alpha: 0.24, duration: 1100, yoyo: true, repeat: -1, ease: "Sine.inOut", delay: 550 });
       const coin = this.add.image(cx, coinY, "coin-art").setDepth(402);
-      const cs = 96 / Math.max(coin.width, coin.height);
+      const cs = 116 / Math.max(coin.width, coin.height);
       coin.setScale(cs * 0.2);
       this.tweens.add({ targets: coin, scaleX: cs, scaleY: cs, duration: 420, ease: "Back.out", delay: 160 });
       objs.push(coin);
       if (reward > 0) {
         objs.push(
           this.add
-            .text(cx + 76, coinY + 30, `+${reward}`, { fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "30px", color: "#ffffff", stroke: "#7a5205", strokeThickness: 5 })
+            .text(cx + 88, coinY + 34, `+${reward}`, { fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "32px", color: "#ffffff", stroke: "#7a5205", strokeThickness: 5 })
             .setOrigin(0.5)
             .setDepth(403)
         );
@@ -5805,7 +5814,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     // ---- khối sự kiện Cỏ May Mắn (panel tím như "New Feature Unlock" của video) ----
-    let claimY = cy + 118;
+    let claimY = cy + 218;
     if (cloverAward) {
       const pw = Math.min(GAME_W - 60, 316);
       const lines: string[] = [`+${cloverAward.gained} ${CLOVER_ICON}  ${EVENT_NAME}`];
@@ -5814,7 +5823,7 @@ export class GameScene extends Phaser.Scene {
       if (!p.done && p.next) lines.push(`Còn ${p.remaining} ${CLOVER_ICON} → ${rewardLabel(p.next.reward)}`);
       else if (p.done) lines.push(`Hoàn thành sự kiện! 🏆`);
       const ph = 26 + lines.length * 22;
-      const py = cy + 96;
+      const py = cy + 186;
       const panel = this.add.graphics().setDepth(401);
       panel.fillStyle(0x6b5aa8, 0.95);
       panel.fillRoundedRect(cx - pw / 2, py, pw, ph, 16);
@@ -5838,20 +5847,20 @@ export class GameScene extends Phaser.Scene {
     }
 
     // ---- nút CLAIM xanh (tap đâu cũng qua level, nút cho rõ hành động) ----
-    const cbw = Math.min(GAME_W - 130, 220);
+    const cbw = Math.min(GAME_W - 110, 244);
     const claim = this.add.graphics().setDepth(402);
     claim.fillStyle(0x35c04a, 1);
-    claim.fillRoundedRect(cx - cbw / 2, claimY - 27, cbw, 54, 27);
+    claim.fillRoundedRect(cx - cbw / 2, claimY - 29, cbw, 58, 28);
     claim.lineStyle(4, 0x1f8a33, 1);
-    claim.strokeRoundedRect(cx - cbw / 2, claimY - 27, cbw, 54, 27);
+    claim.strokeRoundedRect(cx - cbw / 2, claimY - 29, cbw, 58, 28);
     objs.push(claim);
     const cText = this.add
-      .text(cx, claimY, "CLAIM", { fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "22px", color: "#ffffff" })
+      .text(cx, claimY, "CLAIM", { fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "24px", color: "#ffffff" })
       .setOrigin(0.5)
       .setDepth(403);
     objs.push(cText);
     this.tweens.add({ targets: cText, scale: 1.08, duration: 620, yoyo: true, repeat: -1, ease: "Sine.inOut" });
-    const hit = this.add.rectangle(cx, claimY, cbw, 54, 0xffffff, 0.001).setDepth(404).setInteractive({ useHandCursor: true });
+    const hit = this.add.rectangle(cx, claimY, cbw, 58, 0xffffff, 0.001).setDepth(404).setInteractive({ useHandCursor: true });
     hit.on("pointerdown", close);
     objs.push(hit);
   }
