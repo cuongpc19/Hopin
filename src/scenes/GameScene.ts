@@ -390,6 +390,9 @@ export class GameScene extends Phaser.Scene {
     // XU VÀNG màn thắng (video mẫu IMG_6489). Art thật user sẽ gửi vào public/art/coin.png;
     // thiếu/hỏng → create() vẽ placeholder (makeCoinTexture).
     this.load.image("coin-art", "art/coin.png");
+    // XE 3D vàng cho hero màn thắng (car-complete, user 2026-08-01) — thiếu thì hero
+    // rơi về xe car-2 thường trong showWinModal.
+    this.load.image("car-complete", "art/car-complete.png");
   }
 
   create() {
@@ -5661,7 +5664,8 @@ export class GameScene extends Phaser.Scene {
     const facePool = pool.filter((c) => !this.missingSlime.has(c) && BRIGHT.includes(c));
     const slimeCols = facePool.length ? facePool : [0, 3, 4].filter((c) => !this.missingSlime.has(c));
     if (!slimeCols.length) slimeCols.push(0);
-    const carKey = this.textures.exists("car-2") ? "car-2" : "car-0";
+    // ưu tiên art xe 3D riêng cho màn thắng; thiếu → xe vàng thường
+    const carKey = this.textures.exists("car-complete") ? "car-complete" : this.textures.exists("car-2") ? "car-2" : "car-0";
     const car = this.add.image(cx, heroCY, carKey).setDepth(402);
     car.setScale(152 / Math.max(car.width, car.height)); // +15% (user 2026-08-01)
     objs.push(car);
