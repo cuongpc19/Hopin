@@ -3086,31 +3086,27 @@ export class GameScene extends Phaser.Scene {
   // A FACELESS board tile: flat palette colour with a thin darker rim + a soft top
   // gloss for a little depth. No eyes/mouth — keeps the mosaic clean (faces live only
   // on the tray cars). Uniform 128px so setTexture on reveal needs no resize juggling.
-  // Tile "HẠT CƯỜM 3D" (user 2026-08-01, theo game mẫu): bóng đáy + vành tối + thân có
-  // "gradient" giả (dải sáng nửa trên, dải tối đáy) + chấm gloss trắng đậm góc trên-trái.
-  // Vẫn faceless + 2 mắt mờ (§20); vẽ procedural nên MỌI level tự đẹp lên, không cần art.
+  // Tile "KHỐI THẠCH 3D" v2 (user 2026-08-01, theo ảnh mẫu Level-39): mặt trên sáng, cạnh
+  // dưới ĐÙN tối kiểu khối hộp, một vệt gloss cong — TRƠN HOÀN TOÀN, KHÔNG mắt (2 mắt mờ
+  // cũ ở cỡ ô nhỏ thành "nốt đen" lạc lõng — user bắt lỗi). Procedural: mọi level cùng đẹp.
   private makeTileTexture(key: string, col: number, size = 128) {
     if (this.textures.exists(key)) this.textures.remove(key);
     const g = this.make.graphics({ x: 0, y: 0 }, false);
-    const r = size * 0.24;
-    g.fillStyle(0x000000, 0.2);
-    g.fillRoundedRect(size * 0.06, size * 0.1, size * 0.9, size * 0.88, r); // bóng đáy lệch xuống
-    g.fillStyle(shade(col, 0.62), 1);
-    g.fillRoundedRect(size * 0.03, size * 0.03, size * 0.94, size * 0.93, r); // vành tối
+    const r = size * 0.26;
+    // cạnh đùn dưới (mặt bên của khối) — tối hơn hẳn, lộ ra ~10% ở đáy
+    g.fillStyle(shade(col, 0.55), 1);
+    g.fillRoundedRect(size * 0.04, size * 0.12, size * 0.92, size * 0.85, r);
+    // mặt trên của khối
     g.fillStyle(col, 1);
-    g.fillRoundedRect(size * 0.08, size * 0.07, size * 0.84, size * 0.82, r * 0.9); // thân
-    g.fillStyle(shade(col, 1.28), 0.6);
-    g.fillRoundedRect(size * 0.1, size * 0.09, size * 0.8, size * 0.36, r * 0.75); // dải sáng nửa trên
-    g.fillStyle(shade(col, 0.74), 0.5);
-    g.fillRoundedRect(size * 0.12, size * 0.68, size * 0.76, size * 0.19, r * 0.55); // dải tối đáy
-    g.fillStyle(0xffffff, 0.5);
-    g.fillEllipse(size * 0.32, size * 0.22, size * 0.3, size * 0.14); // gloss chính
-    g.fillStyle(0xffffff, 0.35);
-    g.fillCircle(size * 0.68, size * 0.16, size * 0.045); // chấm gloss phụ
-    // Two very small, very faint eyes — a hint of life without the noisy full face.
-    g.fillStyle(0x2a2a34, 0.28);
-    g.fillCircle(size * 0.42, size * 0.52, size * 0.032);
-    g.fillCircle(size * 0.58, size * 0.52, size * 0.032);
+    g.fillRoundedRect(size * 0.04, size * 0.03, size * 0.92, size * 0.84, r);
+    // nửa trên sáng dần (giả gradient)
+    g.fillStyle(shade(col, 1.22), 0.55);
+    g.fillRoundedRect(size * 0.07, size * 0.06, size * 0.86, size * 0.4, r * 0.8);
+    // vệt gloss cong góc trên-trái (2 lớp cho mềm)
+    g.fillStyle(0xffffff, 0.45);
+    g.fillEllipse(size * 0.34, size * 0.2, size * 0.4, size * 0.15);
+    g.fillStyle(0xffffff, 0.28);
+    g.fillEllipse(size * 0.26, size * 0.17, size * 0.18, size * 0.09);
     g.generateTexture(key, size, size);
     g.destroy();
   }
