@@ -46,6 +46,7 @@ export class LevelSelectScene extends Phaser.Scene {
     this.load.image("background", "art/background.png"); // shared theme background
     this.load.image("backgroundHome", "art/backgroundHome.png"); // premium dark Home art
     this.load.image("avatar", "art/slime-3.png"); // a cute face for the profile chip
+    this.load.image("star-icon", "art/star.png"); // xu sao — icon vàng thống nhất (user 2026-08-01)
     // Start-nav mascot. Placeholder for now → swap to the real cute-slime art when ready.
     this.load.image("start-slime", "art/slime-3.png");
     // Lucky Clover event: booster sprites for the reward previews (clover drawn/emoji).
@@ -554,7 +555,13 @@ export class LevelSelectScene extends Phaser.Scene {
     g.fillRoundedRect(x - w / 2, y - 17, w, 34, 17);
     g.lineStyle(2.5, 0xffe08a, 0.6);
     g.strokeRoundedRect(x - w / 2, y - 17, w, 34, 17);
-    this.add.circle(x - w / 2 + 17, y, iconR, color).setStrokeStyle(2, rim, 0.85).setDepth(D + 1);
+    // Pill VÀNG (icon rỗng) → dùng ảnh XU SAO thay đĩa vẽ tay (user 2026-08-01)
+    if (!icon && this.textures.exists("star-icon")) {
+      const st = this.add.image(x - w / 2 + 17, y, "star-icon").setDepth(D + 1);
+      st.setScale((iconR * 2.15) / Math.max(st.width, st.height));
+    } else {
+      this.add.circle(x - w / 2 + 17, y, iconR, color).setStrokeStyle(2, rim, 0.85).setDepth(D + 1);
+    }
     if (icon)
       this.add
         .text(x - w / 2 + 17, y - 1, icon, {

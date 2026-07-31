@@ -2733,9 +2733,14 @@ export class GameScene extends Phaser.Scene {
     pill.lineStyle(2, 0xffe9b0, 0.7);
     pill.strokeRoundedRect(pillLeft, y - 15, pillRight - pillLeft, 30, 15);
 
-    // coin — plain golden disc + dark-gold rim (matches the Home coin, no letter)
+    // coin — XU SAO (star.png) thống nhất với Home/màn thắng; thiếu art → đĩa vẽ tay cũ
     const coinX = pillLeft + 16;
-    this.add.circle(coinX, y, 12, 0xf9c22e).setStrokeStyle(2, 0xc98a10).setDepth(D + 1);
+    if (this.textures.exists("star-icon")) {
+      const st = this.add.image(coinX, y, "star-icon").setDepth(D + 1);
+      st.setScale(26 / Math.max(st.width, st.height));
+    } else {
+      this.add.circle(coinX, y, 12, 0xf9c22e).setStrokeStyle(2, 0xc98a10).setDepth(D + 1);
+    }
     // amount (left-aligned, grows toward the plus)
     this.goldText = this.add
       .text(coinX + 15, y, String(this.gold), {
