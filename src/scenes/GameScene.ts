@@ -5651,7 +5651,7 @@ export class GameScene extends Phaser.Scene {
     // ---- HERO: xe giữa + slime chạy-nhún-nhảy tót lên, LẶP vô hạn ----
     // (2026-08-01 user: cả bố cục DỊCH XUỐNG + ZOOM to hơn — màn cũ dồn lên trên, dưới trống)
     const heroCY = cy - 150;
-    const glow = this.add.ellipse(cx, heroCY + 54, 270, 60, 0xf5b52a, 0.28).setDepth(401);
+    const glow = this.add.ellipse(cx, heroCY + 58, 300, 66, 0xf5b52a, 0.28).setDepth(401);
     objs.push(glow);
     this.tweens.add({ targets: glow, scaleX: 1.12, alpha: 0.4, duration: 900, yoyo: true, repeat: -1, ease: "Sine.inOut" });
     // Xe LUÔN màu VÀNG (id 2 — user 2026-08-01 "chọn luôn xe màu vàng, thêm độ chói");
@@ -5663,7 +5663,7 @@ export class GameScene extends Phaser.Scene {
     if (!slimeCols.length) slimeCols.push(0);
     const carKey = this.textures.exists("car-2") ? "car-2" : "car-0";
     const car = this.add.image(cx, heroCY, carKey).setDepth(402);
-    car.setScale(132 / Math.max(car.width, car.height));
+    car.setScale(152 / Math.max(car.width, car.height)); // +15% (user 2026-08-01)
     objs.push(car);
     this.tweens.add({ targets: car, y: heroCY - 5, duration: 640, yoyo: true, repeat: -1, ease: "Sine.inOut" });
     // độ chói: vệt glint trắng loé trên thân xe theo nhịp
@@ -5716,7 +5716,7 @@ export class GameScene extends Phaser.Scene {
       const col = slimeCols[k % slimeCols.length];
       const sKey = this.textures.exists(`slime-${col}`) ? `slime-${col}` : "slime-0";
       const fromLeft = k % 2 === 0;
-      const s = 46;
+      const s = 53; // +15% (user 2026-08-01)
       const legMk = () => {
         const g = this.add.graphics();
         g.fillStyle(0x2f2f38, 1);
@@ -5735,7 +5735,7 @@ export class GameScene extends Phaser.Scene {
       this.tweens.add({ targets: legL, y: s * 0.3 + 7, duration: 80, yoyo: true, repeat: -1 });
       this.tweens.add({ targets: legR, y: s * 0.3 + 7, duration: 80, yoyo: true, repeat: -1, delay: 40 });
       this.tweens.add({ targets: body, y: -4, duration: 80, yoyo: true, repeat: -1, ease: "Sine.inOut" });
-      const standX = cx + (fromLeft ? -88 : 88);
+      const standX = cx + (fromLeft ? -98 : 98);
       let si = 0;
       const step = () => {
         if (closed) return;
