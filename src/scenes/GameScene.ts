@@ -5782,18 +5782,21 @@ export class GameScene extends Phaser.Scene {
     spawnHeroSlime();
     timers.push(this.time.addEvent({ delay: 1150, loop: true, callback: spawnHeroSlime }));
 
-    // ---- banner LEVEL COMPLETE! (cam-vàng như video) ----
+    // ---- banner LEVEL COMPLETE! — pill VÀNG GOLD bóng như ảnh mẫu (2026-08-01):
+    // nền vàng + vệt sáng nửa trên giả gloss + viền hổ phách.
     const bw = Math.min(GAME_W - 56, 330);
     const bannerY = cy - 32;
     const banner = this.add.graphics().setDepth(402);
-    banner.fillStyle(0xf59b1b, 1);
+    banner.fillStyle(0xf7b425, 1);
     banner.fillRoundedRect(cx - bw / 2, bannerY - 30, bw, 60, 29);
-    banner.lineStyle(4, 0xc77208, 1);
+    banner.fillStyle(0xffd95e, 0.85); // gloss nửa trên
+    banner.fillRoundedRect(cx - bw / 2 + 5, bannerY - 25, bw - 10, 26, 13);
+    banner.lineStyle(4, 0xd88f10, 1);
     banner.strokeRoundedRect(cx - bw / 2, bannerY - 30, bw, 60, 29);
     banner.setAlpha(0);
     objs.push(banner);
     const bText = this.add
-      .text(cx, bannerY, "LEVEL COMPLETE!", { fontFamily: '"Lilita One", "Arial Black", Arial, sans-serif', fontSize: "28px", color: "#ffffff", stroke: "#a35c05", strokeThickness: 5 })
+      .text(cx, bannerY, "LEVEL COMPLETE!", { fontFamily: '"Lilita One", "Arial Black", Arial, sans-serif', fontSize: "28px", color: "#ffffff", stroke: "#b97a08", strokeThickness: 5 })
       .setOrigin(0.5)
       .setDepth(403)
       .setScale(0.2);
@@ -5887,21 +5890,23 @@ export class GameScene extends Phaser.Scene {
       claimY = py + ph + 56;
     }
 
-    // ---- nút CLAIM xanh (tap đâu cũng qua level, nút cho rõ hành động) ----
-    const cbw = Math.min(GAME_W - 110, 244);
+    // ---- nút CLAIM xanh — BÉ lại như ảnh mẫu (2026-08-01) ----
+    const cbw = Math.min(GAME_W - 180, 190);
     const claim = this.add.graphics().setDepth(402);
     claim.fillStyle(0x35c04a, 1);
-    claim.fillRoundedRect(cx - cbw / 2, claimY - 29, cbw, 58, 28);
-    claim.lineStyle(4, 0x1f8a33, 1);
-    claim.strokeRoundedRect(cx - cbw / 2, claimY - 29, cbw, 58, 28);
+    claim.fillRoundedRect(cx - cbw / 2, claimY - 25, cbw, 50, 24);
+    claim.fillStyle(0x5fd873, 0.8); // gloss nửa trên
+    claim.fillRoundedRect(cx - cbw / 2 + 4, claimY - 21, cbw - 8, 21, 10);
+    claim.lineStyle(3, 0x1f8a33, 1);
+    claim.strokeRoundedRect(cx - cbw / 2, claimY - 25, cbw, 50, 24);
     objs.push(claim);
     const cText = this.add
-      .text(cx, claimY, "CLAIM", { fontFamily: '"Lilita One", "Arial Black", Arial, sans-serif', fontSize: "26px", color: "#ffffff", stroke: "#187029", strokeThickness: 4 })
+      .text(cx, claimY, "CLAIM", { fontFamily: '"Lilita One", "Arial Black", Arial, sans-serif', fontSize: "22px", color: "#ffffff", stroke: "#187029", strokeThickness: 4 })
       .setOrigin(0.5)
       .setDepth(403);
     objs.push(cText);
     this.tweens.add({ targets: cText, scale: 1.08, duration: 620, yoyo: true, repeat: -1, ease: "Sine.inOut" });
-    const hit = this.add.rectangle(cx, claimY, cbw, 58, 0xffffff, 0.001).setDepth(404).setInteractive({ useHandCursor: true });
+    const hit = this.add.rectangle(cx, claimY, cbw, 50, 0xffffff, 0.001).setDepth(404).setInteractive({ useHandCursor: true });
     hit.on("pointerdown", close);
     objs.push(hit);
   }
