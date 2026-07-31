@@ -205,14 +205,16 @@ class GameAudio {
   // đi lên nghe sang, không phải một tiếng lặp 13 lần.
   coin(step = 0) {
     if (!this.ctx || !this.sfxGain) return;
+    // v3 (user 2026-08-01 "reduce + same as coin"): NHỎ hơn ~35% và ra chất KIM LOẠI xu
+    // thật — cú gõ "clink" cực ngắn + ngân sine + partial LỆCH HÀI 1.34× (đặc trưng tiếng
+    // kim loại, không phải chuông). Vẫn nhích cao dần theo tràng nhưng bước nhỏ, trần 1 quãng.
     const t = this.ctx.currentTime;
-    const PENTA = [0, 2, 4, 7, 9];
-    const s = Math.min(step, 9); // trần 2 quãng — không chói
-    const semi = PENTA[s % 5] + 12 * Math.floor(s / 5);
-    const f = 1046.5 * Math.pow(2, semi / 12) * (0.995 + Math.random() * 0.01); // gốc C6
-    this.voice(this.sfxGain, f, t, 0.3, 0.3, "sine"); // thân plink
-    this.voice(this.sfxGain, f * 2.76, t, 0.12, 0.07, "sine"); // partial chuông
-    this.glide(this.sfxGain, f * 3.1, f * 4.3, t, 0.06, 0.045, "sine"); // shimmer
+    const s = Math.min(step, 8);
+    const f = 1568 * Math.pow(2, (s * 1.5) / 12) * (0.995 + Math.random() * 0.01); // gốc G6
+    this.voice(this.sfxGain, f * 1.02, t, 0.03, 0.16, "triangle"); // cú gõ clink
+    this.voice(this.sfxGain, f, t + 0.008, 0.22, 0.18, "sine"); // thân ngân
+    this.voice(this.sfxGain, f * 1.343, t + 0.008, 0.14, 0.05, "sine"); // partial lệch hài (kim loại)
+    this.voice(this.sfxGain, f * 2.1, t + 0.01, 0.07, 0.025, "sine"); // ánh xu mảnh
   }
 
   // ---- SFX: a car fills up and drives off → a bright ascending sparkle-chime,
