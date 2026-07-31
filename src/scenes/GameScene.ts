@@ -5584,9 +5584,129 @@ export class GameScene extends Phaser.Scene {
       cloverAward = awardClovers(cloversForWin(firstClear, this.failedThisAttempt));
       for (const m of cloverAward.granted) this.grantEventReward(m.reward);
     }
-    // Hold on the freshly-cleared board for a beat before the curtain — popping the
-    // victory screen the instant the last slime boards felt abrupt (user 2026-07-24).
-    this.time.delayedCall(750, () => this.showWinModal(reward, cloverAward));
+    // Hold a beat on the cleared board, then the WIN PARADE (user 2026-08-01): 1-2 xe
+    // giữa màn hình, slime mặt cười chạy tới nhảy lên xe — rồi mới tới bảng VICTORY.
+    this.time.delayedCall(350, () => this.playWinParade(() => this.showWinModal(reward, cloverAward)));
+  }
+
+  // ---- WIN PARADE ------------------------------------------------------
+  // Sân khấu ~2.5s trên nền board vừa dọn sạch: dim nhẹ, 1-2 xe (màu của chính level)
+  // trượt vào giữa, ~12 slime MẶT CƯỜI (art slime-<id>.png có mặt baked-in — board dùng
+  // tile faceless nhưng sprite mặt cười vẫn load) chạy chân đạp từ mép màn vào, nhảy tót
+  // lên xe (xe nhún + toé sao), xong xe nhún chào rồi vào bảng VICTORY. Tap = bỏ qua.
+  private playWinParade(done: () => void) {
+    const objs: Phaser.GameObjects.GameObject[] = [];
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      for (const o of objs) { this.tweens.killTweensOf(o); o.destroy(); }
+      done();
+    };
+    const D = 380; // trên mọi thứ trong game, dưới bảng VICTORY (399+)
+    const cx = GAME_W / 2;
+    const cy = GAME_H * 0.44;
+
+    // màu lấy từ chính level; slime ưu tiên màu CÓ ART mặt cười (không nằm trong missingSlime)
+    const pool = [...new Set(this.level.chests.map((c) => c.color).filter((c) => c >= 0 && c < 19))];
+    const facePool = pool.filter((c) => !this.missingSlime.has(c));
+    const slimeCols = facePool.length ? facePool : [0, 3, 4];
+    const carCols = pool.slice(0, 2);
+    if (!carCols.length) carCols.push(0);
+
+    const dimBg = this.add
+      .rectangle(cx, GAME_H / 2, GAME_W + 240, GAME_H + 240, 0x000000, 0.42)
+      .setDepth(D - 2)
+      .setInteractive();
+    dimBg.on("pointerdown", finish); // tap để bỏ qua
+    objs.push(dimBg);
+
+    // 1-2 xe trượt vào giữa màn
+    const carXs = carCols.length === 1 ? [cx] : [cx - 90, cx + 90];
+    const cars: Phaser.GameObjects.Image[] = [];
+    carCols.forEach((col, i) => {
+      const key = this.textures.exists(`car-${col}`) ? `car-${col}` : "car-0";
+      const img = this.add.image(i === 0 ? -90 : GAME_W + 90, cy, key).setDepth(D);
+      img.setScale(118 / Math.max(img.width, img.height));
+      objs.push(img);
+      cars.push(img);
+      this.tweens.add({ targets: img, x: carXs[i], duration: 430, ease: "Back.out", delay: i * 100 });
+    });
+
+    // mini toé sao ở depth sân khấu (sparkle chung nằm depth thấp, bị dim che)
+    const burst = (x: number, y: number, color: number) => {
+      for (let i = 0; i < 6; i++) {
+        const ang = (Math.PI * 2 * i) / 6 + Math.random() * 0.5;
+        const p = this.add.circle(x, y, 3, color).setDepth(D + 3);
+        objs.push(p);
+        this.tweens.add({
+          targets: p, x: x + Math.cos(ang) * 26, y: y + Math.sin(ang) * 26,
+          alpha: 0, duration: 300, ease: "Quad.out", onComplete: () => p.destroy(),
+        });
+      }
+    };
+
+    // ~12 slime mặt cười chạy vào từ đáy + hai mép
+    const N = 12;
+    let boarded = 0;
+    for (let k = 0; k < N; k++) {
+      const col = slimeCols[k % slimeCols.length];
+      const sKey = this.textures.exists(`slime-${col}`) ? `slime-${col}` : `slime-0`;
+      const side = k % 3; // 0 = đáy, 1 = trái, 2 = phải
+      const sx = side === 1 ? -30 : side === 2 ? GAME_W + 30 : 40 + Math.random() * (GAME_W - 80);
+      const sy = side === 0 ? GAME_H + 30 : GAME_H * (0.55 + Math.random() * 0.3);
+      const s = 34;
+      const delay = 240 + k * 105 + Math.random() * 70;
+      this.time.delayedCall(delay, () => {
+        if (finished) return;
+        const car = cars[k % cars.length];
+        const legMk = () => {
+          const g = this.add.graphics();
+          g.fillStyle(0x2f2f38, 1);
+          g.fillRoundedRect(-3.5, 0, 7, 11, 3);
+          return g;
+        };
+        const legL = legMk(); const legR = legMk();
+        legL.setPosition(-8, s * 0.28); legR.setPosition(8, s * 0.28);
+        const body = this.add.image(0, 0, sKey);
+        body.setDisplaySize(s, s);
+        const cont = this.add.container(sx, sy, [legL, legR, body]).setDepth(D + 2);
+        cont.rotation = sx < car.x ? 0.12 : -0.12; // nghiêng người theo hướng chạy
+        objs.push(cont);
+        // chân đạp so-le + thân nhún theo nhịp
+        this.tweens.add({ targets: legL, y: s * 0.28 + 6, duration: 85, yoyo: true, repeat: -1 });
+        this.tweens.add({ targets: legR, y: s * 0.28 + 6, duration: 85, yoyo: true, repeat: -1, delay: 42 });
+        this.tweens.add({ targets: body, y: -4, duration: 85, yoyo: true, repeat: -1, ease: "Sine.inOut" });
+        // chạy tới cạnh xe rồi NHẢY TÓT lên (thu nhỏ + mờ dần vào xe), xe nhún + toé sao
+        this.tweens.add({
+          targets: cont, x: car.x + (Math.random() * 24 - 12), y: car.y + 30,
+          duration: 560 + Math.random() * 220, ease: "Cubic.in",
+          onComplete: () => {
+            if (finished) return;
+            this.tweens.add({
+              targets: cont, x: car.x, y: car.y - 6, scale: 0.15, alpha: 0.1,
+              duration: 170, ease: "Back.in",
+              onComplete: () => {
+                if (finished) return;
+                this.tweens.killTweensOf(cont);
+                cont.destroy();
+                burst(car.x, car.y, 0xffe14a);
+                const s0 = car.scale;
+                this.tweens.add({ targets: car, scale: s0 * 1.14, duration: 90, yoyo: true, ease: "Quad.out" });
+                boarded++;
+                if (boarded >= N) {
+                  // đủ khách → hai xe nhún chào rồi mở bảng VICTORY
+                  for (const c of cars) this.tweens.add({ targets: c, y: c.y - 14, duration: 150, yoyo: true, repeat: 1, ease: "Sine.inOut" });
+                  this.time.delayedCall(560, finish);
+                }
+              },
+            });
+          },
+        });
+      });
+    }
+    // chốt an toàn: dù có gì trục trặc vẫn vào bảng VICTORY
+    this.time.delayedCall(4200, finish);
   }
 
   private showWinModal(reward: number, cloverAward: ReturnType<typeof awardClovers> | undefined) {
