@@ -393,6 +393,8 @@ export class GameScene extends Phaser.Scene {
     // XE 3D vàng cho hero màn thắng (car-complete, user 2026-08-01) — thiếu thì hero
     // rơi về xe car-2 thường trong showWinModal.
     this.load.image("car-complete", "art/car-complete.png");
+    // XU SAO cho pill ví góc trên-trái màn thắng (star.png, user 2026-08-01).
+    this.load.image("star-icon", "art/star.png");
   }
 
   create() {
@@ -5639,17 +5641,29 @@ export class GameScene extends Phaser.Scene {
     dim.on("pointerdown", close);
     objs.push(dim);
 
-    // ví vàng góc trên-trái (pill trắng như video)
+    // ví vàng góc trên-trái (pill trắng như video) — icon = XU SAO (star.png, user 2026-08-01)
     const goldPill = this.add.graphics().setDepth(401);
     goldPill.fillStyle(0xffffff, 0.92);
     goldPill.fillRoundedRect(16, 18, 112, 34, 17);
     objs.push(goldPill);
-    objs.push(
-      this.add
-        .text(34, 35, `🪙 ${this.gold}`, { fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "16px", color: "#5a4a1a" })
-        .setOrigin(0, 0.5)
-        .setDepth(402)
-    );
+    if (this.textures.exists("star-icon")) {
+      const starIc = this.add.image(36, 35, "star-icon").setDepth(402);
+      starIc.setScale(28 / Math.max(starIc.width, starIc.height));
+      objs.push(starIc);
+      objs.push(
+        this.add
+          .text(52, 35, `${this.gold}`, { fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "16px", color: "#5a4a1a" })
+          .setOrigin(0, 0.5)
+          .setDepth(402)
+      );
+    } else {
+      objs.push(
+        this.add
+          .text(34, 35, `🪙 ${this.gold}`, { fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "16px", color: "#5a4a1a" })
+          .setOrigin(0, 0.5)
+          .setDepth(402)
+      );
+    }
 
     // ---- HERO: xe giữa + slime chạy-nhún-nhảy tót lên, LẶP vô hạn ----
     // (2026-08-01 user: cả bố cục DỊCH XUỐNG + ZOOM to hơn — màn cũ dồn lên trên, dưới trống)
