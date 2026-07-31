@@ -173,10 +173,11 @@
           <option value="dark">🌑 Tối (mặc định)</option>
           <option value="light">🌕 Sáng</option>
         </select>
-        <label style="margin-left:8px">Viền</label>
-        <select id="borderMode" title="Có viền = tô 1 khung chữ nhật lấp các ô trống bao quanh chủ thể; Không = chủ thể nổi trên nền cỏ">
-          <option value="off">Không viền</option>
-          <option value="on">Có viền</option>
+        <label style="margin-left:8px">Viền/Nền</label>
+        <select id="borderMode" title="Khung sát = tô ô trống trong khung bao quanh chủ thể; Nền đầy = tô mọi ô trống lấp đầy cả bảng; Không = chủ thể nổi trên nền cỏ">
+          <option value="off">Không</option>
+          <option value="bbox">Khung sát chủ thể</option>
+          <option value="full">Nền đầy bảng</option>
         </select>
         <select id="borderColor" title="Màu khung viền (khi Có viền) — Tự động = màu sáng tool tự chọn">
           <option value="auto">Tự động (sáng)</option>
@@ -808,7 +809,7 @@ function buildFromImage(img) {
   document.getElementById("cols").value = BOARD_SIZE;
   document.getElementById("rows").value = BOARD_SIZE;
   selected = -1;
-  borderId = detectBgId(); syncBorderCells(); // Nền "Bỏ" → EMPTY (không viền); "Gộp 1 màu" → màu nền
+  borderId = detectBgId(); syncBorderCells(); if (borderId !== EMPTY) borderModeVal = "full"; // Nền "Bỏ" → không; "Gộp" → nền đầy
   renderPalette(); renderBoard(); refresh();
 }
 
@@ -951,7 +952,7 @@ function applyLevel(obj) {
   cols = obj.cols; rows = obj.rows; board = obj.board.slice();
   chests = (obj.chests || []).map(c => ({ color: c.color, count: c.count }));
   lightBoard = !!obj.lightBoard;
-  borderId = detectBgId(); syncBorderCells(); // best-guess an existing full-board background
+  borderId = detectBgId(); syncBorderCells(); if (borderId !== EMPTY) borderModeVal = "full"; // detected full-board bg
   restorePalette(obj.palette, obj.paletteFull); selected = -1;
   syncSizeUI(); syncBoardTypeUI();
   renderPalette(); renderBoard(); renderChests(); refresh();
@@ -987,6 +988,7 @@ function renderOutput() {
 // subject (even if the border colour matches a subject colour).
 let borderId = EMPTY;
 let borderCells = [];
+let borderModeVal = "full"; // fill style when on: "bbox" (tight around subject) | "full" (whole board)
 // Detect an existing background fill on load: only a REAL panel fills ALL FOUR board corners
 // with one colour (a subject touching the edge must NOT count — that broke the toggle before).
 function detectBgId() {
@@ -1011,17 +1013,23 @@ function subjectBBox() {
   }
   return maxr < 0 ? null : { minr, maxr, minc, maxc };
 }
-// Set the border to `toId` (EMPTY = remove it): clear the previous fill (only its own cells),
-// then paint the EMPTY cells INSIDE the subject's bounding rectangle → a tight rectangle.
-function applyBorder(toId) {
+// Set the border to `toId` (EMPTY = remove it) with fill `mode`: clear the previous fill (only
+// its own cells), then paint EMPTY cells — "bbox" = only inside the subject's bounding rectangle
+// (tight); "full" = every empty cell of the board (fills the whole size, no leftover margin).
+function applyBorder(toId, mode) {
   for (const i of borderCells) if (board[i] === borderId) board[i] = EMPTY;
   borderCells = [];
   borderId = EMPTY;
   if (toId !== EMPTY) {
-    const bb = subjectBBox();
-    if (bb) for (let r = bb.minr; r <= bb.maxr; r++) for (let c = bb.minc; c <= bb.maxc; c++) {
-      const i = r * cols + c; if (board[i] < 0) { board[i] = toId; borderCells.push(i); }
+    if (mode === "full") {
+      for (let i = 0; i < board.length; i++) if (board[i] < 0) { board[i] = toId; borderCells.push(i); }
+    } else {
+      const bb = subjectBBox();
+      if (bb) for (let r = bb.minr; r <= bb.maxr; r++) for (let c = bb.minc; c <= bb.maxc; c++) {
+        const i = r * cols + c; if (board[i] < 0) { board[i] = toId; borderCells.push(i); }
+      }
     }
+    borderModeVal = mode;
   }
   borderId = toId;
   renderBoard(); refresh();
@@ -1038,7 +1046,7 @@ function updateBgReadout() {
   const sw = document.getElementById("bgSwatch");
   const lb = document.getElementById("bgLabel"); // optional
   const tg = document.getElementById("borderMode");
-  if (tg) tg.value = borderId === EMPTY ? "off" : "on";
+  if (tg) tg.value = borderId === EMPTY ? "off" : borderModeVal;
   // borderColor stays enabled even when off, so you can set the DEFAULT colour beforehand.
   if (borderId === EMPTY) {
     if (sw) sw.style.background = "repeating-linear-gradient(45deg,#444 0 6px,#222 6px 12px)";
@@ -1076,13 +1084,16 @@ function chosenBorderId() {
   const v = document.getElementById("borderColor").value;
   return v === "auto" ? autoBrightBorderId() : +v;
 }
-// Có viền / Không viền: fill (chosen/auto colour) or clear the subject's bounding rectangle.
+// Viền/Nền: Không (off) / Khung sát chủ thể (bbox) / Nền đầy bảng (full).
 document.getElementById("borderMode").onchange = (e) => {
-  applyBorder(e.target.value === "on" ? chosenBorderId() : EMPTY);
+  const m = e.target.value;
+  if (m === "off") applyBorder(EMPTY, borderModeVal);
+  else applyBorder(chosenBorderId(), m);
 };
 document.getElementById("borderColor").onchange = (e) => {
   try { localStorage.setItem(BORDER_PREF_KEY, e.target.value); } catch { /* ignore */ } // remember as default
-  if (document.getElementById("borderMode").value === "on") applyBorder(chosenBorderId()); // recolour live
+  const m = document.getElementById("borderMode").value;
+  if (m !== "off") applyBorder(chosenBorderId(), m); // recolour live
 };
 document.getElementById("autogen").onclick = autoGenerate;
 document.getElementById("addChest").onclick = () => { chests.push({ color: paintColor >= 0 ? paintColor : 0, count: 4 }); selected = chests.length - 1; renderChests(); refresh(); };
