@@ -224,17 +224,34 @@ class GameAudio {
   // giai điệu/tiết tấu của fanfare nổi tiếng nào (Mario/FF... có cấu trúc đặc trưng khác hẳn).
   victory() {
     if (!this.ctx || !this.sfxGain) return;
+    // v2 "triumphant" (user 2026-08-01 "hoành tráng hơn tẹo"): chạy KÉP có bè quãng 3 →
+    // HIT C-trưởng + thump timpani → nâng qua G-trưởng (dominant lift) → HIT CUỐI C-trưởng
+    // trải 2 quãng + bass đôi + shimmer kép + chuông đuôi. ~2.6s.
     const t = this.ctx.currentTime;
     const g = this.sfxGain;
+    // chạy kép vút lên (giai điệu + bè dưới quãng 3)
     const run = [NOTE.G4, NOTE.C5, NOTE.E5, NOTE.G5];
-    run.forEach((f, i) => this.voice(g, f, t + i * 0.09, 0.16, 0.32, "triangle"));
-    const ct = t + 0.38; // hợp âm chiến thắng
-    this.voice(g, NOTE.C3, ct, 1.15, 0.42, "sine"); // bass
-    for (const f of [NOTE.C5, NOTE.E5, NOTE.G5, NOTE.C5 * 2]) this.voice(g, f, ct, 0.95, 0.15, "triangle");
-    this.voice(g, NOTE.E5 * 2, ct + 0.35, 0.14, 0.2, "triangle"); // đuôi E-D-C
-    this.voice(g, NOTE.D5 * 2, ct + 0.5, 0.14, 0.17, "triangle");
-    this.voice(g, NOTE.C5 * 2, ct + 0.65, 0.55, 0.24, "triangle");
-    this.glide(g, 800, 2500, t + 0.3, 0.5, 0.06, "sine"); // shimmer
+    const har = [NOTE.E4, NOTE.G4, NOTE.C5, NOTE.E5];
+    run.forEach((f, i) => this.voice(g, f, t + i * 0.085, 0.15, 0.32, "triangle"));
+    har.forEach((f, i) => this.voice(g, f, t + i * 0.085, 0.15, 0.15, "triangle"));
+    // HIT 1: C trưởng + thump trống trầm
+    const c1 = t + 0.36;
+    this.glide(g, 160, 55, c1, 0.24, 0.5, "sine"); // thump timpani
+    this.voice(g, NOTE.C3, c1, 0.45, 0.4, "sine");
+    for (const f of [NOTE.C5, NOTE.E5, NOTE.G5]) this.voice(g, f, c1, 0.38, 0.15, "triangle");
+    // NÂNG: G trưởng (bậc V — lấy đà khải hoàn)
+    const c2 = t + 0.76;
+    this.voice(g, NOTE.G2, c2, 0.38, 0.36, "sine");
+    for (const f of [NOTE.G4, NOTE.B3 * 2, NOTE.D5]) this.voice(g, f, c2, 0.32, 0.14, "triangle");
+    // HIT CUỐI: C trưởng trải 2 quãng + bass đôi + thump + shimmer kép + chuông đuôi
+    const c3 = t + 1.1;
+    this.glide(g, 180, 50, c3, 0.3, 0.55, "sine");
+    this.voice(g, NOTE.C2, c3, 1.5, 0.4, "sine");
+    this.voice(g, NOTE.C3, c3, 1.5, 0.28, "sine");
+    for (const f of [NOTE.C5, NOTE.E5, NOTE.G5, NOTE.C5 * 2, NOTE.E5 * 2]) this.voice(g, f, c3, 1.3, 0.13, "triangle");
+    this.glide(g, 900, 3200, c3, 0.7, 0.07, "sine");
+    this.glide(g, 1400, 4200, c3 + 0.15, 0.6, 0.05, "sine");
+    this.voice(g, NOTE.G5 * 2, c3 + 0.5, 0.6, 0.11, "sine"); // chuông đuôi cao
   }
 
   // ---- SFX: a car fills up and drives off → a bright ascending sparkle-chime,
