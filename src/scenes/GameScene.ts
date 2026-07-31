@@ -5663,7 +5663,8 @@ export class GameScene extends Phaser.Scene {
         timers.push(t);
       });
     };
-    // ---- CHUYỂN CẢNH sau CLAIM (user 2026-08-01, hồi sinh parade cũ dạng đoàn diễu) ----
+    // ---- CHUYỂN CẢNH sau CLAIM (user 2026-08-01, bản 2: XE ĐỨNG GIỮA — không trôi ngang;
+    // slime chạy vào từ hai mép, nhảy tót lên; Loading 3.5s rồi sang màn) ----
     const playTransition = () => {
       if (closed) return;
       // phủ tối đè lên toàn bộ modal
@@ -5672,63 +5673,72 @@ export class GameScene extends Phaser.Scene {
         .setDepth(500)
         .setInteractive(); // nuốt tap trong lúc chuyển cảnh
       objs.push(tCover);
-      // ĐOÀN DIỄU: 1 container trôi ngang màn — xe dẫn đầu, slime rượt phía sau rồi
-      // lần lượt bắt kịp + nhảy vòng cung lên nóc (cùng hệ toạ độ nên bám xe tự nhiên).
-      const convoyY = GAME_H * 0.46;
-      const convoy = this.add.container(-320, convoyY).setDepth(502);
-      objs.push(convoy);
+      const stageY = GAME_H * 0.45;
+      // bệ sáng + xe đứng giữa thở nhẹ
+      const tGlow = this.add.ellipse(cx, stageY + 52, 260, 58, 0xf5b52a, 0.25).setDepth(501);
+      objs.push(tGlow);
+      this.tweens.add({ targets: tGlow, scaleX: 1.1, alpha: 0.35, duration: 900, yoyo: true, repeat: -1, ease: "Sine.inOut" });
       const carKey2 = this.textures.exists("car-complete") ? "car-complete" : this.textures.exists("car-2") ? "car-2" : "car-0";
-      const tCar = this.add.image(0, 0, carKey2);
-      tCar.setScale(120 / Math.max(tCar.width, tCar.height));
-      convoy.add(tCar);
+      const tCar = this.add.image(cx, stageY, carKey2).setDepth(502);
+      tCar.setScale(126 / Math.max(tCar.width, tCar.height));
+      objs.push(tCar);
+      this.tweens.add({ targets: tCar, y: stageY - 5, duration: 620, yoyo: true, repeat: -1, ease: "Sine.inOut" });
       const pool2 = [...new Set(this.level.chests.map((c) => c.color).filter((c) => c >= 0 && c < 19))];
       const BRIGHT2 = [0, 1, 2, 3, 4, 5, 7, 17];
       const sCols = pool2.filter((c) => !this.missingSlime.has(c) && BRIGHT2.includes(c));
       if (!sCols.length) sCols.push(0);
-      this.tweens.add({ targets: convoy, x: GAME_W + 340, duration: 2050, ease: "Sine.inOut" });
-      for (let k = 0; k < 3; k++) {
+      // 5 slime so le chạy vào từ 2 mép → đứng cạnh xe → nhún → nhảy vòng cung lên nóc
+      for (let k = 0; k < 5; k++) {
         const sKey2 = this.textures.exists(`slime-${sCols[k % sCols.length]}`) ? `slime-${sCols[k % sCols.length]}` : "slime-0";
-        const s2 = 40;
-        const mkLeg = () => {
-          const lg = this.add.graphics();
-          lg.fillStyle(0x2f2f38, 1);
-          lg.fillRoundedRect(-4, 0, 8, 12, 3);
-          return lg;
-        };
-        const lL = mkLeg(); const lR = mkLeg();
-        lL.setPosition(-9, s2 * 0.3); lR.setPosition(9, s2 * 0.3);
-        const bd = this.add.image(0, 0, sKey2);
-        bd.setDisplaySize(s2, s2);
-        const sl = this.add.container(-150 - k * 55, 42, [lL, lR, bd]);
-        sl.rotation = 0.14; // nghiêng người rượt theo
-        convoy.add(sl);
-        this.tweens.add({ targets: lL, y: s2 * 0.3 + 7, duration: 75, yoyo: true, repeat: -1 });
-        this.tweens.add({ targets: lR, y: s2 * 0.3 + 7, duration: 75, yoyo: true, repeat: -1, delay: 38 });
-        this.tweens.add({ targets: bd, y: -4, duration: 75, yoyo: true, repeat: -1, ease: "Sine.inOut" });
-        // rượt kịp xe (delay so le) rồi nhảy vòng cung lên nóc
-        this.time.delayedCall(150 + k * 420, () => {
+        const s2 = 42;
+        const fromLeft2 = k % 2 === 0;
+        this.time.delayedCall(120 + k * 560, () => {
           if (closed) return;
+          const mkLeg = () => {
+            const lg = this.add.graphics();
+            lg.fillStyle(0x2f2f38, 1);
+            lg.fillRoundedRect(-4, 0, 8, 12, 3);
+            return lg;
+          };
+          const lL = mkLeg(); const lR = mkLeg();
+          lL.setPosition(-9, s2 * 0.3); lR.setPosition(9, s2 * 0.3);
+          const bd = this.add.image(0, 0, sKey2);
+          bd.setDisplaySize(s2, s2);
+          const sl = this.add.container(fromLeft2 ? -32 : GAME_W + 32, stageY + 44, [lL, lR, bd]).setDepth(503);
+          sl.rotation = fromLeft2 ? 0.14 : -0.14;
+          objs.push(sl);
+          this.tweens.add({ targets: lL, y: s2 * 0.3 + 7, duration: 78, yoyo: true, repeat: -1 });
+          this.tweens.add({ targets: lR, y: s2 * 0.3 + 7, duration: 78, yoyo: true, repeat: -1, delay: 39 });
+          this.tweens.add({ targets: bd, y: -4, duration: 78, yoyo: true, repeat: -1, ease: "Sine.inOut" });
           this.tweens.add({
-            targets: sl, x: -46, duration: 330, ease: "Sine.out",
+            targets: sl, x: cx + (fromLeft2 ? -84 : 84), duration: 460, ease: "Sine.out",
             onComplete: () => {
               if (closed) return;
               this.tweens.killTweensOf(lL); this.tweens.killTweensOf(lR); this.tweens.killTweensOf(bd);
+              lL.setPosition(-9, s2 * 0.3); lR.setPosition(9, s2 * 0.3); bd.setPosition(0, 0);
               sl.rotation = 0;
-              this.tweens.add({ targets: sl, x: 0, duration: 260, ease: "Linear" });
               this.tweens.add({
-                targets: sl, y: -66, duration: 130, ease: "Quad.out",
+                targets: sl, scaleX: 1.16, scaleY: 0.74, duration: 110, ease: "Quad.out", // nhún lấy đà
                 onComplete: () => {
+                  if (closed) return;
+                  sl.setScale(0.88, 1.18);
+                  this.tweens.add({ targets: sl, x: cx, duration: 300, ease: "Linear" });
                   this.tweens.add({
-                    targets: sl, y: -20, duration: 130, ease: "Quad.in",
+                    targets: sl, y: tCar.y - 70, duration: 150, ease: "Quad.out",
                     onComplete: () => {
-                      Audio.board(); // pop nhảy lên xe
                       this.tweens.add({
-                        targets: sl, y: 0, scale: 0.12, alpha: 0.15, duration: 130, ease: "Back.in",
+                        targets: sl, y: tCar.y - 22, duration: 150, ease: "Quad.in",
                         onComplete: () => {
-                          this.tweens.killTweensOf(sl); sl.destroy();
-                          if (closed) return;
-                          const cb = tCar.scaleX;
-                          this.tweens.add({ targets: tCar, scaleX: cb * 1.1, scaleY: cb * 1.1, duration: 80, yoyo: true });
+                          Audio.board(); // pop nhảy lên xe
+                          this.tweens.add({
+                            targets: sl, y: tCar.y, scale: 0.12, alpha: 0.15, duration: 140, ease: "Back.in",
+                            onComplete: () => {
+                              this.tweens.killTweensOf(sl); sl.destroy();
+                              if (closed) return;
+                              const cb = tCar.scaleX;
+                              this.tweens.add({ targets: tCar, scaleX: cb * 1.1, scaleY: cb * 1.1, duration: 80, yoyo: true });
+                            },
+                          });
                         },
                       });
                     },
@@ -5753,8 +5763,9 @@ export class GameScene extends Phaser.Scene {
           callback: () => { dots = (dots + 1) % 4; loadTx.setText("Loading" + ".".repeat(dots)); },
         })
       );
-      // mặc định 2s rồi sang màn (level build đồng bộ — có sẵn ngay)
-      timers.push(this.time.delayedCall(2000, finishAndGo));
+      // mặc định 3.5s rồi sang màn (user 2026-08-01: loading lâu hơn, 3-4s;
+      // level build đồng bộ nên đây thuần là màn ngắm slime)
+      timers.push(this.time.delayedCall(3500, finishAndGo));
     };
 
     // nền: LEVEL đang chơi chỉ còn THẤP THOÁNG sau lớp phủ tối 97% (user 2026-08-01
