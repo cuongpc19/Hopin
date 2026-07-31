@@ -5908,20 +5908,20 @@ export class GameScene extends Phaser.Scene {
     // "+40" rồi bay lên pill ví; mỗi xu đáp = icon ví nảy + số đếm dần; xu cuối cộng thật
     // (applyReward) rồi gọi onDone → chờ 1s → finishAndGo.
     const flyCoins = (onDone: () => void) => {
-      const NC = 7;
+      const NC = 13; // đàn đông hơn (user 2026-08-01)
       const fromX = cx + 92, fromY = coinY + 46;
       const oldGold = this.gold;
       if (closed || !this.textures.exists("star-icon")) { applyReward(); onDone(); return; }
       for (let k = 0; k < NC; k++) {
         const c = this.add
-          .image(fromX + (Math.random() * 34 - 17), fromY + (Math.random() * 22 - 11), "star-icon")
+          .image(fromX + (Math.random() * 44 - 22), fromY + (Math.random() * 28 - 14), "star-icon")
           .setDepth(405)
           .setAlpha(0);
         const cs = 24 / Math.max(c.width, c.height);
         c.setScale(cs * 0.1);
         objs.push(c);
         this.tweens.add({
-          targets: c, alpha: 1, scaleX: cs, scaleY: cs, duration: 150, delay: k * 85, ease: "Back.out",
+          targets: c, alpha: 1, scaleX: cs, scaleY: cs, duration: 150, delay: k * 70, ease: "Back.out",
           onComplete: () => {
             if (closed) { c.destroy(); return; }
             this.tweens.add({
@@ -5929,6 +5929,7 @@ export class GameScene extends Phaser.Scene {
               onComplete: () => {
                 c.destroy();
                 if (closed) return;
+                Audio.coin(); // leng keng mỗi xu đáp ví
                 if (walletIcon) {
                   this.tweens.killTweensOf(walletIcon);
                   walletIcon.setScale(walletBase);

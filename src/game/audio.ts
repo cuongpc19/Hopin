@@ -199,6 +199,17 @@ class GameAudio {
     this.glide(this.sfxGain, base, base * 1.7, t, 0.05, 0.16, "sine"); // short soft pop
   }
 
+  // ---- SFX: xu bay vào ví (màn thắng) → "ding" đồng xu cổ điển: 2 nốt vút B5→E6 + lớp
+  // ánh kim mỏng phía trên; wobble nhẹ để đàn xu nghe leng keng lấp lánh, không lặp y hệt.
+  coin() {
+    if (!this.ctx || !this.sfxGain) return;
+    const t = this.ctx.currentTime;
+    const w = 0.97 + Math.random() * 0.06;
+    this.voice(this.sfxGain, 987.77 * w, t, 0.07, 0.3, "triangle");
+    this.voice(this.sfxGain, 1318.51 * w, t + 0.07, 0.3, 0.32, "triangle");
+    this.voice(this.sfxGain, 2637.02 * w, t + 0.07, 0.16, 0.09, "sine"); // ánh kim
+  }
+
   // ---- SFX: a car fills up and drives off → a bright ascending sparkle-chime,
   // clearly different from the pickup pop.
   finish() {
