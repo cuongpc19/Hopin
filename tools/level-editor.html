@@ -1052,7 +1052,8 @@ function refresh() { renderValidation(); renderOutput(); updateBgReadout(); }
 document.getElementById("clear").onclick = () => { board.fill(EMPTY); borderId = EMPTY; borderCells = []; renderBoard(); refresh(); };
 // Border colour picker: "Tự động" + every game colour (tinted). The chosen value is REMEMBERED
 // (localStorage) as your DEFAULT border colour for the next level (user 2026-08-01).
-const BORDER_PREF_KEY = "pf_ed_border";
+const BORDER_PREF_KEY = "pf_ed_border2"; // bumped so the new default (9) replaces old test picks
+const BORDER_DEFAULT = "9"; // user 2026-08-01: mặc định viền = xám nhạt (9) thay cho trắng/sáng cũ
 function fillBorderColorSelect() {
   const sel = document.getElementById("borderColor");
   if (!sel) return;
@@ -1065,7 +1066,7 @@ function fillBorderColorSelect() {
     o.style.color = (0.299 * r + 0.587 * g + 0.114 * b) < 140 ? "#fff" : "#111";
     sel.appendChild(o);
   }
-  try { sel.value = localStorage.getItem(BORDER_PREF_KEY) || "auto"; } catch { sel.value = "auto"; }
+  try { sel.value = localStorage.getItem(BORDER_PREF_KEY) || BORDER_DEFAULT; } catch { sel.value = BORDER_DEFAULT; }
 }
 // The border colour to apply now: the picked game id, or an auto-bright pick.
 function chosenBorderId() {
