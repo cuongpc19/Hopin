@@ -138,6 +138,9 @@ const TWIN_SPAWN_GAP = 5; // nodes between a twin pair on the ray (snug but the 
 const TWIN_INTRO_LEVEL = 8; // the ONE level that introduces twin cars (skip if you're past it)
 const BELT_SPEED = 6; // Line belt cleats: nodes per second
 const SHOT_COOLDOWN = 10; // ms between pickups — slam: near frame-rate cap (~1 slime/frame @60fps)
+// CẤU HÌNH coin thưởng MỖI ván thắng (user 2026-08-01, theo video mẫu "+40" — mọi ván
+// thắng đều +40, không chỉ first-clear).
+const WIN_GOLD = 40;
 // Critter "run to the car" animation: sets off, accelerates to catch the moving
 // car. RUN_MAX must comfortably exceed car speed (SPEED * TRACK_STEP px/s).
 const RUN_START = 320;   // snappier: critters set off faster (user 2026-07-29 — quicker "see + grab")
@@ -5584,8 +5587,9 @@ export class GameScene extends Phaser.Scene {
     const next = this.levelNum + 1;
     // Gold is granted only the FIRST time a level is cleared (no replay farming).
     const firstClear = this.claimFirstClearReward(this.levelNum);
-    const reward = firstClear ? 50 : 0;
-    if (reward > 0) this.addGold(reward);
+    // Mọi ván thắng +WIN_GOLD (video mẫu). firstClear vẫn dùng cho clover/đánh dấu tiến độ.
+    const reward = WIN_GOLD;
+    this.addGold(reward);
     this.unlockProgress(next); // record on the picker that this level is beaten
 
     // Lucky Clover event: award clovers + auto-grant any milestone rewards reached.
@@ -5622,10 +5626,11 @@ export class GameScene extends Phaser.Scene {
       this.startLevel(nextLevel);
     };
 
-    // nền tối phủ kín (như video — board/khung sau biến mất hẳn)
-    const cover = this.add.graphics().setDepth(399);
-    cover.fillGradientStyle(0x23232e, 0x23232e, 0x0d0d12, 0x0d0d12, 1);
-    cover.fillRect(cx - (GAME_W + 240) / 2, cy - (GAME_H + 240) / 2, GAME_W + 240, GAME_H + 240);
+    // nền: LEVEL đang chơi vẫn hiện RẤT MỜ sau lớp phủ tối (user 2026-08-01, như ảnh mẫu
+    // — không che đặc nữa, board ghost nhẹ phía sau)
+    const cover = this.add
+      .rectangle(cx, cy, GAME_W + 240, GAME_H + 240, 0x0d0d12, 0.92)
+      .setDepth(399);
     objs.push(cover);
     const dim = this.add.rectangle(cx, cy, GAME_W + 240, GAME_H + 240, 0x000000, 0.001).setDepth(400).setInteractive();
     dim.on("pointerdown", close);
@@ -5801,19 +5806,30 @@ export class GameScene extends Phaser.Scene {
     // THON NHỌN (tam giác vót đầu, dài-ngắn xen kẽ, alpha nhẹ) + halo kép thở lệch pha.
     const coinY = cy + 98;
     {
+      // Nan tia BỚT NHỌN (user 2026-08-01 "nhìn hơi ghê"): hình thang đầu bằng + nắp mờ
+      // phía ngoài để tia TAN DẦN thay vì vót thành gai.
       const rays = this.add.graphics().setDepth(401);
       rays.setPosition(cx, coinY);
       for (let i = 0; i < 16; i++) {
         const a = (Math.PI * 2 * i) / 16;
         const inner = 72;
-        const len = i % 2 === 0 ? 178 : 132; // dài-ngắn xen kẽ (2026-08-01: hào quang TO hơn nữa)
-        const halfW = i % 2 === 0 ? 0.085 : 0.06; // nan mảnh
-        rays.fillStyle(0xffe08a, i % 2 === 0 ? 0.14 : 0.1);
-        rays.fillTriangle(
-          Math.cos(a - halfW) * inner, Math.sin(a - halfW) * inner,
-          Math.cos(a + halfW) * inner, Math.sin(a + halfW) * inner,
-          Math.cos(a) * len, Math.sin(a) * len // vót nhọn ở đầu ngoài
-        );
+        const len = i % 2 === 0 ? 168 : 126; // dài-ngắn xen kẽ
+        const halfW = i % 2 === 0 ? 0.085 : 0.06;
+        const outW = halfW * 0.6; // đầu ngoài còn 60% bề rộng — hình thang, không nhọn
+        const p = (ang: number, r: number) => [Math.cos(ang) * r, Math.sin(ang) * r] as const;
+        const [x1, y1] = p(a - halfW, inner);
+        const [x2, y2] = p(a + halfW, inner);
+        const [x3, y3] = p(a + outW, len);
+        const [x4, y4] = p(a - outW, len);
+        rays.fillStyle(0xffe08a, i % 2 === 0 ? 0.13 : 0.09);
+        rays.fillTriangle(x1, y1, x2, y2, x3, y3);
+        rays.fillTriangle(x1, y1, x3, y3, x4, y4);
+        // nắp mờ: nối tiếp một đoạn ngắn alpha thấp cho cảm giác tan dần
+        const [x5, y5] = p(a + outW * 0.75, len + 26);
+        const [x6, y6] = p(a - outW * 0.75, len + 26);
+        rays.fillStyle(0xffe08a, 0.045);
+        rays.fillTriangle(x4, y4, x3, y3, x5, y5);
+        rays.fillTriangle(x4, y4, x5, y5, x6, y6);
       }
       objs.push(rays);
       this.tweens.add({ targets: rays, angle: 360, duration: 30000, repeat: -1 });
@@ -5829,18 +5845,17 @@ export class GameScene extends Phaser.Scene {
       coin.setScale(cs * 0.2);
       this.tweens.add({ targets: coin, scaleX: cs, scaleY: cs, duration: 420, ease: "Back.out", delay: 160 });
       objs.push(coin);
-      if (reward > 0) {
-        objs.push(
-          this.add
-            .text(cx + 88, coinY + 34, `+${reward}`, { fontFamily: '"Lilita One", "Arial Black", Arial, sans-serif', fontSize: "34px", color: "#ffffff", stroke: "#7a5205", strokeThickness: 5 })
-            .setOrigin(0.5)
-            .setDepth(403)
-        );
-      }
+      // "+40" LUÔN cạnh xu như ảnh mẫu (WIN_GOLD — mọi ván thắng đều nhận)
+      objs.push(
+        this.add
+          .text(cx + 88, coinY + 34, `+${reward}`, { fontFamily: '"Lilita One", "Arial Black", Arial, sans-serif', fontSize: "34px", color: "#ffffff", stroke: "#7a5205", strokeThickness: 5 })
+          .setOrigin(0.5)
+          .setDepth(403)
+      );
     }
 
     // ---- khối sự kiện Cỏ May Mắn (panel tím như "New Feature Unlock" của video) ----
-    let claimY = cy + 218;
+    let claimY = cy + 262; // 2026-08-01: CLAIM hạ xuống thêm
     if (cloverAward) {
       const pw = Math.min(GAME_W - 60, 316);
       const lines: string[] = [`+${cloverAward.gained} ${CLOVER_ICON}  ${EVENT_NAME}`];
@@ -5869,7 +5884,7 @@ export class GameScene extends Phaser.Scene {
             .setDepth(402)
         );
       });
-      claimY = py + ph + 46;
+      claimY = py + ph + 56;
     }
 
     // ---- nút CLAIM xanh (tap đâu cũng qua level, nút cho rõ hành động) ----
