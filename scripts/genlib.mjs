@@ -331,13 +331,42 @@ export function tuneTwinsCli(lvl, cap) {
   catch { return false; }
 }
 
+// ---- viền CẤU TRÚC: mọi mảng đồng màu ≥30 ô CHẠM RÌA vùng chơi --------------
+// Bắt cả nền ảnh gốc KHÔNG tách được (bị giữ thành slime — L10 cua nền trắng 49%, bug
+// 2026-07-31 user bắt: "cái hình bao ngoài con cua là viền mà") lẫn ô viền máy tô.
+export function structuralRimPct(board, cols, rows) {
+  const seen = new Array(board.length).fill(false);
+  let rim = 0;
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const i = r * cols + c;
+    if (!isC(board[i]) || seen[i]) continue;
+    const col = board[i], q = [i]; seen[i] = true; const comp = [i]; let edge = false;
+    while (q.length) {
+      const cur = q.pop(), cr = (cur / cols) | 0, cc = cur % cols;
+      for (const [dr, dc] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nr = cr + dr, nc = cc + dc;
+        if (nr < 0 || nc < 0 || nr >= rows || nc >= cols) { edge = true; continue; }
+        const ni = nr * cols + nc;
+        if (!isC(board[ni])) { if (board[ni] < 90) edge = true; continue; } // -1 = mép; đá thì không
+        if (board[ni] === col && !seen[ni]) { seen[ni] = true; q.push(ni); comp.push(ni); }
+      }
+    }
+    if (edge && comp.length >= 30) rim += comp.length;
+  }
+  return Math.round((100 * rim) / (cols * rows));
+}
+
 // ---- build board từ ảnh qua build-one (viền chữ nhật mới) -------------------
-// Trả {ok, borderPct, bgColor, lightBoard} — ok=false khi ảnh vượt 30% (exit 2) / lỗi khác.
+// Trả {ok, borderPct, bgColor, rimPct} — ok=false khi: ảnh vượt 30% ô-tô (exit 2), lỗi khác,
+// hoặc VIỀN CẤU TRÚC >30% (nền ảnh sót lại tính là viền — rule tổng viền của user).
 export function buildBoard(img, lvl, K, size) {
   try {
     const out = sh(`node scripts/build-one.mjs "${img}" -1 ${lvl} ${K} ${size}`);
     const m = out.match(/viền chữ nhật id (\d+), (\d+) ô = (\d+)% board/);
-    return { ok: true, bgColor: m ? +m[1] : 12, borderCells: m ? +m[2] : 0, borderPct: m ? +m[3] : 0 };
+    const L = readD()[lvl];
+    const rimPct = structuralRimPct(L.board, L.cols, L.rows);
+    if (rimPct > 30) return { ok: false, exit: 3, rimPct }; // nền ảnh sót → tổng viền vượt rule
+    return { ok: true, bgColor: m ? +m[1] : 12, borderCells: m ? +m[2] : 0, borderPct: m ? +m[3] : 0, rimPct };
   } catch (e) {
     return { ok: false, exit: e.status ?? -1 };
   }
