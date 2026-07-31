@@ -5614,12 +5614,21 @@ export class GameScene extends Phaser.Scene {
     const carCols = pool.slice(0, 2);
     if (!carCols.length) carCols.push(0);
 
-    const dimBg = this.add
-      .rectangle(cx, GAME_H / 2, GAME_W + 240, GAME_H + 240, 0x000000, 0.42)
-      .setDepth(D - 2)
+    // PHÔNG CHE KÍN board + khung (user 2026-08-01 "ẩn cái board và khung sau đi") —
+    // cùng tông kem→xanh nắng với bảng VICTORY để chuyển cảnh liền mạch.
+    const cover = this.add.graphics().setDepth(D - 2);
+    cover.fillGradientStyle(0xfdf6d0, 0xfdf6d0, 0xb7dd9a, 0xb7dd9a, 1);
+    cover.fillRect(cx - (GAME_W + 240) / 2, GAME_H / 2 - (GAME_H + 240) / 2, GAME_W + 240, GAME_H + 240);
+    objs.push(cover);
+    const tapZone = this.add
+      .rectangle(cx, GAME_H / 2, GAME_W + 240, GAME_H + 240, 0x000000, 0.001)
+      .setDepth(D - 1)
       .setInteractive();
-    dimBg.on("pointerdown", finish); // tap để bỏ qua
-    objs.push(dimBg);
+    tapZone.on("pointerdown", finish); // tap để bỏ qua
+    objs.push(tapZone);
+    // vệt đường dưới bánh xe cho có "mặt đất"
+    const road = this.add.rectangle(cx, cy + 64, GAME_W + 240, 6, 0x9a8a6a, 0.55).setDepth(D - 1);
+    objs.push(road);
 
     // 1-2 xe trượt vào giữa màn
     const carXs = carCols.length === 1 ? [cx] : [cx - 90, cx + 90];
@@ -5646,59 +5655,96 @@ export class GameScene extends Phaser.Scene {
       }
     };
 
-    // ~12 slime mặt cười chạy vào từ đáy + hai mép
-    const N = 12;
+    // ~10 slime mặt cười: CHẠY tới đứng cạnh xe → nhún lấy đà → NHẢY VÒNG CUNG lên nóc
+    // xe → tiếp đất bẹt xuống rồi chui vào (user 2026-08-01: cú "chạy theo rồi nhảy tót"
+    // phải đọc được bằng mắt — bản đầu gộp thành 1 tween 170ms nhìn như tan biến).
+    const N = 10;
     let boarded = 0;
+    const onBoard = (car: Phaser.GameObjects.Image) => {
+      burst(car.x, car.y - 30, 0xffe14a);
+      const s0 = car.scale;
+      this.tweens.add({ targets: car, scale: s0 * 1.13, duration: 90, yoyo: true, ease: "Quad.out" });
+      boarded++;
+      if (boarded >= N) {
+        for (const c of cars) this.tweens.add({ targets: c, y: c.y - 14, duration: 150, yoyo: true, repeat: 1, ease: "Sine.inOut" });
+        this.time.delayedCall(620, finish);
+      }
+    };
     for (let k = 0; k < N; k++) {
       const col = slimeCols[k % slimeCols.length];
       const sKey = this.textures.exists(`slime-${col}`) ? `slime-${col}` : `slime-0`;
-      const side = k % 3; // 0 = đáy, 1 = trái, 2 = phải
-      const sx = side === 1 ? -30 : side === 2 ? GAME_W + 30 : 40 + Math.random() * (GAME_W - 80);
-      const sy = side === 0 ? GAME_H + 30 : GAME_H * (0.55 + Math.random() * 0.3);
-      const s = 34;
-      const delay = 240 + k * 105 + Math.random() * 70;
+      const car = cars[k % cars.length];
+      const fromLeft = k % 2 === 0;
+      const sx = fromLeft ? -34 : GAME_W + 34;
+      const sy = cy + 46; // chạy trên "mặt đường"
+      const s = 44;
+      const delay = 540 + k * 190; // xe yên vị rồi slime mới vào, so-le rõ từng con
       this.time.delayedCall(delay, () => {
         if (finished) return;
-        const car = cars[k % cars.length];
         const legMk = () => {
           const g = this.add.graphics();
           g.fillStyle(0x2f2f38, 1);
-          g.fillRoundedRect(-3.5, 0, 7, 11, 3);
+          g.fillRoundedRect(-4.5, 0, 9, 14, 4);
           return g;
         };
         const legL = legMk(); const legR = legMk();
-        legL.setPosition(-8, s * 0.28); legR.setPosition(8, s * 0.28);
+        legL.setPosition(-10, s * 0.3); legR.setPosition(10, s * 0.3);
         const body = this.add.image(0, 0, sKey);
         body.setDisplaySize(s, s);
         const cont = this.add.container(sx, sy, [legL, legR, body]).setDepth(D + 2);
-        cont.rotation = sx < car.x ? 0.12 : -0.12; // nghiêng người theo hướng chạy
+        cont.rotation = fromLeft ? 0.14 : -0.14; // nghiêng người theo hướng chạy
         objs.push(cont);
-        // chân đạp so-le + thân nhún theo nhịp
-        this.tweens.add({ targets: legL, y: s * 0.28 + 6, duration: 85, yoyo: true, repeat: -1 });
-        this.tweens.add({ targets: legR, y: s * 0.28 + 6, duration: 85, yoyo: true, repeat: -1, delay: 42 });
-        this.tweens.add({ targets: body, y: -4, duration: 85, yoyo: true, repeat: -1, ease: "Sine.inOut" });
-        // chạy tới cạnh xe rồi NHẢY TÓT lên (thu nhỏ + mờ dần vào xe), xe nhún + toé sao
+        // chân đạp so-le nhanh + thân nhún — thấy rõ là ĐANG CHẠY
+        this.tweens.add({ targets: legL, y: s * 0.3 + 8, duration: 80, yoyo: true, repeat: -1 });
+        this.tweens.add({ targets: legR, y: s * 0.3 + 8, duration: 80, yoyo: true, repeat: -1, delay: 40 });
+        this.tweens.add({ targets: body, y: -5, duration: 80, yoyo: true, repeat: -1, ease: "Sine.inOut" });
+        // GIAI ĐOẠN 1 — CHẠY: tới điểm đứng cạnh xe (bên phía nó chạy vào)
+        const standX = car.x + (fromLeft ? -52 : 52);
         this.tweens.add({
-          targets: cont, x: car.x + (Math.random() * 24 - 12), y: car.y + 30,
-          duration: 560 + Math.random() * 220, ease: "Cubic.in",
+          targets: cont, x: standX, duration: 640, ease: "Sine.out",
           onComplete: () => {
             if (finished) return;
+            // dừng đạp chân, đứng thẳng, NHÚN lấy đà (squash xuống)
+            this.tweens.killTweensOf(legL); this.tweens.killTweensOf(legR); this.tweens.killTweensOf(body);
+            legL.setPosition(-10, s * 0.3); legR.setPosition(10, s * 0.3); body.setPosition(0, 0);
+            cont.rotation = 0;
             this.tweens.add({
-              targets: cont, x: car.x, y: car.y - 6, scale: 0.15, alpha: 0.1,
-              duration: 170, ease: "Back.in",
+              targets: cont, scaleX: 1.18, scaleY: 0.72, duration: 130, ease: "Quad.out",
               onComplete: () => {
                 if (finished) return;
-                this.tweens.killTweensOf(cont);
-                cont.destroy();
-                burst(car.x, car.y, 0xffe14a);
-                const s0 = car.scale;
-                this.tweens.add({ targets: car, scale: s0 * 1.14, duration: 90, yoyo: true, ease: "Quad.out" });
-                boarded++;
-                if (boarded >= N) {
-                  // đủ khách → hai xe nhún chào rồi mở bảng VICTORY
-                  for (const c of cars) this.tweens.add({ targets: c, y: c.y - 14, duration: 150, yoyo: true, repeat: 1, ease: "Sine.inOut" });
-                  this.time.delayedCall(560, finish);
-                }
+                // GIAI ĐOẠN 2 — NHẢY VÒNG CUNG lên nóc xe: x đi ngang đều, y bay lên rồi rơi
+                cont.setScale(0.86, 1.22); // vươn dài lúc bật
+                const topY = car.y - 78; // đỉnh cung cao hơn nóc
+                const roofY = car.y - 26;
+                this.tweens.add({ targets: cont, x: car.x, duration: 400, ease: "Linear" });
+                this.tweens.add({
+                  targets: cont, y: topY, duration: 200, ease: "Quad.out",
+                  onComplete: () => {
+                    if (finished) return;
+                    this.tweens.add({
+                      targets: cont, y: roofY, duration: 200, ease: "Quad.in",
+                      onComplete: () => {
+                        if (finished) return;
+                        // TIẾP ĐẤT trên nóc: bẹt xuống 1 nhịp rồi chui tọt vào xe
+                        this.tweens.add({
+                          targets: cont, scaleX: 1.25, scaleY: 0.7, duration: 90, yoyo: true, ease: "Quad.out",
+                          onComplete: () => {
+                            if (finished) return;
+                            this.tweens.add({
+                              targets: cont, y: car.y - 4, scale: 0.12, alpha: 0.15, duration: 160, ease: "Back.in",
+                              onComplete: () => {
+                                if (finished) return;
+                                this.tweens.killTweensOf(cont);
+                                cont.destroy();
+                                onBoard(car);
+                              },
+                            });
+                          },
+                        });
+                      },
+                    });
+                  },
+                });
               },
             });
           },
@@ -5706,7 +5752,7 @@ export class GameScene extends Phaser.Scene {
       });
     }
     // chốt an toàn: dù có gì trục trặc vẫn vào bảng VICTORY
-    this.time.delayedCall(4200, finish);
+    this.time.delayedCall(6200, finish);
   }
 
   private showWinModal(reward: number, cloverAward: ReturnType<typeof awardClovers> | undefined) {
