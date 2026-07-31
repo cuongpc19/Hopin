@@ -203,14 +203,13 @@ class GameAudio {
   // chiptune retro): "plink" thuỷ tinh — sine cơ bản decay mượt + partial chuông 2.76×
   // + shimmer cao mảnh; MỖI XU ĐÁP LÊN MỘT NẤC pentatonic → cả tràng thành hợp âm rải
   // đi lên nghe sang, không phải một tiếng lặp 13 lần.
-  coin(step = 0) {
+  coin() {
     if (!this.ctx || !this.sfxGain) return;
-    // v3 (user 2026-08-01 "reduce + same as coin"): NHỎ hơn ~35% và ra chất KIM LOẠI xu
-    // thật — cú gõ "clink" cực ngắn + ngân sine + partial LỆCH HÀI 1.34× (đặc trưng tiếng
-    // kim loại, không phải chuông). Vẫn nhích cao dần theo tràng nhưng bước nhỏ, trần 1 quãng.
+    // v4 (user 2026-08-01): BỎ nhích cao theo tràng — mọi xu cùng cao độ, chỉ wobble ngẫu
+    // nhiên rất nhẹ cho tự nhiên. Chất kim loại giữ nguyên: clink ngắn + ngân + partial
+    // lệch hài 1.34× + ánh xu mảnh.
     const t = this.ctx.currentTime;
-    const s = Math.min(step, 8);
-    const f = 1568 * Math.pow(2, (s * 1.5) / 12) * (0.995 + Math.random() * 0.01); // gốc G6
+    const f = 1568 * (0.99 + Math.random() * 0.02); // G6, wobble ±1%
     this.voice(this.sfxGain, f * 1.02, t, 0.03, 0.16, "triangle"); // cú gõ clink
     this.voice(this.sfxGain, f, t + 0.008, 0.22, 0.18, "sine"); // thân ngân
     this.voice(this.sfxGain, f * 1.343, t + 0.008, 0.14, 0.05, "sine"); // partial lệch hài (kim loại)
