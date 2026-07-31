@@ -1636,28 +1636,13 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  // Waiting cars the player could usefully send out RIGHT NOW: a queue-front (launchable)
-  // car or a parked bay car whose colour is currently reachable and that has room on the ray.
+  // Bay cars the player could usefully send out RIGHT NOW: a PARKED (returned) car in a
+  // waiting bay whose colour is currently reachable and that has ray room. ONLY the bays —
+  // the queue lineup is NOT nudged (user 2026-07-31: "chỉ nhắc khi xe ở hàng chờ").
   private idleTapCandidates(): ChestView[] {
     const out: ChestView[] = [];
     const onRay = this.active.length + this.pending.length;
-    const freeSlots = this.slots.reduce((n, s) => n + (s ? 0 : 1), 0);
-    // (1) Front cars of the queue columns.
-    for (const col of this.invColumns) {
-      const v = col[0];
-      if (!v) continue;
-      const group = this.groupOf(v);
-      // launchable = no stranger sits ahead of any member (same front-prefix rule as launch).
-      const launchable = group.every((m) => {
-        const p = this.findInInventory(m);
-        return !!p && p.col.slice(0, p.r).every((c) => group.includes(c));
-      });
-      if (!launchable) continue;
-      if (freeSlots < group.length) continue;
-      if (onRay + group.length > MAX_ON_TRACK) continue;
-      if (group.some((m) => this.carCanCollect(m))) out.push(v);
-    }
-    // (2) Parked bay cars (a returned car sitting in its slot, not one out on the ray).
+    // Parked bay cars (a returned car sitting in its slot, not one out on the ray).
     for (const v of this.slots) {
       if (!v) continue;
       const outNow = this.pending.includes(v) || this.active.some((a) => a.view === v);
