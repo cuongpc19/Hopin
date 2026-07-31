@@ -945,25 +945,20 @@ export class GameScene extends Phaser.Scene {
       this.beltTop = cy - side / 2;
       this.beltBottom = cy + side / 2;
       this.roadRadius = Math.round(roadW * 1.1);
-      // Cell size normally targets the STANDARD 25×25 board so every level renders
-      // slimes at the SAME size (a smaller board just occupies less of the ring). But
-      // a board BIGGER than 25 (e.g. detailed "picture" levels) would overflow the
-      // road at that fixed size, so we shrink the cell to fit those — boards ≤25 are
-      // unchanged, only larger boards render smaller-to-fit.
+      // Cell size targets the STANDARD 25×25 board so slimes render the SAME size on every
+      // board ≤25 (a smaller board just fills less of the ring). A board BIGGER than 25 (e.g.
+      // detailed "picture" levels) shrinks its cell so the grid still fits inside the ring.
+      // We FILL the interior EXACTLY with a FRACTIONAL cell (no integer floor, no ×1.15 hack) —
+      // so every board ≥25 has the SAME outer size and more slimes NEVER yields a smaller board
+      // (bug fixed 2026-07-31: integer-floored `cols*cell` made a 31×31 render smaller than a
+      // 25×25). Only the per-slime size changes with the count.
       const STD = Math.max(25, cols, rows);
-      const cb = Math.round(this.roadRadius * 0.1);
-      const availW = this.beltRight - this.beltLeft - roadW - 2 * gap - cb;
-      const availH = this.beltBottom - this.beltTop - roadW - 2 * gap - cb;
-      this.cell = Math.max(6, Math.floor(Math.min(availW, availH) / STD));
-      // fill bump so the slimes fill more of the enlarged interior, capped by the road
-      // boundary (cb removed) so tiles never actually reach the road.
-      const capCell = Math.floor((this.beltRight - this.beltLeft - roadW - 2 * gap) / STD);
-      this.cell = Math.min(Math.round(this.cell * 1.15), capCell);
-      // Same computation pinned to STD=25 → the cell a 25×25 board would use here.
-      // (Identical to this.cell whenever cols,rows ≤ 25; larger on picture levels.)
-      const cell25 = Math.max(6, Math.floor(Math.min(availW, availH) / 25));
-      const cap25 = Math.floor((this.beltRight - this.beltLeft - roadW - 2 * gap) / 25);
-      this.stdCell = Math.min(Math.round(cell25 * 1.15), cap25);
+      const availW = this.beltRight - this.beltLeft - roadW - 2 * gap; // interior between the road's inner edges
+      const availH = this.beltBottom - this.beltTop - roadW - 2 * gap;
+      const fillBox = Math.min(availW, availH);
+      this.cell = Math.max(6, fillBox / STD);
+      // The cell a 25×25 would use here → keeps runner critters a constant size on big boards.
+      this.stdCell = Math.max(6, fillBox / 25);
       gridW = cols * this.cell;
       gridH = rows * this.cell;
       this.gridX = cx - gridW / 2;
