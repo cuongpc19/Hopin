@@ -219,14 +219,13 @@
       </div>
 
       <div class="row" style="margin-top:10px;">
-        <label>Màu nền hiện tại:</label>
+        <label>Viền</label>
+        <select id="borderMode" title="Có viền = tô 1 khung chữ nhật (màu sáng tự chọn) lấp các ô trống bao quanh chủ thể; Không = chủ thể nổi trên nền cỏ">
+          <option value="off">Không viền</option>
+          <option value="on">Có viền (tự động sáng)</option>
+        </select>
         <span id="bgSwatch" style="display:inline-block;width:22px;height:22px;border-radius:6px;border:1px solid #555;vertical-align:middle;"></span>
         <span id="bgLabel" class="hint"></span>
-        <label style="margin-left:10px">Đổi màu viền</label>
-        <select id="bgColorPick" title="Chọn màu nền/viền cho level này — tô ngay lên vùng nền (lan từ mép bảng)">
-          <option value="none">— chọn màu —</option>
-          <option value="-1">⌫ Trống (nền cỏ)</option>
-        </select>
       </div>
 
       <div class="board-wrap"><div id="board"></div></div>
@@ -812,6 +811,7 @@ function buildFromImage(img) {
   document.getElementById("cols").value = BOARD_SIZE;
   document.getElementById("rows").value = BOARD_SIZE;
   selected = -1;
+  borderId = detectBgId(); // Nền "Bỏ" → EMPTY (không viền); "Gộp 1 màu" → màu nền vừa tô
   renderPalette(); renderBoard(); refresh();
 }
 
@@ -954,6 +954,7 @@ function applyLevel(obj) {
   cols = obj.cols; rows = obj.rows; board = obj.board.slice();
   chests = (obj.chests || []).map(c => ({ color: c.color, count: c.count }));
   lightBoard = !!obj.lightBoard;
+  borderId = detectBgId(); // best-guess an existing edge-filling background as the current border
   restorePalette(obj.palette, obj.paletteFull); selected = -1;
   syncSizeUI(); syncBoardTypeUI();
   renderPalette(); renderBoard(); renderChests(); refresh();
@@ -983,15 +984,18 @@ function renderOutput() {
 }
 
 // ---- Master refresh ----
-// ---- Background colour: detect + show + recolour ----
-// The "nền/viền" is whatever fills the board's outer ring (a picture bg floods the margins).
-// So the current background = the majority colour among the border cells (may be EMPTY).
+// ---- Viền = RECTANGLE panel = the smallest bounding box around the subject ----
+// The "viền/nền" is a coloured rectangle filling the TIGHT bounding box of the drawing
+// (user 2026-08-01: "hình chữ nhật nhỏ nhất bao quanh chủ thể"). `borderId` tracks its colour
+// (EMPTY = none). Subject = every non-empty cell that isn't the current border fill.
+let borderId = EMPTY;
 function borderCellIdx() {
   const s = [];
   for (let c = 0; c < cols; c++) { s.push(c); s.push((rows - 1) * cols + c); }
   for (let r = 1; r < rows - 1; r++) { s.push(r * cols); s.push(r * cols + cols - 1); }
   return s;
 }
+// Best-guess an existing background when a level is loaded (edge-ring majority colour).
 function detectBgId() {
   const tally = {};
   for (const i of borderCellIdx()) { const v = board[i]; tally[v] = (tally[v] || 0) + 1; }
@@ -999,62 +1003,62 @@ function detectBgId() {
   for (const k in tally) if (tally[k] > bn) { bn = tally[k]; best = +k; }
   return best;
 }
+// Smallest rectangle covering the SUBJECT (non-empty cells that aren't the border fill).
+function subjectBBox() {
+  let minr = rows, maxr = -1, minc = cols, maxc = -1;
+  for (let i = 0; i < board.length; i++) {
+    if (board[i] < 0 || board[i] === borderId) continue;
+    const r = Math.floor(i / cols), c = i % cols;
+    if (r < minr) minr = r; if (r > maxr) maxr = r;
+    if (c < minc) minc = c; if (c > maxc) maxc = c;
+  }
+  return maxr < 0 ? null : { minr, maxr, minc, maxc };
+}
+// Set the border to `toId` (EMPTY = remove it): strip the old border everywhere first, then
+// fill the EMPTY cells inside the subject's bounding rectangle with the new colour — so the
+// result is always a tight rectangle behind the subject, never a full-board flood.
+function applyBorder(toId) {
+  if (borderId !== EMPTY) for (let i = 0; i < board.length; i++) if (board[i] === borderId) board[i] = EMPTY;
+  borderId = EMPTY;
+  const bb = subjectBBox();
+  if (bb && toId !== EMPTY) {
+    for (let r = bb.minr; r <= bb.maxr; r++) for (let c = bb.minc; c <= bb.maxc; c++) {
+      const i = r * cols + c; if (board[i] < 0) board[i] = toId;
+    }
+  }
+  borderId = toId;
+  renderBoard(); refresh();
+}
+// Bright background preference (matches the game builder's bright-bg rule): pick the first
+// bright colour the subject doesn't already use, so the frame contrasts with the drawing.
+const BRIGHT_BG_PREF = [15, 4, 5, 17, 2, 1, 3, 7, 8, 6, 0, 14];
+function autoBrightBorderId() {
+  const used = new Set();
+  for (let i = 0; i < board.length; i++) if (board[i] >= 0 && board[i] !== borderId) used.add(board[i]);
+  return BRIGHT_BG_PREF.find(id => id < BASE_N && !used.has(id)) ?? 15;
+}
 function updateBgReadout() {
-  const bg = detectBgId();
   const sw = document.getElementById("bgSwatch");
   const lb = document.getElementById("bgLabel");
+  const tg = document.getElementById("borderMode");
+  if (tg) tg.value = borderId === EMPTY ? "off" : "on";
   if (!sw || !lb) return;
-  if (bg === EMPTY) {
+  if (borderId === EMPTY) {
     sw.style.background = "repeating-linear-gradient(45deg,#444 0 6px,#222 6px 12px)";
-    lb.textContent = "Trống (nhân vật nổi trên nền cỏ game)";
+    lb.textContent = "chủ thể nổi trên nền cỏ";
   } else {
-    sw.style.background = COLORS[bg] ? COLORS[bg].hex : "#000";
-    lb.textContent = `${bg} · ${COLORS[bg] ? COLORS[bg].name : "?"}`;
+    sw.style.background = COLORS[borderId] ? COLORS[borderId].hex : "#000";
+    lb.textContent = `khung ${borderId} · ${COLORS[borderId] ? COLORS[borderId].name : "?"}`;
   }
-}
-// Flood-fill the background region (from the border, over cells matching the current bg)
-// and repaint it to `toId` — so only the real background changes, not same-colour subject cells.
-function recolorBackground(toId) {
-  const bg = detectBgId();
-  if (toId === bg) return;
-  const seen = new Uint8Array(board.length);
-  const stack = [];
-  for (const i of borderCellIdx()) if (board[i] === bg && !seen[i]) { seen[i] = 1; stack.push(i); }
-  while (stack.length) {
-    const i = stack.pop();
-    board[i] = toId;
-    const r = Math.floor(i / cols), c = i % cols;
-    const nb = [];
-    if (r > 0) nb.push(i - cols); if (r < rows - 1) nb.push(i + cols);
-    if (c > 0) nb.push(i - 1); if (c < cols - 1) nb.push(i + 1);
-    for (const j of nb) if (!seen[j] && board[j] === bg) { seen[j] = 1; stack.push(j); }
-  }
-  renderBoard(); refresh();
 }
 
 function refresh() { renderValidation(); renderOutput(); updateBgReadout(); }
 
 // ---- Events ----
-document.getElementById("clear").onclick = () => { board.fill(EMPTY); renderBoard(); refresh(); };
-// Direct "choose border colour": pick a colour → flood the background to it immediately.
-function fillBgPickSelect() {
-  const sel = document.getElementById("bgColorPick");
-  if (!sel) return;
-  sel.innerHTML = '<option value="none">— chọn màu —</option><option value="-1">⌫ Trống (nền cỏ)</option>';
-  for (let i = 0; i < BASE_N; i++) {
-    const o = document.createElement("option");
-    o.value = i; o.textContent = `${i} · ${BASE_COLORS[i].name}`;
-    o.style.background = BASE_COLORS[i].hex;
-    const [r, g, b] = hexToRgb(BASE_COLORS[i].hex);
-    o.style.color = (0.299 * r + 0.587 * g + 0.114 * b) < 140 ? "#fff" : "#111";
-    sel.appendChild(o);
-  }
-}
-document.getElementById("bgColorPick").onchange = (e) => {
-  const v = e.target.value;
-  if (v === "none") return;
-  recolorBackground(+v);
-  e.target.value = "none"; // reset so the same colour can be re-applied
+document.getElementById("clear").onclick = () => { board.fill(EMPTY); borderId = EMPTY; renderBoard(); refresh(); };
+// Có viền / Không viền: fill (auto-bright) or clear the subject's bounding rectangle.
+document.getElementById("borderMode").onchange = (e) => {
+  applyBorder(e.target.value === "on" ? autoBrightBorderId() : EMPTY);
 };
 document.getElementById("autogen").onclick = autoGenerate;
 document.getElementById("addChest").onclick = () => { chests.push({ color: paintColor >= 0 ? paintColor : 0, count: 4 }); selected = chests.length - 1; renderChests(); refresh(); };
@@ -1219,7 +1223,7 @@ document.getElementById("boardType").onchange = (e) => { lightBoard = e.target.v
 
 // ---- Boot ----
 loadDefault();
-fillBgColorSelect(); syncBgColorEnabled(); syncBoardTypeUI(); fillBgPickSelect();
+fillBgColorSelect(); syncBgColorEnabled(); syncBoardTypeUI();
 renderPalette(); renderBoard(); renderChests(); refresh();
 initGameApi();
 </script>
