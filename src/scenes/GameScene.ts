@@ -3086,27 +3086,26 @@ export class GameScene extends Phaser.Scene {
   // A FACELESS board tile: flat palette colour with a thin darker rim + a soft top
   // gloss for a little depth. No eyes/mouth — keeps the mosaic clean (faces live only
   // on the tray cars). Uniform 128px so setTexture on reveal needs no resize juggling.
-  // Tile "KHỐI THẠCH 3D" v2 (user 2026-08-01, theo ảnh mẫu Level-39): mặt trên sáng, cạnh
-  // dưới ĐÙN tối kiểu khối hộp, một vệt gloss cong — TRƠN HOÀN TOÀN, KHÔNG mắt (2 mắt mờ
-  // cũ ở cỡ ô nhỏ thành "nốt đen" lạc lõng — user bắt lỗi). Procedural: mọi level cùng đẹp.
+  // Tile "KHỐI THẠCH 3D" v3 (user 2026-08-01, chỉnh theo ảnh mẫu Level-39 sau 2 bản bị chê):
+  // FULL-BLEED kín cả ô (không chừa mép — tranh liền mạch, không thành "đậu rời"), bo góc
+  // NHỎ, cạnh đùn dưới chỉ hơi tối (0.72 — bản trước 0.55 đen quá thành sọc bẩn), sáng nhẹ
+  // nửa trên + gloss rất dịu. Trơn, không mắt.
   private makeTileTexture(key: string, col: number, size = 128) {
     if (this.textures.exists(key)) this.textures.remove(key);
     const g = this.make.graphics({ x: 0, y: 0 }, false);
-    const r = size * 0.26;
-    // cạnh đùn dưới (mặt bên của khối) — tối hơn hẳn, lộ ra ~10% ở đáy
-    g.fillStyle(shade(col, 0.55), 1);
-    g.fillRoundedRect(size * 0.04, size * 0.12, size * 0.92, size * 0.85, r);
-    // mặt trên của khối
+    const r = size * 0.13;
+    // cạnh đùn dưới — DỊU (mặt bên khối lộ ~12% ở đáy)
+    g.fillStyle(shade(col, 0.72), 1);
+    g.fillRoundedRect(0, size * 0.1, size, size * 0.9, r);
+    // mặt trên phủ gần kín
     g.fillStyle(col, 1);
-    g.fillRoundedRect(size * 0.04, size * 0.03, size * 0.92, size * 0.84, r);
-    // nửa trên sáng dần (giả gradient)
-    g.fillStyle(shade(col, 1.22), 0.55);
-    g.fillRoundedRect(size * 0.07, size * 0.06, size * 0.86, size * 0.4, r * 0.8);
-    // vệt gloss cong góc trên-trái (2 lớp cho mềm)
-    g.fillStyle(0xffffff, 0.45);
-    g.fillEllipse(size * 0.34, size * 0.2, size * 0.4, size * 0.15);
-    g.fillStyle(0xffffff, 0.28);
-    g.fillEllipse(size * 0.26, size * 0.17, size * 0.18, size * 0.09);
+    g.fillRoundedRect(0, 0, size, size * 0.88, r);
+    // sáng nhẹ nửa trên
+    g.fillStyle(shade(col, 1.14), 0.4);
+    g.fillRoundedRect(size * 0.04, size * 0.03, size * 0.92, size * 0.38, r * 0.9);
+    // gloss dịu góc trên-trái
+    g.fillStyle(0xffffff, 0.3);
+    g.fillEllipse(size * 0.3, size * 0.16, size * 0.34, size * 0.12);
     g.generateTexture(key, size, size);
     g.destroy();
   }
