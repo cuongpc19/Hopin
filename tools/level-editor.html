@@ -222,8 +222,11 @@
         <label>Màu nền hiện tại:</label>
         <span id="bgSwatch" style="display:inline-block;width:22px;height:22px;border-radius:6px;border:1px solid #555;vertical-align:middle;"></span>
         <span id="bgLabel" class="hint"></span>
-        <div class="spacer"></div>
-        <button id="bgRecolor" title="Tô lại toàn bộ nền (vùng lan từ mép bảng) theo Màu vẽ đang chọn">Tô nền = màu vẽ</button>
+        <label style="margin-left:10px">Đổi màu viền</label>
+        <select id="bgColorPick" title="Chọn màu nền/viền cho level này — tô ngay lên vùng nền (lan từ mép bảng)">
+          <option value="none">— chọn màu —</option>
+          <option value="-1">⌫ Trống (nền cỏ)</option>
+        </select>
       </div>
 
       <div class="board-wrap"><div id="board"></div></div>
@@ -1033,7 +1036,26 @@ function refresh() { renderValidation(); renderOutput(); updateBgReadout(); }
 
 // ---- Events ----
 document.getElementById("clear").onclick = () => { board.fill(EMPTY); renderBoard(); refresh(); };
-document.getElementById("bgRecolor").onclick = () => recolorBackground(paintColor);
+// Direct "choose border colour": pick a colour → flood the background to it immediately.
+function fillBgPickSelect() {
+  const sel = document.getElementById("bgColorPick");
+  if (!sel) return;
+  sel.innerHTML = '<option value="none">— chọn màu —</option><option value="-1">⌫ Trống (nền cỏ)</option>';
+  for (let i = 0; i < BASE_N; i++) {
+    const o = document.createElement("option");
+    o.value = i; o.textContent = `${i} · ${BASE_COLORS[i].name}`;
+    o.style.background = BASE_COLORS[i].hex;
+    const [r, g, b] = hexToRgb(BASE_COLORS[i].hex);
+    o.style.color = (0.299 * r + 0.587 * g + 0.114 * b) < 140 ? "#fff" : "#111";
+    sel.appendChild(o);
+  }
+}
+document.getElementById("bgColorPick").onchange = (e) => {
+  const v = e.target.value;
+  if (v === "none") return;
+  recolorBackground(+v);
+  e.target.value = "none"; // reset so the same colour can be re-applied
+};
 document.getElementById("autogen").onclick = autoGenerate;
 document.getElementById("addChest").onclick = () => { chests.push({ color: paintColor >= 0 ? paintColor : 0, count: 4 }); selected = chests.length - 1; renderChests(); refresh(); };
 document.getElementById("clearChests").onclick = () => { chests = []; selected = -1; renderChests(); refresh(); };
@@ -1197,7 +1219,7 @@ document.getElementById("boardType").onchange = (e) => { lightBoard = e.target.v
 
 // ---- Boot ----
 loadDefault();
-fillBgColorSelect(); syncBgColorEnabled(); syncBoardTypeUI();
+fillBgColorSelect(); syncBgColorEnabled(); syncBoardTypeUI(); fillBgPickSelect();
 renderPalette(); renderBoard(); renderChests(); refresh();
 initGameApi();
 </script>
