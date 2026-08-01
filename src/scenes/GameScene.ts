@@ -389,6 +389,9 @@ export class GameScene extends Phaser.Scene {
     for (let i = 0; i < COLORS.length; i++) {
       this.load.image(`slime-${i}`, `art/slime-${i}.png`);
       this.load.image(`car-${i}`, `art/car-${i}.png`); // one pre-coloured car per color id
+      // Glossy keycap board-tile art (public/art/slime/tile-<id>.png). If present it
+      // REPLACES the procedural flat tile in create(); missing ones fall back to it.
+      this.load.image(`tile-${i}`, `art/slime/tile-${i}.png`);
     }
     // XU VÀNG màn thắng (video mẫu IMG_6489). Art thật user sẽ gửi vào public/art/coin.png;
     // thiếu/hỏng → create() vẽ placeholder (makeCoinTexture).
@@ -425,7 +428,14 @@ export class GameScene extends Phaser.Scene {
     // FACELESS board tiles (user 2026-07-26): the PNG slimes have a baked-in face that
     // makes the "picture" noisy. Board cells now render as flat bevelled colour tiles
     // (no face) → clean mosaic; faces stay only on the cars/chests in the tray.
-    for (let i = 0; i < COLORS.length; i++) this.makeTileTexture(`tile-${i}`, COLORS[i]);
+    // Keep the loaded keycap PNG if it arrived; otherwise draw the flat procedural tile.
+    // A Vite dev-server 200-for-missing yields a tiny broken texture, so also regen when
+    // the texture is absent or degenerate (width < 8).
+    for (let i = 0; i < COLORS.length; i++) {
+      const t = this.textures.exists(`tile-${i}`) ? this.textures.get(`tile-${i}`) : null;
+      const ok = t && t.getSourceImage() && (t.getSourceImage() as HTMLImageElement).width >= 8;
+      if (!ok) this.makeTileTexture(`tile-${i}`, COLORS[i]);
+    }
     this.makeTileTexture("tile-hidden", 0xeef3f8); // white blank for the "?" cover
     // Placeholder art for obstacle / special-car textures. NOTE: Vite's dev server
     // returns 200 (index.html) for a missing PNG, so `loaderror` is unreliable —
@@ -522,7 +532,9 @@ export class GameScene extends Phaser.Scene {
     this.twinLinkG = this.add.graphics().setDepth(DEPTH_TWINLINK);
 
     this.level = makeLevel(levelNum);
-    this.slamMode = this.level.slam === true; // lock mode (tap bay cars; slot locks while out)
+    // SLAM = chế độ MẶC ĐỊNH cho MỌI level (user 2026-08-01): luôn bật trừ khi level ghi rõ
+    // `slam: false` (opt-out cho level đặc biệt). Không cần gắn `slam:true` từng level nữa.
+    this.slamMode = this.level.slam !== false; // lock mode (tap bay cars; slot locks while out)
     this.trayMode = this.level.tray === true || this.slamMode; // slam reuses the tray bay system
     this.postLog({ ev: "start", v: (typeof __APP_BUILD__ !== "undefined" ? __APP_BUILD__ : "?"), cars: this.level.chests.length, twins: new Set(this.level.chests.filter((c) => c.pairId != null).map((c) => c.pairId)).size, buried: this.level.chests.filter((c) => (c as unknown as { buried?: boolean }).buried).length });
     // SLAM: ALWAYS 5 waiting slots (the "Add" booster grows it to 6). No per-level bays.
@@ -544,9 +556,9 @@ export class GameScene extends Phaser.Scene {
     const perRow = Phaser.Math.Clamp(this.level.lanes ?? 4, 2, 6);
     const chest = CAR_SIZE;
 
-    const hudH = 58; // top HUD strip
-    const gTop = 10; // gap below the HUD
-    const gBoard = 20; // breathing room between the board and the waiting slots (small → board grows)
+    const hudH = 36; // top HUD strip — HUD dời lên y=20 nên đáy ~y34; board áp ngay dưới ô LEVEL (user 2026-08-02)
+    const gTop = 2; // gap below the HUD — nhỏ để board áp SÁT ô LEVEL, đẩy mọi thứ lên trên (user 2026-08-02)
+    const gBoard = 14; // khe board→hàng chờ, nhỏ để hàng chờ GẦN SÁT board (user 2026-08-02)
     const gSlots = 18;
     const gInv = 10; // small gap — the freed space goes into the row-3 peek, not empty air
     const boostH = 78;
@@ -561,7 +573,7 @@ export class GameScene extends Phaser.Scene {
     this.invPeek = peek; // mask uses the same value so the clip matches the reserved space
     const regionH = (rows: number) => (rows - 1) * rowStep + chest + peek + 8;
     const bottomFixed = SLOT_SIZE + gSlots + gInv + boostH;
-    const bottomMax = Math.round(GAME_H * 0.4);
+    const bottomMax = Math.round(GAME_H * 0.35); // 40%→35%: đẩy cụm dưới xuống + board sát mép to hơn (user 2026-08-02)
     // GROW the inventory to fill the 40% budget (up to 3 rows) so the bottom cluster
     // sits near 40% and the board lands around the real game's ~53% — instead of the
     // board ballooning and leaving an empty gap.
@@ -584,7 +596,9 @@ export class GameScene extends Phaser.Scene {
     const boardTop = hudH + gTop;
     this.buildBoard(boardTop, m); // zone 1
 
-    let by = GAME_H - margin - bottomH;
+    // Bottom cluster ANCHORED ngay dưới board (không ghim đáy màn hình nữa) nên hàng chờ luôn
+    // GẦN SÁT board và dời lên theo khi board lên (user 2026-08-02). Dư ra thì rơi xuống đáy.
+    let by = boardTop + m.frameH + gBoard;
     this.buildSlots(by); // zone 2 (waiting slots)
     by += SLOT_SIZE + gSlots;
 
@@ -937,20 +951,35 @@ export class GameScene extends Phaser.Scene {
     // becomes slack between the board and the bottom cluster. Line/arch keep the
     // full vertical budget. this.cell is (re)computed in buildBoard per track.
     const isRing = (this.level.track ?? "square") !== "line" && this.level.track !== "u" && this.level.track !== "arch";
-    // Ring (square) frame may grow toward the full screen width so the square road
-    // can hug the left/right edges, still bounded by the vertical budget.
-    const frameH = isRing ? Math.min(boardBudget, GAME_W) : boardBudget;
+    // Ring (square) frame is FORCED to the FULL screen width so the square road hugs the
+    // left/right edges (user 2026-08-02 "chưa sát 2 bên"). Was min(boardBudget, GAME_W) which
+    // let a short viewport shrink the square → side gaps. Now the board always spans GAME_W;
+    // the bottom cluster yields the vertical room (pushed down / compressed).
+    const frameH = isRing ? GAME_W : boardBudget;
     this.chestSize = CAR_SIZE; // fixed — consistent car size on every level
     return { frameW, frameH, ringW: frameW, ringH: frameH };
   }
 
-  // Full-screen forest-floor background image (bottom layer). Play scene keeps the
-  // LIGHT forest art (Home uses the dark premium one).
+  // Full-screen background (bottom layer). Was the forest-floor photo; now a soft
+  // BEIGE "caro" (checkerboard) tablecloth — light beige + a muted sage green — so the
+  // dark navy board panel reads as a tray on a picnic cloth. Two tones only, kept low
+  // in contrast so the bright board tiles stay the star.
   private buildBackground() {
-    this.add
-      .image(GAME_W / 2, GAME_H / 2, "background")
-      .setDisplaySize(GAME_W, GAME_H)
-      .setDepth(DEPTH_BG);
+    const beige = 0xceba8e; // caro tan ẤM VÀNG (golden) — gần ảnh hơn (user 2026-08-02)
+    const sage = 0xe3d6b0; //  2nd tone: kem ấm → caro tan 2 tông
+    const g = this.add.graphics().setDepth(DEPTH_BG);
+    g.fillStyle(beige, 1);
+    g.fillRect(0, 0, GAME_W, GAME_H);
+    const cs = Math.round(GAME_W / 16); // ~16 squares wide → tablecloth scale
+    const cols = Math.ceil(GAME_W / cs) + 1;
+    const rows = Math.ceil(GAME_H / cs) + 1;
+    g.fillStyle(sage, 1);
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (((r + c) & 1) === 0) continue; // only "odd" squares → checker
+        g.fillRect(c * cs, r * cs, cs, cs);
+      }
+    }
   }
 
   // ---- Zone 1: board, Line track, keys -------------------------------
@@ -998,15 +1027,15 @@ export class GameScene extends Phaser.Scene {
       // still leaving a clear run gap down to the road.
       this.gridY = gridTop + Math.max(0, bandH - gridH) * 0.5;
     } else if (kind === "square" || kind === "rect") {
-      // Largest CENTRED SQUARE loop that fits, hugging the screen edges (tiny margin
-      // so the road spans nearly the full width → biggest enclosed area).
+      // Largest CENTRED SQUARE loop that fits. edge = 4: đủ lề để nét OUTLINE ngoài của ray
+      // (dày roadW+6, lấn ~25px so với tâm) không bị XÉN ở mép (user 2026-08-02 "mép bị xoá 1 chút").
       const edge = 4;
       const side = Math.min(GAME_W - roadW - 2 * edge, m.frameH - roadW - 2 * edge);
       this.beltLeft = cx - side / 2;
       this.beltRight = cx + side / 2;
       this.beltTop = cy - side / 2;
       this.beltBottom = cy + side / 2;
-      this.roadRadius = Math.round(roadW * 1.1);
+      this.roadRadius = Math.round(roadW * 0.85); // bo góc TRÒN như ảnh mẫu khung gỗ (user 2026-08-02)
       // Cell size targets the STANDARD 25×25 board so slimes render the SAME size on every
       // board ≤25 (a smaller board just fills less of the ring). A board BIGGER than 25 (e.g.
       // detailed "picture" levels) shrinks its cell so the grid still fits inside the ring.
@@ -1168,30 +1197,16 @@ export class GameScene extends Phaser.Scene {
     const h = (this.beltBottom - this.beltTop) - roadW + 2 * tuck;
     const rad = Math.max(10, this.roadRadius - roadW / 2 + tuck);
     const g = this.add.graphics().setDepth(-60); // above the forest bg, below the ROAD & tiles
-    // Per-level theme: default DARK navy (bright tiles pop, like ref game); lightBoard
-    // falls back to the old light sand mat (design comparison).
-    const light = !!this.level.lightBoard;
-    const base = light ? 0xdcc79c : 0x2b2f4a;   // sand vs deep navy
-    const alt = light ? 0xd2bb8c : 0x323858;    // the OTHER caro tone (subtle, so bright tiles still pop)
-    const gridLine = light ? 0xc9b184 : 0x232840; // faint cell-boundary line
+    // TẠM THỜI (user 2026-08-01): nền trong đường ray = màu LÒNG ĐƯỜNG RAY (tan) cho liền mạch,
+    // bỏ mat navy + caro. (buildRoadLoop center highlight = 0xe8cf9c.)
+    const base = 0xe8cf9c;      // road-bed tan (be — giữ nguyên)
+    const gridLine = 0xa2814f;  // cell-boundary line — TỐI hơn 1 chút (user 2026-08-01)
     g.fillStyle(base, 1); g.fillRoundedRect(x, y, w, h, rad); // base board tone
-    // Two-tone "caro" checkerboard filling the WHOLE mat (not just the tile grid) so a
-    // small board like 15×15 doesn't look like a tiny caro square floating in a plain
-    // navy panel. Cells are phase-aligned to the tile grid (gridX/gridY) so tiles sit
-    // flush on the caro, and the whole thing is masked to the rounded-rect mat shape so
-    // corners stay clean. Kept subtle so bright pixel-art tiles still pop on top.
     const cell = this.cell;
     const c0 = Math.floor((x - this.gridX) / cell), r0 = Math.floor((y - this.gridY) / cell);
     const c1 = Math.ceil((x + w - this.gridX) / cell), r1 = Math.ceil((y + h - this.gridY) / cell);
-    g.fillStyle(alt, 1);
-    for (let r = r0; r < r1; r++) {
-      for (let c = c0; c < c1; c++) {
-        if (((r + c) & 1) === 0) continue; // only the "odd" cells → checker
-        g.fillRect(this.gridX + c * cell, this.gridY + r * cell, cell, cell);
-      }
-    }
-    // A faint lattice on top keeps every cell boundary crisp, across the whole mat.
-    g.lineStyle(1, gridLine, light ? 0.4 : 0.35);
+    // A faint lattice keeps every cell boundary crisp on the tan bed.
+    g.lineStyle(1, gridLine, 0.35);
     for (let c = c0; c <= c1; c++) { const gx = this.gridX + c * cell; g.beginPath(); g.moveTo(gx, y); g.lineTo(gx, y + h); g.strokePath(); }
     for (let r = r0; r <= r1; r++) { const gy = this.gridY + r * cell; g.beginPath(); g.moveTo(x, gy); g.lineTo(x + w, gy); g.strokePath(); }
     // Clip everything (checker + lattice overflow) to the rounded-rect mat shape.
@@ -1219,10 +1234,12 @@ export class GameScene extends Phaser.Scene {
       g.lineStyle(w, color, alpha);
       g.strokeRoundedRect(L, T, bw, bh, rad);
     };
-    ring(roadW + 6, 0x4a3016); // dark outline
-    ring(roadW, 0xa9743d); // rail band (edges)
-    ring(roadW - 9, 0xd8b47e); // tan road surface
-    ring(roadW - 22, 0xe8cf9c, 0.9); // soft center highlight
+    // Khung GỖ BLONDE có gờ nổi bevel như ảnh mẫu (user 2026-08-02): viền ngoài dịu (không đen),
+    // thân gỗ sáng, dải sáng bevel nổi ở giữa, dịu lại sát mép trong — trông như khung gỗ bo tròn.
+    ring(roadW + 4, 0xa87f47); // rim ngoài mảnh, nâu vàng ấm
+    ring(roadW, 0xc9a86e); // thân gỗ honey (ấm/vàng hơn)
+    ring(roadW - 8, 0xddc48d); // dải sáng bevel (bắt sáng, nổi khối)
+    ring(roadW - 20, 0xbd9c63, 0.85); // dịu lại ở giữa, tránh chói
   }
 
   // A single horizontal road band (pill-shaped, rounded ends), same wooden look.
@@ -1238,10 +1255,10 @@ export class GameScene extends Phaser.Scene {
       g.fillStyle(color, alpha);
       g.fillRect(left, y - hh / 2, w, hh);
     };
-    band(-3, 0x4a3016); // dark outline (top/bottom edges)
-    band(0, 0xa9743d); // rail band
-    band(6, 0xd8b47e); // tan surface
-    band(13, 0xe8cf9c, 0.9); // soft center highlight
+    band(-2, 0xa87f47); // rim ngoài mảnh, ấm (khớp buildRoadLoop)
+    band(0, 0xc9a86e); // thân gỗ honey (ấm/vàng hơn)
+    band(6, 0xddc48d); // dải sáng bevel
+    band(13, 0xbd9c63, 0.85); // dịu lại ở giữa
   }
 
   // An INVERTED-U (⊓) road, open at the bottom: left leg → rounded top-left bend →
@@ -1318,7 +1335,7 @@ export class GameScene extends Phaser.Scene {
   // tile's color with a little face. Fills the cell so the grid reads as a mosaic.
   // A grid tile = a cute critter sprite (slime) in the tile's color.
   private makeKey(colorId: number, x: number, y: number, s: number) {
-    const img = this.add.image(0, 0, `tile-${colorId}`).setDisplaySize(s * 1.15, s * 1.15); // faceless body ≈ cell → tiles sit flush (no overlap)
+    const img = this.add.image(0, 0, `tile-${colorId}`).setDisplaySize(s * 1.3, s * 1.3); // keycap art has ~23% transparent margin → ×1.3 makes the cap ≈ fill the cell (flush; shadow bleeds onto the next tile)
     const c = this.add.container(x, y, [img]);
     c.setSize(s, s);
     c.setData("body", img); // kept so the collect animation can bob the body alone
@@ -1379,8 +1396,8 @@ export class GameScene extends Phaser.Scene {
         body.clearTint();
         body.setTexture(`tile-${color}`);
         // tile-* textures are uniform 128px, but setTexture still resets display size,
-        // so re-apply the cell size.
-        body.setDisplaySize(this.cell * 1.15, this.cell * 1.15);
+        // so re-apply the cell size (×1.3 to match makeKey's flush keycap footprint).
+        body.setDisplaySize(this.cell * 1.3, this.cell * 1.3);
         const q = tile.getData("qmark") as Phaser.GameObjects.Text | undefined;
         if (q) q.destroy();
         tile.setScale(0.6);
@@ -2752,7 +2769,7 @@ export class GameScene extends Phaser.Scene {
   // ---- Top HUD: settings (left) · level pill (center) · gold (right) ----
 
   private buildTopBar(levelNum: number) {
-    const y = 32;
+    const y = 20; // HUD sát viền TRÊN (user 2026-08-02) — ô LEVEL/gear/gold dồn lên đỉnh
     const D = 40;
 
     // Settings button (left): a round red button with a white gear (real-game look).
@@ -5690,16 +5707,20 @@ export class GameScene extends Phaser.Scene {
 
     const closeAll = () => objs.forEach((o) => o.destroy());
 
-    // REVIVE: pay gold, clear the 5 waiting bays (cars drive up & off), then park
-    // the car that couldn't fit — and resume play.
+    // REVIVE (user 2026-08-01): pay gold and ADD ONE empty waiting bay — do NOT clear the
+    // whole row anymore. The fresh empty bay lets a queue car flow in (slam auto-fills bays),
+    // which breaks the deadlock. No 6-bay cap here: revive is a paid escape hatch.
     const revive = () => {
       if (this.gold < REVIVE_COST) return;
       this.addGold(-REVIVE_COST);
       this.lost = false;
       closeAll();
-      const parked = this.slots.filter(Boolean) as ChestView[];
-      for (const v of parked) this.leaveCar(v); // drift up & leave → free the slot
-      if (pending) this.parkChest(pending);
+      this.slotCount += 1;
+      this.slots.push(null);
+      this.layoutSlots();
+      if (this.slotWarnActive) this.stopSlotWarning(); // fresh empty bay clears the "full" warning
+      this.flashNewSlot(this.slotCount - 1); // call out the brand-new bay
+      if (pending) this.parkChest(pending); // (classic/tray only) the overflow car goes into the new bay
     };
 
     // Revive button (green, big). Greyed out with a hint if the player can't pay.

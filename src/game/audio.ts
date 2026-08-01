@@ -228,7 +228,11 @@ class GameAudio {
     // HIT C-trưởng + thump timpani → nâng qua G-trưởng (dominant lift) → HIT CUỐI C-trưởng
     // trải 2 quãng + bass đôi + shimmer kép + chuông đuôi. ~2.6s.
     const t = this.ctx.currentTime;
-    const g = this.sfxGain;
+    // To hơn 1 chút (user 2026-08-01): jingle thắng đi qua 1 gain khuếch đại riêng (~1.4×)
+    // nối vào sfxGain, nên chỉ jingle này to lên chứ không đụng SFX khác.
+    const g = this.ctx.createGain();
+    g.gain.value = 1.4;
+    g.connect(this.sfxGain);
     // (v3 "vui tai" 2026-08-01) boing hoạt hình + 2 nốt nhún staccato lấy đà trước khi chạy
     this.glide(g, NOTE.C5 * 0.75, NOTE.C5 * 1.05, t, 0.09, 0.16, "sine"); // boing nhỏ
     this.voice(g, NOTE.C5, t + 0.02, 0.06, 0.2, "triangle");
