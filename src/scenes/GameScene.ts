@@ -66,6 +66,8 @@ interface ChestView {
   armFx?: Phaser.GameObjects.GameObject[]; // extra telegraph objects (up-arrow, ring) destroyed on disarm
   qMark?: Phaser.GameObjects.Text; // the "?" cover of a BURIED car (destroyed on reveal)
   traySlot?: number; // TRAY mode: the bay this car is RESERVED in while it darts out to collect (returns here; freed only when it leaves empty)
+  seqOut?: number; // boardSeq when this trip left its bay — the futility proof needs an unchanged board
+  futileAtSeq?: number; // slam: last full trip ate NOTHING while the board sat at this seq → until the board changes this car provably has no move, whatever the ray model says
 }
 
 // A chest currently travelling on the Line.
@@ -474,6 +476,7 @@ export class GameScene extends Phaser.Scene {
     // Home picker features THIS level, not the max unlocked one (user 2026-07-31).
     try { localStorage.setItem("pf_current", String(levelNum)); } catch { /* storage unavailable */ }
     this.playLog = []; this.playStart = (typeof performance !== "undefined" ? performance.now() : 0); this.peakUsed = 0;
+    this.boardSeq = 0; this.lastStuckProbe = 0; // fresh board → fresh futility bookkeeping
     try { this.guideMode = localStorage.getItem("hopin_guide") === "1"; } catch { this.guideMode = false; }
     this.guideKey = ""; this.guideHand = undefined; this.guideRing = undefined; this.guidePlan = null; this.guidePlanWinning = false; this.guidePlanNonce = 0;
     if (typeof window !== "undefined") { (window as any).hopLog = () => console.log(localStorage.getItem("hopin_playlog") || "[]"); (window as any).hopLogClear = () => localStorage.removeItem("hopin_playlog"); }
@@ -1708,7 +1711,7 @@ export class GameScene extends Phaser.Scene {
       if (outNow) continue;
       const group = this.groupOf(v).filter((m) => this.slots.includes(m));
       if (onRay + group.length > MAX_ON_TRACK) continue;
-      if (this.carCanCollect(v)) out.push(v);
+      if (this.bayCarLive(v)) out.push(v); // never nudge a car whose lap just proved futile
     }
     return out;
   }
@@ -3478,7 +3481,7 @@ export class GameScene extends Phaser.Scene {
     }
     this.playPop(); // cheerful "pop" as the car springs out of its bay
     if (!auto) this.idleSince = this.time.now; // real bay tap → restart the idle-nudge timer
-    for (const m of group) (m as unknown as { _capOut?: number })._capOut = m.chest.count; // telemetry trip: seats khi ra ray
+    for (const m of group) { (m as unknown as { _capOut?: number })._capOut = m.chest.count; m.seqOut = this.boardSeq; } // trip start: seats + board seq (futility proof)
     if (!auto) { this.postLog({ ev: "bayTap", colors: group.map((m) => m.chest.color), counts: group.map((m) => m.chest.count), slot: slotIndex }); this.onGuideAction("bay" + slotIndex); } // slam: tapping a bay is the player's 2nd decision type
     for (const v of group) {
       const si = this.slots.indexOf(v);
@@ -3906,7 +3909,12 @@ export class GameScene extends Phaser.Scene {
   // keeps circling only while its colour is reachable, and parks (freeing the slot)
   // when it isn't — so blocked cars never hog the ray and deadlock the board.
   private reachableColors = new Set<number>();
-  private computeReachableColors() {
+  // Monotonic count of board changes (any slime/rock/wood removed). Pairs with
+  // ChestView.futileAtSeq: a car's "my trip ate nothing" proof only holds while
+  // the board is exactly as that trip toured it.
+  private boardSeq = 0;
+  private lastStuckProbe = 0; // throttle for the stuck-state telemetry probe
+  private computeReachableColors(sample?: Map<number, number>) {
     this.reachableColors.clear();
     const cols = this.level.cols, rows = this.level.rows;
     const board = this.level.board;
@@ -3914,7 +3922,10 @@ export class GameScene extends Phaser.Scene {
       if (!hit) return;
       if (this.hiddenSet.has(hit.idx)) return; // a "?" slime isn't collectable yet
       const code = board[hit.idx];
-      if (code >= 0 && code < HARD_ROCK) this.reachableColors.add(code); // exposed slime
+      if (code >= 0 && code < HARD_ROCK) {
+        this.reachableColors.add(code); // exposed slime
+        if (sample && !sample.has(code)) sample.set(code, hit.idx); // probe: remember ONE cell per colour
+      }
     };
     // Cast the SAME 3 rays the car shoots (straight + two 45° diagonals) from every
     // lane of every edge the track actually runs along — so this matches real LOS
@@ -3956,6 +3967,14 @@ export class GameScene extends Phaser.Scene {
     if ((v.chest.kind ?? "color") !== "color") return false;
     if (v.chest.count - v.inFlight <= 0) return false; // no free seat to fill
     return this.reachableColors.has(v.chest.color);
+  }
+
+  // A bay car worth tapping RIGHT NOW: colour reachable AND not freshly PROVEN futile —
+  // a car whose whole trip ate nothing on this exact board has no real move, whatever
+  // the ray model claims (belt-and-braces against any model/route divergence; the mark
+  // clears the moment anything on the board changes).
+  private bayCarLive(v: ChestView): boolean {
+    return this.carCanCollect(v) && v.futileAtSeq !== this.boardSeq;
   }
 
   // A car keeps circling (instead of parking) while it can still collect. Linked cars
@@ -4414,7 +4433,7 @@ export class GameScene extends Phaser.Scene {
     this.guidePlanNonce++;
     // ứng viên: mọi xe Ô đang ăn được + mọi cột phóng được
     const cands: string[] = [];
-    for (let i = 0; i < this.slots.length; i++) { const v = this.slots[i]; if (v && this.carCanCollect(v)) cands.push("bay" + i); }
+    for (let i = 0; i < this.slots.length; i++) { const v = this.slots[i]; if (v && this.bayCarLive(v)) cands.push("bay" + i); }
     const seen = new Set<ChestView>();
     for (let j = 0; j < this.invColumns.length; j++) {
       const head = this.invColumns[j][0];
@@ -4491,7 +4510,7 @@ export class GameScene extends Phaser.Scene {
     if (step.startsWith("bay")) {
       const i = parseInt(step.slice(3), 10);
       const v = this.slots[i];
-      if (!v || !this.carCanCollect(v)) return null;
+      if (!v || !this.bayCarLive(v)) return null;
       return { key: tag + "bay" + i, x: v.container.x, y: v.container.y };
     }
     const j = parseInt(step.slice(1), 10);
@@ -4580,8 +4599,29 @@ export class GameScene extends Phaser.Scene {
       // must ACTUALLY be launchable — "free bay + queue not empty" isn't enough: with 1 free bay
       // and only twin/triple groups left (need 2-3 bays), the player is stuck but the old check
       // kept the game hanging forever (user 2026-07-30) → now that counts as a loss too.
-      for (const v of this.slots) { if (v && this.carCanCollect(v)) return; } // a tappable move exists
+      // bayCarLive (not carCanCollect): a car whose full lap just proved it can't eat on this
+      // exact board doesn't hold the lose back, even if the ray model still calls it reachable
+      // (user 2026-08-01: bays full, taps ate nothing, yet the game never ended).
       const freeSlots = this.slots.reduce((n, s) => n + (s ? 0 : 1), 0);
+      if (this.slots.some((v) => !!v && this.bayCarLive(v))) {
+        // Bays FULL + idle, and ONLY a model-reachable colour is holding the lose back →
+        // breadcrumb the exact cells the model believes in (throttled), so a "stuck but
+        // not losing" report can be diagnosed from playlog.jsonl.
+        if (freeSlots === 0 && this.time.now - this.lastStuckProbe > 5000) {
+          this.lastStuckProbe = this.time.now;
+          const smp = new Map<number, number>();
+          this.computeReachableColors(smp);
+          const W = this.level.cols;
+          this.postLog({
+            ev: "stuckProbe",
+            bays: this.slots.map((s) => (s ? s.chest.color : -1)),
+            counts: this.slots.map((s) => (s ? s.chest.count : 0)),
+            futile: this.slots.map((s) => (s ? s.futileAtSeq === this.boardSeq : false)),
+            reach: [...smp].map(([c, i]) => `${c}@r${Math.floor(i / W)}c${i % W}`),
+          });
+        }
+        return; // a tappable move exists (or is at least still unproven)
+      }
       if (freeSlots > 0 && this.queueHasLaunchableMove(freeSlots)) return; // a queue car/group fits
       if (this.slots.every((s) => s === null) && this.queueEmpty()) return; // no cars at all (pre-win frame)
       this.lose();
@@ -4841,6 +4881,7 @@ export class GameScene extends Phaser.Scene {
       const cells = (key.getData("cells") as number[]) ?? [idx];
       for (const ci of cells) this.keys[ci] = null; // a 2×2 soft rock clears all four
       this.keysRemaining -= 1;
+      this.boardSeq++;
       this.revealHiddenAround(cells);
       this.explode(key.x, key.y, this.cell * 1.3, 12, 0xcaa06a, 6); // big rock burst
       key.destroy();
@@ -4869,6 +4910,7 @@ export class GameScene extends Phaser.Scene {
     const cells = (key.getData("cells") as number[]) ?? [idx];
     for (const ci of cells) this.keys[ci] = null;
     this.keysRemaining -= 1;
+    this.boardSeq++;
     this.revealHiddenAround(cells);
     this.explode(key.x, key.y, this.cell * 0.95, 8, 0xb5834a, 5); // small wood burst
     key.destroy();
@@ -4914,6 +4956,7 @@ export class GameScene extends Phaser.Scene {
     const cells = (key.getData("cells") as number[]) ?? [cellIdx];
     for (const ci of cells) this.keys[ci] = null;
     this.keysRemaining -= 1;
+    this.boardSeq++;
     this.revealHiddenAround(cells); // an opened side reveals any adjacent "?" slime
     view.inFlight += 1; // reserve a seat so the car won't over-collect while this one runs
 
@@ -5307,6 +5350,19 @@ export class GameScene extends Phaser.Scene {
         if (m === a.view) continue;
         const act = this.active.find((x) => x.view === m);
         if (act) { this.removeActive(act); m.waiting = false; }
+      }
+      // Futility proof (slam deadlock): if this trip started AND ended on the SAME board
+      // (nobody ate anything, incl. itself) the lap toured every lane of exactly this board
+      // and found nothing — record that so checkTrayStuck can override a phantom
+      // "reachable" verdict. Any board change during the trip voids the proof.
+      let sawTrip = false, tripAte = 0, seqStable = true;
+      for (const m of members) {
+        const co = (m as unknown as { _capOut?: number })._capOut;
+        if (co !== undefined) { sawTrip = true; tripAte += co - m.chest.count; if (m.seqOut !== this.boardSeq) seqStable = false; }
+      }
+      if (sawTrip) {
+        const futile = seqStable && tripAte <= 0;
+        for (const m of members) { m.futileAtSeq = futile ? this.boardSeq : undefined; m.seqOut = undefined; }
       }
       for (const m of members) {
         const co = (m as unknown as { _capOut?: number })._capOut;
