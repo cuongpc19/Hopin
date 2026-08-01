@@ -2464,9 +2464,10 @@ export class GameScene extends Phaser.Scene {
     view.carImg.setScale((this.chestSize * 1.15) / (view.carImg.height || this.chestSize));
   }
 
-  // "Magnet": arm a one-shot tap on a board slime. A VIP car then appears and reels
-  // in the CLUSTER of same-colour slimes connected (edge-to-edge) to the tapped one
-  // — not every slime of that colour on the board.
+  // "Magnet": open a ZOOMED copy of the board — flat colour swatches at ~1.3× the
+  // live cell size — so picking a cluster is easy on a phone (live tiles are fiddly,
+  // user 2026-08-01). Tap a cell → its whole connected cluster lights up with a
+  // count; USE spends the booster, CANCEL / tapping outside costs nothing.
   private boosterMagnet() {
     if (this.won || this.handMode || this.magnetMode) return;
     if (this.keysRemaining <= 0) {
@@ -2474,124 +2475,176 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     if (!this.affordToast("magnet")) return;
-    this.magnetMode = true;
-    this.toast("Tap a slime to pull its cluster");
+    this.magnetMode = true; // claims bay/queue taps until the picker closes
     // Defer one tick so the tap that pressed the booster button isn't captured.
-    this.time.delayedCall(40, () =>
-      this.input.once("pointerdown", (p: Phaser.Input.Pointer) => {
-        this.magnetMode = false;
-        const idx = this.nearestSlime(p.worldX, p.worldY);
-        if (idx < 0) {
-          this.toast("Cancelled");
-          return;
-        }
-        // Easy to mis-tap → confirm the picked cluster first.
-        this.confirmMagnet(idx);
-      }),
-    );
+    this.time.delayedCall(40, () => {
+      if (this.won || this.lost || this.keysRemaining <= 0) { this.magnetMode = false; return; }
+      this.openMagnetPicker();
+    });
   }
 
-  // Nearest real slime cell to a world point, within ~1.3 cells — a forgiving tap
-  // for the magnet, since small slimes are fiddly to hit dead-centre.
-  private nearestSlime(wx: number, wy: number): number {
-    const exact = this.slimeAt(wx, wy);
-    if (exact >= 0) return exact;
-    const { cols, rows } = this.level;
-    const c0 = Math.floor((wx - this.gridX) / this.cell);
-    const r0 = Math.floor((wy - this.gridY) / this.cell);
-    let best = -1;
-    let bestD = (this.cell * 1.3) ** 2;
-    for (let r = r0 - 1; r <= r0 + 1; r++) {
-      for (let c = c0 - 1; c <= c0 + 1; c++) {
-        if (c < 0 || c >= cols || r < 0 || r >= rows) continue;
-        const idx = r * cols + c;
-        if (!this.keys[idx] || isObstacle(this.level.board[idx])) continue;
-        const scx = this.gridX + c * this.cell + this.cell / 2;
-        const scy = this.gridY + r * this.cell + this.cell / 2;
-        const d = (wx - scx) ** 2 + (wy - scy) ** 2;
-        if (d < bestD) {
-          bestD = d;
-          best = idx;
-        }
-      }
-    }
-    return best;
-  }
-
-  // Show the picked colour (swatch + slime + count) and ask the player to confirm
-  // before the Magnet is actually spent. Cancel costs nothing. Game freezes so the
-  // board (and thus the count) can't change under the player mid-decision.
-  private confirmMagnet(startIdx: number) {
-    const color = this.level.board[startIdx];
-    const group = this.connectedSameColor(startIdx);
-    const total = group.length;
-    if (total === 0) {
-      this.toast("No slimes there");
-      return;
-    }
-    this.tutPaused = true;
+  // The zoomed magnet picker. EVERY exit path funnels through one closeAll() so
+  // magnetMode/tutPaused can never stick half-set (stuck booster flags were a repeat
+  // bug source in this area). The game is frozen while it's open, so the cluster the
+  // player confirms is exactly the cluster that gets pulled.
+  private openMagnetPicker() {
+    this.tutPaused = true; // freeze the game so the board can't change mid-pick
     const D = 400;
-    const pw = 300;
-    const ph = 250;
+    const { cols, rows } = this.level;
+    const board = this.level.board;
+
+    // Layout: zoomed board almost full-width, header above, count + buttons below.
+    const zc = Math.min((GAME_W - 44) / cols, (GAME_H * 0.62) / rows); // zoomed cell size
+    const bw = cols * zc;
+    const bh = rows * zc;
+    const headH = 52;
+    const footH = 92;
+    const pw = Math.max(bw + 28, 300);
+    const ph = headH + bh + footH;
     const x0 = GAME_W / 2 - pw / 2;
     const y0 = GAME_H / 2 - ph / 2;
+    const bx = GAME_W / 2 - bw / 2;
+    const by = y0 + headH;
+
     const dim = this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0x000000, 0.6).setDepth(D).setInteractive();
     const panel = this.add.graphics().setDepth(D + 1);
     panel.fillStyle(0xf7edd0, 1);
     panel.fillRoundedRect(x0, y0, pw, ph, 20);
     panel.lineStyle(4, 0x8a5a12, 1);
     panel.strokeRoundedRect(x0, y0, pw, ph, 20);
-    const objs: Phaser.GameObjects.GameObject[] = [dim, panel];
-    const hex = COLORS[color] ?? 0x888888;
-    const swatch = this.add.circle(GAME_W / 2, y0 + 66, 40, hex).setStrokeStyle(4, shade(hex)).setDepth(D + 2);
-    objs.push(swatch);
-    if (this.textures.exists(`slime-${color}`)) {
-      const sl = this.add.image(GAME_W / 2, y0 + 66, `slime-${color}`).setDisplaySize(60, 60).setDepth(D + 3);
-      objs.push(sl);
+    // Dark mat behind the swatches so every colour pops (incl. cream/white tiles).
+    panel.fillStyle(0x2b2f4a, 1);
+    panel.fillRoundedRect(bx - 6, by - 6, bw + 12, bh + 12, 10);
+
+    // One flat swatch per remaining tile — no bevel/eyes, so colours read instantly.
+    // Obstacles = dark slate (not pickable), still-hidden "?" = neutral grey.
+    const cellsG = this.add.graphics().setDepth(D + 2);
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const idx = r * cols + c;
+        if (!this.keys[idx]) continue;
+        const code = board[idx];
+        const fill = isObstacle(code) ? 0x565b6e : this.hiddenSet.has(idx) ? 0x9aa0ad : (COLORS[code] ?? 0x888888);
+        cellsG.fillStyle(fill, 1);
+        cellsG.fillRect(bx + c * zc + 0.5, by + r * zc + 0.5, Math.max(1, zc - 1), Math.max(1, zc - 1));
+      }
     }
+
+    const hi = this.add.graphics().setDepth(D + 3); // picked-cluster highlight
     const title = this.add
-      .text(GAME_W / 2, y0 + 126, "Pull THIS color?", {
-        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "20px", color: "#6a4a12",
+      .text(GAME_W / 2, y0 + 28, "Magnet: tap a slime cluster", {
+        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "19px", color: "#6a4a12",
       })
       .setOrigin(0.5)
       .setDepth(D + 2);
-    const cnt = this.add
-      .text(GAME_W / 2, y0 + 158, `${total} slime${total > 1 ? "s" : ""} will board the VIP car`, {
+    const info = this.add
+      .text(GAME_W / 2, by + bh + 20, "Tap any slime on the zoomed board", {
         fontFamily: "Arial, sans-serif", fontSize: "13px", color: "#6a4a12", align: "center",
         wordWrap: { width: pw - 44 },
       })
       .setOrigin(0.5)
       .setDepth(D + 2);
-    objs.push(title, cnt);
-    const close = () => {
-      objs.forEach((o) => o.destroy());
-      this.tutPaused = false;
-    };
+    const btnY = y0 + ph - 32;
     const no = this.add
-      .text(GAME_W / 2 - 66, y0 + ph - 32, "CANCEL", {
+      .text(GAME_W / 2 - 66, btnY, "CANCEL", {
         fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "15px", color: "#ffffff",
         backgroundColor: "#b0392b", padding: { x: 16, y: 8 },
       })
       .setOrigin(0.5)
-      .setDepth(D + 2)
+      .setDepth(D + 5)
       .setInteractive({ useHandCursor: true });
     const yes = this.add
-      .text(GAME_W / 2 + 60, y0 + ph - 32, "USE", {
+      .text(GAME_W / 2 + 60, btnY, "USE", {
         fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "15px", color: "#ffffff",
         backgroundColor: "#3a8a3a", padding: { x: 22, y: 8 },
       })
       .setOrigin(0.5)
-      .setDepth(D + 2)
-      .setInteractive({ useHandCursor: true });
-    objs.push(no, yes);
+      .setDepth(D + 5)
+      .setInteractive({ useHandCursor: true })
+      .setVisible(false); // appears once a cluster is picked
+
+    // Tap zone slightly BIGGER than the board so a near-miss at the edge still snaps
+    // to the nearest cell instead of falling through to the cancel dim.
+    const hit = this.add
+      .rectangle(bx + bw / 2, by + bh / 2, bw + zc * 2, bh + zc * 2, 0x000000, 0.001)
+      .setDepth(D + 4)
+      .setInteractive();
+
+    const objs: Phaser.GameObjects.GameObject[] = [dim, panel, cellsG, hi, title, info, no, yes, hit];
+    let closed = false;
+    const closeAll = () => {
+      if (closed) return;
+      closed = true;
+      objs.forEach((o) => o.destroy());
+      this.magnetMode = false;
+      this.tutPaused = false;
+    };
+
+    // Nearest pickable cell to a world point, within ~1.3 zoomed cells. Hidden "?"
+    // tiles are NOT pickable here (their colour is a secret the picker won't leak).
+    const nearest = (wx: number, wy: number): number => {
+      const c0 = Math.floor((wx - bx) / zc);
+      const r0 = Math.floor((wy - by) / zc);
+      let best = -1;
+      let bestD = (zc * 1.3) ** 2;
+      for (let r = r0 - 1; r <= r0 + 1; r++) {
+        for (let c = c0 - 1; c <= c0 + 1; c++) {
+          if (c < 0 || c >= cols || r < 0 || r >= rows) continue;
+          const idx = r * cols + c;
+          if (!this.keys[idx] || isObstacle(board[idx]) || this.hiddenSet.has(idx)) continue;
+          const dx = wx - (bx + c * zc + zc / 2);
+          const dy = wy - (by + r * zc + zc / 2);
+          const d = dx * dx + dy * dy;
+          if (d < bestD) {
+            bestD = d;
+            best = idx;
+          }
+        }
+      }
+      return best;
+    };
+
+    let picked: number[] = [];
+    let pickedColor = -1;
+    hit.on("pointerdown", (p: Phaser.Input.Pointer) => {
+      // worldX/worldY, NOT x/y — the camera is zoomed by dpr (repeat gotcha here).
+      const idx = nearest(p.worldX, p.worldY);
+      if (idx < 0) return; // dead spot inside the panel — ignore, don't cancel
+      picked = this.connectedSameColor(idx);
+      pickedColor = board[idx];
+      hi.clear();
+      hi.fillStyle(0xffffff, 0.28);
+      hi.lineStyle(Math.max(2, zc * 0.16), 0xffffff, 1);
+      for (const i of picked) {
+        const r = Math.floor(i / cols);
+        const c = i % cols;
+        hi.fillRect(bx + c * zc, by + r * zc, zc, zc);
+        hi.strokeRect(bx + c * zc + 1, by + r * zc + 1, zc - 2, zc - 2);
+      }
+      info.setText(`${picked.length} slime${picked.length > 1 ? "s" : ""} will board the VIP car`);
+      yes.setVisible(true);
+    });
+
     no.on("pointerdown", () => {
-      close();
+      closeAll();
+      this.toast("Cancelled");
+    });
+    dim.on("pointerdown", () => {
+      closeAll();
       this.toast("Cancelled");
     });
     yes.on("pointerdown", () => {
-      close();
+      if (!picked.length) return;
+      // Belt-and-braces: re-verify against the live board before spending the booster
+      // (the freeze should make this a no-op, but a stale cluster must never charge).
+      const alive = picked.filter((i) => this.keys[i] && board[i] === pickedColor);
+      closeAll();
+      if (!alive.length) {
+        this.toast("Those slimes are gone");
+        return;
+      }
       this.consumeBooster("magnet");
-      this.spawnVipCollector(color, group);
+      this.spawnVipCollector(pickedColor, alive);
     });
   }
 
@@ -2625,17 +2678,6 @@ export class GameScene extends Phaser.Scene {
       }
     }
     return out;
-  }
-
-  // Board cell index of the slime under a world point, or -1.
-  private slimeAt(wx: number, wy: number): number {
-    const { cols, rows } = this.level;
-    const c = Math.floor((wx - this.gridX) / this.cell);
-    const r = Math.floor((wy - this.gridY) / this.cell);
-    if (c < 0 || c >= cols || r < 0 || r >= rows) return -1;
-    const idx = r * cols + c;
-    // Magnet only works on real slimes, not obstacles.
-    return this.keys[idx] && !isObstacle(this.level.board[idx]) ? idx : -1;
   }
 
   // A VIP car appears and reels in the given cluster of slimes, one every ~90ms,
