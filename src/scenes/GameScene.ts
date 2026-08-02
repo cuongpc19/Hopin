@@ -1943,19 +1943,8 @@ export class GameScene extends Phaser.Scene {
         .setOrigin(0.5);
       this.boostBar!.add(dot);
       this.boostBar!.add(dotN);
-
-      // When empty, also show the gold price below so the buy cost is clear.
-      if (count === 0) {
-        const cy = iconY + size / 2 + 22;
-        const coin = this.add.circle(x - 12, cy, 6, 0xf9c22e).setStrokeStyle(1.5, 0xc98a10);
-        const price = this.add
-          .text(x - 2, cy, String(b.cost), {
-            fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "12px", color: "#8a5a10",
-          })
-          .setOrigin(0, 0.5);
-        this.boostBar!.add(coin);
-        this.boostBar!.add(price);
-      }
+      // (No price under the icon when empty — user 2026-08-02. The buy-confirm
+      // modal that opens on tap shows the gold cost.)
     });
   }
 
