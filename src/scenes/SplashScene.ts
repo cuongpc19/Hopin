@@ -42,30 +42,26 @@ export class SplashScene extends Phaser.Scene {
     const img = this.add.image(GAME_W / 2, GAME_H / 2, "splash");
     img.setScale(Math.max(GAME_W / img.width, GAME_H / img.height));
 
-    // "Loading…" pill a bit below the screen centre, gently pulsing (auto-advance, no tap).
-    const y = Math.round(GAME_H * 0.62);
+    // "Loading…" — CHỈ chữ (bỏ nền button/pill), đặt THẤP hơn (user 2026-08-02).
+    const y = Math.round(GAME_H * 0.78);
     const label = this.add
       .text(GAME_W / 2, y, tr("loading") + "…", {
         fontFamily: "Arial, sans-serif",
         fontStyle: "bold",
-        fontSize: "20px",
+        fontSize: "24px", // +20% (user 2026-08-02)
         color: "#ffffff",
         stroke: "#5a3a12",
-        strokeThickness: 5,
+        strokeThickness: 6,
       })
-      .setOrigin(0.5);
-    const pill = this.add
-      .rectangle(GAME_W / 2, y, 150, 46, 0x6a4a12, 0.55)
-      .setStrokeStyle(3, 0xffffff, 0.85);
-    pill.setDepth(0);
-    label.setDepth(1);
+      .setOrigin(0.5)
+      .setDepth(1);
     // animated dots so it reads as "working"
     this.time.addEvent({
       delay: 420, loop: true,
       callback: () => { const n = ((label.text.match(/\./g)?.length ?? 0) % 3) + 1; label.setText(tr("loading") + ".".repeat(n)); },
     });
     this.tweens.add({
-      targets: [label, pill],
+      targets: label,
       scale: 1.06,
       alpha: 0.85,
       duration: 700,
@@ -94,9 +90,26 @@ export class SplashScene extends Phaser.Scene {
     const t0 = this.time.now;
     let went = false;
     let loadDone = false;
+
+    // Thanh PROGRESS (chuyên nghiệp hơn dấu "…"): track bo tròn + fill vàng chạy mượt theo
+    // thời gian tối thiểu; đầy 100% ngay trước khi fade sang Home (user 2026-08-02).
+    const barW = 264, barH = 15, barX = GAME_W / 2 - barW / 2, barY = y + 40; // +20% (user 2026-08-02)
+    const track = this.add.graphics().setDepth(1);
+    track.fillStyle(0x2a1c0a, 0.35); track.fillRoundedRect(barX, barY, barW, barH, barH / 2);
+    track.lineStyle(2, 0xffffff, 0.55); track.strokeRoundedRect(barX, barY, barW, barH, barH / 2);
+    const barFill = this.add.graphics().setDepth(2);
+    const prog = { v: 0 };
+    const drawBar = () => {
+      barFill.clear();
+      const w = Phaser.Math.Clamp(prog.v, 0, 1) * (barW - 4);
+      if (w > 0.5) { barFill.fillStyle(0xffd95e, 1); barFill.fillRoundedRect(barX + 2, barY + 2, w, barH - 4, (barH - 4) / 2); }
+    };
+    this.tweens.add({ targets: prog, v: 0.92, duration: MIN_MS, ease: "Sine.out", onUpdate: drawBar });
+
     const goHome = () => {
       if (went) return;
       went = true;
+      prog.v = 1; drawBar(); // đầy 100% trước khi chuyển
       this.cameras.main.fadeOut(350, 244, 239, 224);
       this.cameras.main.once("camerafadeoutcomplete", () => this.scene.start("select"));
     };
@@ -108,14 +121,12 @@ export class SplashScene extends Phaser.Scene {
     this.load.image("star-icon", "art/star.png");
     this.load.image("start-slime", "art/slime-3.png");
     for (const b of ["add", "hand", "refresh", "magnet"]) this.load.image(`booster-${b}`, `art/booster-${b}.png`);
-    this.load.once("complete", () => {
-      loadDone = true;
-      const wait = Math.max(0, MIN_MS - (this.time.now - t0)); // finished early → hold to 3s; late → go now
-      this.time.delayedCall(wait, goHome);
-    });
+    this.load.once("complete", () => { loadDone = true; });
     this.load.start();
-    // Safety net: never get stuck on the splash if the loader stalls/errors.
-    this.time.delayedCall(MIN_MS + 8000, goHome);
+    // Splash CỐ ĐỊNH ~3s rồi sang Home — KHÔNG chờ load lâu hơn (user 2026-08-02: nhanh hơn,
+    // asset nhỏ đã cache + Home tự preload). Sau này load level thật sẽ chạy theo tiến độ thực.
+    this.time.delayedCall(MIN_MS, goHome);
+    void t0;
 
     // A tap only skips ahead once loading is DONE (so Home never shows unloaded art); it
     // also serves as the audio-unlock gesture browsers require.

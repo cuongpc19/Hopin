@@ -156,6 +156,9 @@ const WIN_GOLD = 40;
 const RUN_START = 320;   // snappier: critters set off faster (user 2026-07-29 — quicker "see + grab")
 const RUN_ACCEL = 1100;
 const RUN_MAX = 950;
+// When this many running critters are already in flight (eating fast), further pickups collect
+// INSTANTLY (no runner, no beam) with a light pop — caps object churn so rapid eating stays cool.
+const RUNNER_CAP = 9;
 // Direction the car sprite art faces, in radians (0 = right/East). Tune if the
 // car points the wrong way as it drives: right=0, up=-PI/2, left=PI, down=PI/2.
 const CAR_ART_FACING = Math.PI / 2; // car art faces UP (face at top); +90° so the face leads travel
@@ -314,6 +317,10 @@ export class GameScene extends Phaser.Scene {
   private trackKind: TrackKind = "square"; // road shape for the current level
 
   private runners: Runner[] = []; // critters running to board a car
+  // ONE pooled GPU particle emitter for all collect sparkles (replaces N tweened circles/stars
+  // per pickup — far lighter when eating fast). Colour set per burst via the tint callback.
+  private sparkEmitter?: Phaser.GameObjects.Particles.ParticleEmitter;
+  private sparkColor = 0xffffff;
 
   // Level-1 tutorial: step 1 = tap a queued car; step 2 = tap the car that parked.
   private tutStep = 0;
@@ -5145,6 +5152,25 @@ export class GameScene extends Phaser.Scene {
       this.sparkle(bx, by, COLORS[bottom]);
     }
 
+    // EATING FAST → collect INSTANTLY (no running critter, no beam) with just a light pop.
+    // Kicks in only once RUNNER_CAP critters are already in flight, so normal play still shows
+    // slimes running to the car; only the fast/boost bursts go light (user 2026-08-02).
+    if (this.runners.length >= RUNNER_CAP) {
+      view.inFlight -= 1; // undo the seat reservation — boards immediately, nothing in flight
+      this.sparkle(key.x, key.y, color); // one cheap pooled burst for feedback
+      key.destroy();
+      view.chest.count = Math.max(0, view.chest.count - 1);
+      view.countText.setText(String(view.chest.count));
+      if (view.container.scene) this.pulse(view.container);
+      Audio.pop();
+      if (view.chest.count <= 0) {
+        Audio.finish();
+        this.finishCar(view);
+      }
+      if (this.keysRemaining <= 0 && this.runners.length === 0) this.win();
+      return;
+    }
+
     // quick "collect beam": a line flashes from the car to the critter it's
     // grabbing, then fades as the critter sets off running.
     this.aimBeam(view.container.x, view.container.y, key.x, key.y, color);
@@ -5308,24 +5334,9 @@ export class GameScene extends Phaser.Scene {
     const ring = this.add.circle(x1, y1, 7).setStrokeStyle(3, color, 0.9).setDepth(DEPTH_RUNNER + 2);
     this.tweens.add({ targets: ring, scale: 2.2, alpha: 0, duration: 340, ease: "Quad.out", onComplete: () => ring.destroy() });
 
-    // little stars pop at the slime, then get gently reeled toward the car
-    for (let i = 0; i < 4; i++) {
-      const s = this.add.star(x1, y1, 5, 2.2, 4.6, color).setDepth(DEPTH_RUNNER + 2);
-      const t = 0.4 + 0.5 * (i / 3); // travel partway to the car
-      const tx = x1 + (x0 - x1) * t;
-      const ty = y1 + (y0 - y1) * t;
-      this.tweens.add({
-        targets: s,
-        x: tx,
-        y: ty,
-        scale: { from: 1.1, to: 0.2 },
-        alpha: { from: 1, to: 0 },
-        angle: 160,
-        duration: 300 + i * 30,
-        ease: "Quad.out",
-        onComplete: () => s.destroy(),
-      });
-    }
+    // little sparks pop at the slime (pooled emitter instead of 4 tweened stars)
+    this.sparkColor = color;
+    this.getSparkEmitter().explode(4, x1, y1);
   }
 
   // A small dust puff kicked up at a running critter's feet.
@@ -5342,21 +5353,32 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  private sparkle(x: number, y: number, color: number) {
-    for (let i = 0; i < 6; i++) {
-      const ang = (Math.PI * 2 * i) / 6;
-      const p = this.add.circle(x, y, 3, color);
-      this.tweens.add({
-        targets: p,
-        x: x + Math.cos(ang) * 20,
-        y: y + Math.sin(ang) * 20,
-        alpha: 0,
-        scale: 0.2,
-        duration: 320,
-        ease: "Quad.out",
-        onComplete: () => p.destroy(),
-      });
+  // Lazily build the shared spark emitter (+ its tiny round texture) once per scene.
+  private getSparkEmitter(): Phaser.GameObjects.Particles.ParticleEmitter {
+    if (this.sparkEmitter && this.sparkEmitter.scene) return this.sparkEmitter;
+    if (!this.textures.exists("spark")) {
+      const g = this.make.graphics({ x: 0, y: 0 }, false);
+      g.fillStyle(0xffffff, 1);
+      g.fillCircle(8, 8, 7);
+      g.generateTexture("spark", 16, 16);
+      g.destroy();
     }
+    this.sparkEmitter = this.add
+      .particles(0, 0, "spark", {
+        lifespan: 330,
+        speed: { min: 35, max: 95 },
+        scale: { start: 0.45, end: 0.06 },
+        alpha: { start: 1, end: 0 },
+        tint: () => this.sparkColor, // per-burst colour
+        emitting: false, // burst-only via explode()
+      })
+      .setDepth(DEPTH_RUNNER + 2);
+    return this.sparkEmitter;
+  }
+
+  private sparkle(x: number, y: number, color: number) {
+    this.sparkColor = color;
+    this.getSparkEmitter().explode(6, x, y); // one GPU burst instead of 6 tweened circles
   }
 
   private pulse(c: Phaser.GameObjects.Container) {
@@ -5892,7 +5914,7 @@ export class GameScene extends Phaser.Scene {
     }
     // Hold a beat on the cleared board, then the WIN SCREEN (redesign theo video mẫu
     // IMG_6489 — hero là animation slime nhảy lên xe LẶP ngay trong màn thắng).
-    this.time.delayedCall(600, () => this.showWinModal(reward, cloverAward));
+    this.time.delayedCall(350, () => this.showWinModal(reward, cloverAward));
   }
 
   // ---- WIN SCREEN (redesign theo video mẫu Manythings/IMG_6489, user 2026-08-01) ----
@@ -5939,7 +5961,7 @@ export class GameScene extends Phaser.Scene {
       // xu bay xong → màn CHUYỂN CẢNH: đoàn xe chạy ngang + slime rượt theo nhảy tót lên
       // + "Loading..." (mặc định ~2s — level build đồng bộ nên có sẵn ngay) → sang màn.
       flyCoins(() => {
-        const t = this.time.delayedCall(350, playTransition);
+        const t = this.time.delayedCall(150, playTransition);
         timers.push(t);
       });
     };
@@ -5972,7 +5994,7 @@ export class GameScene extends Phaser.Scene {
         const sKey2 = this.textures.exists(`slime-${sCols[k % sCols.length]}`) ? `slime-${sCols[k % sCols.length]}` : "slime-0";
         const s2 = 42;
         const fromLeft2 = k % 2 === 0;
-        this.time.delayedCall(120 + k * 560, () => {
+        this.time.delayedCall(80 + k * 260, () => {
           if (closed) return;
           const mkLeg = () => {
             const lg = this.add.graphics();
@@ -6043,9 +6065,9 @@ export class GameScene extends Phaser.Scene {
           callback: () => { dots = (dots + 1) % 4; loadTx.setText(tr("loading") + ".".repeat(dots)); },
         })
       );
-      // mặc định 3.5s rồi sang màn (user 2026-08-01: loading lâu hơn, 3-4s;
-      // level build đồng bộ nên đây thuần là màn ngắm slime)
-      timers.push(this.time.delayedCall(3500, finishAndGo));
+      // ~1.5s rồi sang màn (user 2026-08-02: chuyển level nhanh hơn; level build đồng bộ nên
+      // đây thuần là màn ngắm slime — sau này load level nặng sẽ chạy theo tiến độ thực).
+      timers.push(this.time.delayedCall(1500, finishAndGo));
     };
 
     // nền: LEVEL đang chơi chỉ còn THẤP THOÁNG sau lớp phủ tối 97% (user 2026-08-01
