@@ -610,22 +610,22 @@ export class GameScene extends Phaser.Scene {
     boardBudget = Math.round(Math.max(boardBudget, 220));
     const m = this.computeMetrics(boardBudget);
 
-    // Board sits just under the HUD; the bottom cluster is ALWAYS pinned to the screen
-    // bottom (controls within thumb reach). Any slack falls between board and cluster.
     const boardTop = hudH + gTop;
     this.buildBoard(boardTop, m); // zone 1
 
-    // Bottom cluster GHIM SÁT ĐÁY màn hình (user 2026-08-02: "đẩy booster xuống dưới") — cả cụm
-    // ô chờ→queue→booster dồn xuống, booster chạm đáy, queue lộ lấp ló hàng thứ 3. Trên màn hình
-    // thấp thì rơi về ngay dưới board (max) để không đè lên board.
-    let by = Math.max(boardTop + m.frameH + gBoard, GAME_H - margin - bottomH);
-    this.buildSlots(by); // zone 2 (waiting slots)
-    by += SLOT_SIZE + gSlots;
-
-    this.buildInventory(by, perRow, visRows); // zone 3
-    by += invH + gInv;
-
-    this.buildBoosters(by, boostH); // zone 4
+    // Cụm dưới (user 2026-08-02): Ô CHỜ neo NGAY DƯỚI board (gần đường ray), BOOSTER ghim SÁT
+    // ĐÁY, và QUEUE GIÃN lấp khoảng giữa — thay vì để hở board↔bays trên màn hình cao. Số hàng
+    // queue hiển thị = vừa đủ lấp khoảng trống (tối thiểu 2 hàng + lấp ló hàng 3, tối đa 5).
+    const clusterTop = boardTop + m.frameH + gBoard;
+    this.buildSlots(clusterTop); // zone 2 — ô chờ sát board
+    const invTop = clusterTop + SLOT_SIZE + gSlots;
+    const boosterPin = GAME_H - margin - boostH; // booster ở đáy
+    const invAvail = boosterPin - gInv - invTop;
+    let vis = 1;
+    while (vis < 5 && regionH(vis + 1) <= invAvail) vis++;
+    this.buildInventory(invTop, perRow, vis); // zone 3 — giãn lấp khoảng giữa
+    // Màn cao: booster ở đáy (queue đã lấp đầy). Màn thấp: đặt ngay dưới queue để không đè.
+    this.buildBoosters(Math.max(boosterPin, invTop + regionH(vis) + gInv), boostH); // zone 4
 
     // Gift + tutorialise any booster whose unlock level this level reaches.
     this.checkBoosterUnlocks(levelNum);
