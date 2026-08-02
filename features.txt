@@ -1006,16 +1006,24 @@ GỘP BẢN (user: "chỉ còn bản Hop-In"):
     ≥14px lấp ló (báo cho người chơi biết còn xe bên dưới).
   - Đã mô phỏng quét tỉ lệ 1.60→2.30: mọi tỉ lệ đều ≥2 hàng nguyên + lấp ló ≥14,
     booster luôn trong màn, board luôn 456.
-• ĐỀ NGHỊ REVIVE KHI KẸT (user: "còn 5 xe ô chờ mà k xe nào ăn được thì hỏi luôn"):
-  checkTrayStuck (nhánh slam) — ô chờ ĐẦY + không xe nào trên ray + ĐÃ có ít nhất
-  1 xe chạy hết vòng mà ăn 0 slime trên đúng board này (futileAtSeq===boardSeq) +
-  board không đổi suốt STUCK_OFFER_MS (7s) → hiện modal showStuckOffer.
-  - Là LỜI MỜI, không phải thua: có nút "Để tôi thử tiếp" để đóng; chỉ hỏi 1 lần
-    cho mỗi boardSeq (ăn được 1 slime là hỏi lại được). Cố ý làm vậy vì mô hình
-    tia có thể vẫn đúng với màu chưa thử — báo thua luôn thì oan.
-  - Revive ở đây = y hệt màn thua: trả 900 Coin, THÊM 1 Ô CHỜ trống để xe trong
-    hàng tràn vào, phá thế kẹt.
-  - Thế kẹt thật (cả 5 ô đều đã chứng minh vô ích) vẫn thua theo đường cũ.
+• PHÁT HIỆN KẸT (ô chờ đầy mà không xe nào ăn được) — LÀM LẠI CHO ĐÚNG:
+  ⚠ BẢN ĐẦU SAI (đã gỡ): modal showStuckOffer "Hình như kẹt rồi" bật theo ĐỒNG HỒ
+  (ô chờ đầy + 1 xe đi vô ích + 7s không đổi board). Khối này chạy TRƯỚC kiểm tra
+  bayCarLive nên BÁO SAI: chỉ cần 1 xe chạy hụt rồi người chơi ngẫm 7 giây là nó
+  kêu kẹt, dù xe khác vẫn ăn được ngon lành (user 2026-08-02 "đôi lúc thấy k đúng").
+  ĐỪNG dựng lại kiểu hẹn-giờ này.
+  ✅ CÁCH ĐÚNG = LAN TRUYỀN CHỨNG MINH VÔ ÍCH THEO MÀU. Vô ích là tính chất của
+  (MÀU, BOARD) chứ không phải của từng xe: một vòng chạy đã quét mọi làn của đúng
+  board này mà không ăn được gì cho màu C ⇒ MỌI xe màu C đều vô ích cho tới khi
+  board đổi. Nên khi 1 chuyến chứng minh vô ích, gán futileAtSeq cho toàn bộ xe
+  cùng màu ở CẢ ô chờ LẪN hàng chờ (xe hàng chờ vào ô mới không được "hồi sinh"
+  màu vừa bị bác bỏ). Kết quả: chứng minh 1 lần thay vì bắt chạy hụt đủ 5 xe →
+  checkTrayStuck báo thua (kèm nút Revive sẵn có) ngay khi thật sự kẹt, KHÔNG cần
+  đồng hồ, KHÔNG báo nhầm.
+  ⚠ CHỈ LAN TRUYỀN GIỮA XE MÀU: xe búa/xe gỗ vẫn có trường color (game bỏ qua) —
+  để nó gieo màu chết sẽ kết án oan mọi xe màu trùng số = THUA OAN.
+  - Thứ tự trong checkTrayStuck giữ nguyên: còn xe bayCarLive → return; còn ô
+    trống + hàng chờ phóng được → return; hết cách → lose().
 • optimize-art: thêm "tmp" vào danh sách thư mục bỏ khỏi dist (art/tmp ~18MB là
   thư mục nháp, gitignore nhưng vite vẫn copy cả public/).
 • XÁC NHẬN MỌI HÀNH ĐỘNG TỐN TIM (user 2026-08-02): hàm dùng chung

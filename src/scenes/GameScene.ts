@@ -110,10 +110,6 @@ const SLOT_SIZE = 49; // waiting bay size — giảm 10% (54→49) để queue n
 const INV_GAP_X = 30; // queue column gap at scale 1
 const INV_GAP_Y = 16; // queue row gap at scale 1
 const CLUSTER_MIN_SCALE = 0.6; // never shrink the cluster past this — cars stay tappable
-// How long the board must sit unchanged, with the bays full and one lap already wasted,
-// before we offer Revive (user 2026-08-02). Long enough that a player who is simply
-// thinking about their next tap doesn't get interrupted.
-const STUCK_OFFER_MS = 7000;
 // Fixed car size — the SAME on every level (independent of the grid's cell size,
 // which changes with the level's rows/cols). ~30% bigger than the old sizing.
 const CAR_SIZE = 55;
@@ -516,7 +512,6 @@ export class GameScene extends Phaser.Scene {
     try { localStorage.setItem("pf_current", String(levelNum)); } catch { /* storage unavailable */ }
     this.playLog = []; this.playStart = (typeof performance !== "undefined" ? performance.now() : 0); this.peakUsed = 0;
     this.boardSeq = 0; this.lastStuckProbe = 0; // fresh board → fresh futility bookkeeping
-    this.boardChangedAt = this.time.now; this.stuckOfferedSeq = -1; this.stuckOfferOpen = false;
     try { this.guideMode = localStorage.getItem("hopin_guide") === "1"; } catch { this.guideMode = false; }
     this.guideKey = ""; this.guideHand = undefined; this.guideRing = undefined; this.guidePlan = null; this.guidePlanWinning = false; this.guidePlanNonce = 0;
     if (typeof window !== "undefined") { (window as any).hopLog = () => console.log(localStorage.getItem("hopin_playlog") || "[]"); (window as any).hopLogClear = () => localStorage.removeItem("hopin_playlog"); }
@@ -4211,11 +4206,6 @@ export class GameScene extends Phaser.Scene {
   // the board is exactly as that trip toured it.
   private boardSeq = 0;
   private lastStuckProbe = 0; // throttle for the stuck-state telemetry probe
-  // "Looks stuck" offer: bays full + a lap already came back empty + nothing has changed
-  // for a while → offer Revive instead of making the player prove all five bays futile.
-  private boardChangedAt = 0; // this.time.now of the last board change (pairs with boardSeq)
-  private stuckOfferedSeq = -1; // boardSeq the offer was last shown/dismissed for (no nagging)
-  private stuckOfferOpen = false;
   private computeReachableColors(sample?: Map<number, number>) {
     this.reachableColors.clear();
     const cols = this.level.cols, rows = this.level.rows;
@@ -4889,91 +4879,6 @@ export class GameScene extends Phaser.Scene {
     return false;
   }
 
-  // "Looks stuck" offer (user 2026-08-02): the bays are full and a lap already ate nothing,
-  // so rather than leave the board sitting there — or make the player prove every bay futile
-  // one wasted lap at a time — put the Revive choice in front of them. Deliberately an OFFER,
-  // not a loss: "let me keep trying" dismisses it, and it won't ask again until the board
-  // changes. A genuine dead end still ends the level through the normal lose path below.
-  private showStuckOffer() {
-    if (this.stuckOfferOpen || this.won || this.lost || this.tutPaused) return;
-    this.stuckOfferOpen = true;
-    this.tutPaused = true; // freeze the board behind the modal
-    const REVIVE_COST = 900;
-    const canAfford = this.gold >= REVIVE_COST;
-    const D = 420;
-    const pw = 320;
-    const ph = 268;
-    const x0 = GAME_W / 2 - pw / 2;
-    const y0 = GAME_H / 2 - ph / 2;
-    const objs: Phaser.GameObjects.GameObject[] = [];
-    const dim = this.add
-      .rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0x000000, 0.6)
-      .setDepth(D)
-      .setInteractive();
-    objs.push(dim);
-    const panel = this.add.graphics().setDepth(D + 1);
-    panel.fillStyle(0xf7edd0, 1);
-    panel.fillRoundedRect(x0, y0, pw, ph, 20);
-    panel.lineStyle(4, 0x8a5a12, 1);
-    panel.strokeRoundedRect(x0, y0, pw, ph, 20);
-    objs.push(panel);
-    objs.push(
-      this.add.text(GAME_W / 2, y0 + 54, "😵", { fontSize: "34px" }).setOrigin(0.5).setDepth(D + 2),
-      this.add
-        .text(GAME_W / 2, y0 + 100, tr("stuckTitle"), {
-          fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "21px", color: "#6a4a12",
-        })
-        .setOrigin(0.5)
-        .setDepth(D + 2),
-      this.add
-        .text(GAME_W / 2, y0 + 150, tr("stuckBody"), {
-          fontFamily: "Arial, sans-serif", fontSize: "14px", color: "#6a4a12", align: "center",
-          wordWrap: { width: pw - 44 },
-        })
-        .setOrigin(0.5)
-        .setDepth(D + 2)
-    );
-
-    const close = () => {
-      objs.forEach((o) => o.destroy());
-      this.stuckOfferOpen = false;
-      this.tutPaused = false;
-    };
-    const reviveBtn = this.add
-      .text(GAME_W / 2, y0 + ph - 74, canAfford ? trf("reviveBtn", { n: REVIVE_COST }) : trf("reviveNeed", { n: REVIVE_COST }), {
-        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "17px", color: "#ffffff",
-        backgroundColor: canAfford ? "#35b04a" : "#a39b8c", padding: { x: 26, y: 10 },
-      })
-      .setOrigin(0.5)
-      .setDepth(D + 2);
-    objs.push(reviveBtn);
-    if (canAfford) {
-      reviveBtn.setInteractive({ useHandCursor: true });
-      reviveBtn.on("pointerdown", () => {
-        this.addGold(-REVIVE_COST);
-        close();
-        // Same escape hatch as the lose screen: one more waiting bay, so a queue car can
-        // flow in and change the board (slam auto-fills bays).
-        this.slotCount += 1;
-        this.slots.push(null);
-        this.layoutSlots();
-        if (this.slotWarnActive) this.stopSlotWarning();
-        this.flashNewSlot(this.slotCount - 1);
-      });
-    }
-    const keep = this.add
-      .text(GAME_W / 2, y0 + ph - 28, tr("stuckKeep"), {
-        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "15px", color: "#ffffff",
-        backgroundColor: "#8a5a12", padding: { x: 20, y: 8 },
-      })
-      .setOrigin(0.5)
-      .setDepth(D + 2)
-      .setInteractive({ useHandCursor: true });
-    objs.push(keep);
-    keep.on("pointerdown", close);
-    dim.on("pointerdown", close);
-  }
-
   // TRAY-mode lose. Batch mode: the bays are full of blocked cars, nothing is out on the
   // ray, there's nothing new to stage (no free bay / empty queue) and pressing GO would
   // collect nothing (no bay car's colour is reachable) → deadlock. Auto mode: original
@@ -4990,20 +4895,6 @@ export class GameScene extends Phaser.Scene {
       // exact board doesn't hold the lose back, even if the ray model still calls it reachable
       // (user 2026-08-01: bays full, taps ate nothing, yet the game never ended).
       const freeSlots = this.slots.reduce((n, s) => n + (s ? 0 : 1), 0);
-      // Bays FULL and a lap has already come back EMPTY on this exact board? Then the
-      // player is probably stuck — offer Revive now instead of making them send all five
-      // cars out one by one to prove it (user 2026-08-02). It stays an OFFER, dismissible,
-      // because the ray model can still be right about a colour we haven't tried yet.
-      if (
-        freeSlots === 0 &&
-        this.stuckOfferedSeq !== this.boardSeq &&
-        this.slots.some((v) => !!v && v.futileAtSeq === this.boardSeq) &&
-        this.time.now - this.boardChangedAt > STUCK_OFFER_MS
-      ) {
-        this.stuckOfferedSeq = this.boardSeq;
-        this.showStuckOffer();
-        return;
-      }
       if (this.slots.some((v) => !!v && this.bayCarLive(v))) {
         // Bays FULL + idle, and ONLY a model-reachable colour is holding the lose back →
         // breadcrumb the exact cells the model believes in (throttled), so a "stuck but
@@ -5282,7 +5173,7 @@ export class GameScene extends Phaser.Scene {
       const cells = (key.getData("cells") as number[]) ?? [idx];
       for (const ci of cells) this.keys[ci] = null; // a 2×2 soft rock clears all four
       this.keysRemaining -= 1;
-      this.boardSeq++; this.boardChangedAt = this.time.now;
+      this.boardSeq++;
       this.revealHiddenAround(cells);
       this.explode(key.x, key.y, this.cell * 1.3, 12, 0xcaa06a, 6); // big rock burst
       key.destroy();
@@ -5311,7 +5202,7 @@ export class GameScene extends Phaser.Scene {
     const cells = (key.getData("cells") as number[]) ?? [idx];
     for (const ci of cells) this.keys[ci] = null;
     this.keysRemaining -= 1;
-    this.boardSeq++; this.boardChangedAt = this.time.now;
+    this.boardSeq++;
     this.revealHiddenAround(cells);
     this.explode(key.x, key.y, this.cell * 0.95, 8, 0xb5834a, 5); // small wood burst
     key.destroy();
@@ -5357,7 +5248,7 @@ export class GameScene extends Phaser.Scene {
     const cells = (key.getData("cells") as number[]) ?? [cellIdx];
     for (const ci of cells) this.keys[ci] = null;
     this.keysRemaining -= 1;
-    this.boardSeq++; this.boardChangedAt = this.time.now;
+    this.boardSeq++;
     this.revealHiddenAround(cells); // an opened side reveals any adjacent "?" slime
     view.inFlight += 1; // reserve a seat so the car won't over-collect while this one runs
 
@@ -5795,6 +5686,26 @@ export class GameScene extends Phaser.Scene {
       if (sawTrip) {
         const futile = seqStable && tripAte <= 0;
         for (const m of members) { m.futileAtSeq = futile ? this.boardSeq : undefined; m.seqOut = undefined; }
+        // Futility belongs to the COLOUR and the board, not to one car: this lap toured
+        // every lane and found nothing for these colours, so no other car of the same
+        // colour can find anything either until the board changes. Marking them all now
+        // means a dead end is proven ONCE instead of once per identical car — the game
+        // reaches the lose screen (and its Revive offer) as soon as it is really stuck,
+        // without the player burning a lap on each bay to demonstrate it.
+        // Colour cars only: hammer/wood cars carry a `color` field that the game ignores,
+        // so letting one of those seed the set would condemn every real car that happens
+        // to share its number — a false deadlock, i.e. a stolen level.
+        if (futile) {
+          const isColorCar = (v: ChestView) => (v.chest.kind ?? "color") === "color";
+          const deadColors = new Set(members.filter(isColorCar).map((m) => m.chest.color));
+          const alsoDead = (v: ChestView | null) => {
+            if (v && isColorCar(v) && deadColors.has(v.chest.color)) v.futileAtSeq = this.boardSeq;
+          };
+          this.slots.forEach(alsoDead);
+          // Queue cars too: staging one into a bay must not resurrect a colour we just
+          // disproved on this very board.
+          for (const col of this.invColumns) col.forEach(alsoDead);
+        }
       }
       for (const m of members) {
         const co = (m as unknown as { _capOut?: number })._capOut;
