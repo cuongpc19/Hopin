@@ -882,6 +882,64 @@ CHỌN ART CHO LEVEL TRANH (để hợp board tối):
   (số level không đổi). Guide-sim (chỉ dẫn từng bước) cũng đã vá đá + "?" ẩn.
 
 ────────────────────────────────────────────────────────────────────────────
+24) MAGNET NÂNG CẤP + GIÁ BOOSTER + SETTINGS GỌN (2026-08-02)
+────────────────────────────────────────────────────────────────────────────
+• MAGNET giờ mở BẢNG PHÓNG TO của board (ô màu phẳng trên nền navy, to hơn ~1.3x
+  ô thật) thay vì bắt bấm ô nhỏ xíu trên board thật. Bấm 1 ô -> cả cụm liền mạch
+  sáng lên + đếm số; USE mới trừ booster, CANCEL/bấm ra ngoài không mất gì.
+  Đá và ô "?" chưa lộ: vẽ xám, KHÔNG bấm được (không lộ màu bí mật).
+  An toàn: mọi ngả thoát đi qua 1 closeAll() (cờ magnetMode/tutPaused không kẹt),
+  toạ độ dùng pointer.worldX/Y (gotcha camera-zoom-dpr), verify lại cụm trước khi trừ.
+• Hút NHANH hơn: nhả 40ms/slime (cũ 90ms) + xe VIP gắn cờ waiting -> slime chạy
+  làn RUSH x3 sẵn có.
+• SỔ SÁCH GHẾ (quan trọng): hút N slime thì các XE CÙNG MÀU bị trừ N ghế, trừ dần
+  TỪNG GHẾ theo nhịp hút (số trên xe đếm lùi cho user dễ hình dung, và không bao
+  giờ trừ đúp nếu giữa chừng có xe thường ăn mất 1 ô trong cụm). Thứ tự: xe Ô CHỜ
+  trước -> hàng xếp TRÊN xuống DƯỚI. Xe về 0 ghế: đang đỗ thì lái đi trả ô, trong
+  hàng thì biến mất, cột dồn lên. Xe úp mặt "?" VẪN bị trừ nhưng câm lặng (giữ bí
+  mật số). Xe đôi/xe 3 trừ được về 0, cả nhóm chỉ rời đi khi MỌI thành viên = 0.
+  Chặn dùng Magnet khi còn xe đang chạy trên ray (toast "chờ xe chạy xong") —
+  có vậy mới cân sổ được: slime trên board = tổng ghế các xe.
+• GIÁ BOOSTER x1.5: Add 450 · Grab 750 · Shuffle 900 · Magnet 900. Quà lần đầu mở
+  khoá 3 -> 2 cái. Bỏ dòng giá coin dưới icon khi hết lượt (badge đỏ 0 là đủ; giá
+  hiện trong hộp xác nhận mua).
+• SETTINGS trong game: 6 hàng pill ĐỒNG MÀU, đồng cỡ 244x38, nhịp dọc đều 46px
+  (Âm thanh · Chỉ dẫn · Ngôn ngữ · Chơi lại từ đầu · Home · Đóng). Bật/tắt thể
+  hiện bằng chữ trong nhãn, không đổi màu nút. Nút về Home đổi nhãn "Levels"->"Home".
+
+────────────────────────────────────────────────────────────────────────────
+25) NGÔN NGỮ: TIẾNG VIỆT (MẶC ĐỊNH) / ENGLISH (2026-08-02)
+────────────────────────────────────────────────────────────────────────────
+• src/game/i18n.ts: từ điển {vi, en} + t("key") / tf("key", {n}); mặc định vi;
+  lưu localStorage("pf_lang"). Import trong scene đặt alias t as tr, tf as trf.
+• Đổi ở 2 chỗ: Settings trong game (nút 🌐 Ngôn ngữ, đổi xong mở lại modal đã vẽ
+  lại) và Settings ở Home (hàng Tiếng Việt | English, restart scene).
+• ⚠ LUẬT: từ game THÔNG DỤNG giữ NGUYÊN TIẾNG ANH ở cả 2 ngôn ngữ — Level, Home,
+  Revive, Coin, CLAIM, Loading, HARD/SUPER HARD, tên booster (Add/Grab/Shuffle/
+  Magnet), Nice!/Great!. Chỉ dịch câu hướng dẫn/thông báo.
+• Mọi chuỗi MỚI hiện cho người chơi phải thêm key vào i18n.ts với đủ 2 ngôn ngữ.
+
+────────────────────────────────────────────────────────────────────────────
+26) TIM (LIVES): TỐI ĐA 5, HỒI 5 PHÚT/TIM, MUA BẰNG COIN (2026-08-02)
+────────────────────────────────────────────────────────────────────────────
+• src/game/lives.ts giữ state + panel tim dùng CHUNG cho 2 scene.
+  localStorage: pf_lives (số tim) + pf_lives_next (mốc thời gian tim kế tiếp).
+  Mọi lần đọc đều tự tính bù thời gian đã trôi (kể cả lúc đóng game).
+• TRỪ TIM khi BỎ CUỘC 1 lượt chơi: thua rồi bấm Chơi lại / Home, HOẶC bỏ ván giữa
+  chừng qua Settings -> Home (chống việc thấy sắp thua thì thoát ra để né tim).
+  REVIVE không đụng tới tim (chỉ tốn Coin, vì là chơi tiếp cùng 1 lượt).
+• Muốn chơi phải có >= 1 tim: Home chặn cả 2 đường vào level (ô LEVEL + Jump to
+  Level) và mở panel tim khi = 0. Retry mà tiêu nốt tim cuối cũng mở panel (có nút
+  Home để thoát); mua/chờ được tim thì đóng panel là vào thẳng level.
+• Ô ❤ trên Home hiện SỐ THẬT + chip đếm ngược m:ss ngay dưới khi đang hồi; bấm ô
+  ❤ mở panel. Panel: 5 trái tim sáng/xám, dòng đếm ngược, 2 nút mua.
+• GIÁ (dễ chỉnh trong lives.ts): 150 Coin/tim · 500 Coin đầy 5 tim.
+  Đối chiếu: thắng 1 ván +40 Coin, Revive 900 Coin.
+• LỖ HỔNG đã biết: F5/đóng app giữa ván vẫn né được tim. Bịt thì cần cờ "đang
+  trong level" xử lý lúc khởi động — chưa làm vì sẽ trừ tim mỗi lần dev F5.
+
+
+────────────────────────────────────────────────────────────────────────────
 GHI CHÚ CHUNG
 ────────────────────────────────────────────────────────────────────────────
 • Stack: Phaser 3 + TypeScript + Vite. Chạy web; sau đóng gói APK bằng Capacitor.
