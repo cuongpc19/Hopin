@@ -2491,6 +2491,12 @@ export class GameScene extends Phaser.Scene {
       this.toast("No slimes left");
       return;
     }
+    // Seat accounting needs every same-colour car settled in a bay or the queue —
+    // with cars mid-run the books can't be squared (user 2026-08-02: block + tell them).
+    if (this.active.length > 0 || this.pending.length > 0) {
+      this.toast("Wait for the running cars to finish!");
+      return;
+    }
     if (!this.affordToast("magnet")) return;
     this.magnetMode = true; // claims bay/queue taps until the picker closes
     // Defer one tick so the tap that pressed the booster button isn't captured.
@@ -2706,7 +2712,9 @@ export class GameScene extends Phaser.Scene {
       this.toast("No slimes of that color");
       return;
     }
-    this.settleMagnetDebt(color, total); // same-colour cars give up the pulled seats (bays first, then queue)
+    // Same-colour cars pay the pulled seats back one-by-one as the suction runs
+    // (bays first, then queue top-to-bottom) — see buildMagnetDebtPlan/payMagnetDebt.
+    const debtPlan = this.buildMagnetDebtPlan(color, total);
     const view = this.makeVipView(color, total);
     view.waiting = true; // magnet slimes use the runners' RUSH lane (3× speed) — faster suction, user 2026-08-02
     // Park the VIP car down near the waiting row, centred — slimes reel all the
@@ -2742,18 +2750,21 @@ export class GameScene extends Phaser.Scene {
           return;
         }
         this.fireTo(view, idx); // slime runs to the VIP car; boards on arrival
+        this.payMagnetDebt(debtPlan); // one seat off a same-colour car, in step with the pull
       },
     });
     this.toast("VIP car incoming!");
   }
 
-  // MAGNET accounting (user 2026-08-02): the pulled cluster is gone from the board, so
-  // the same-colour CARS give up that many seats — otherwise they keep seats that can
-  // never fill and clog the bays. Priority: waiting-bay cars first (one that empties
-  // drives off and FREES its bay), then the queue top-to-bottom (row by row). Skipped:
-  // cars out on the ray, face-down buried cars, and twin/triple members never drop
-  // below 1 seat (a partial group breaks launch/rope logic).
-  private settleMagnetDebt(color: number, pulled: number) {
+  // MAGNET accounting (user 2026-08-02, refined): the pulled cluster's seats come off
+  // the same-colour cars so board-slime count == car capacity stays true. Priority:
+  // waiting-bay cars first, then the queue top-to-bottom (row by row). Counts tick
+  // down IN SYNC with the suction — one seat per slime actually dispatched to the
+  // VIP (payMagnetDebt), never an instant lump — so a cluster cell grabbed by a
+  // regular car mid-effect is never double-charged. Buried face-down cars pay too
+  // but silently (their count stays secret); twin/triple members go all the way to
+  // 0 — the group departs/vanishes only once EVERY member is empty.
+  private buildMagnetDebtPlan(color: number, pulled: number): { car: ChestView; take: number }[] {
     let debt = pulled;
     const out = (v: ChestView) => this.pending.includes(v) || this.active.some((a) => a.view === v);
     const cands: ChestView[] = [];
@@ -2765,44 +2776,59 @@ export class GameScene extends Phaser.Scene {
         if (v && v.container.scene) cands.push(v);
       }
     }
-    const emptiedQueue: ChestView[] = [];
+    const plan: { car: ChestView; take: number }[] = [];
     for (const v of cands) {
       if (debt <= 0) break;
       if ((v.chest.kind ?? "color") !== "color" || v.chest.color !== color) continue;
-      if (v.chest.buried) continue; // a face-down car keeps its secret count
-      const grouped = this.isGrouped(v);
-      const spare = Math.max(0, v.chest.count - v.inFlight - (grouped ? 1 : 0));
+      const spare = Math.max(0, v.chest.count - v.inFlight);
       const take = Math.min(debt, spare);
       if (take <= 0) continue;
       debt -= take;
-      v.chest.count -= take;
-      v.countText.setText(String(v.chest.count));
-      // Feedback: quick pulse + a floating "-k" so the player sees where the seats went.
-      this.tweens.add({ targets: v.container, scale: v.container.scale * 1.12, duration: 110, yoyo: true });
-      const fl = this.add
-        .text(v.container.x, v.container.y - this.chestSize * 0.7, `-${take}`, {
-          fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "17px",
-          color: "#ffe14a", stroke: "#000000", strokeThickness: 4,
-        })
-        .setOrigin(0.5)
-        .setDepth(DEPTH_RUNNER + 6);
-      this.tweens.add({ targets: fl, y: fl.y - 26, alpha: 0, duration: 750, ease: "Quad.out", onComplete: () => fl.destroy() });
-      if (v.chest.count <= 0) {
-        if (this.slots.includes(v)) {
-          this.leaveCar(v); // fully covered by the pull → drives off, bay freed
-          this.updateSlotWarning();
-        } else {
-          emptiedQueue.push(v);
-        }
+      plan.push({ car: v, take });
+    }
+    return plan;
+  }
+
+  // Pay ONE seat of the magnet debt — called per dispatched slime so the numbers
+  // visibly count down in step with the suction effect.
+  private payMagnetDebt(plan: { car: ChestView; take: number }[]) {
+    while (plan.length) {
+      const head = plan[0];
+      const v = head.car;
+      if (head.take <= 0 || !v.container.scene || v.left) {
+        plan.shift();
+        continue;
       }
+      head.take--;
+      if (head.take <= 0) plan.shift();
+      v.chest.count = Math.max(0, v.chest.count - 1);
+      if (!v.chest.buried) v.countText.setText(String(v.chest.count)); // buried: silent, count stays secret
+      if (v.chest.count <= 0) this.onMagnetEmptied(v);
+      return;
     }
-    // Emptied queue cars vanish (they no longer need to enter); their columns close up.
-    for (const v of emptiedQueue) {
-      const p = this.findInInventory(v);
-      if (p) p.col.splice(p.r, 1);
-      this.tweens.add({ targets: v.container, scale: 0.15, alpha: 0, duration: 260, ease: "Back.in", onComplete: () => v.container.destroy() });
+  }
+
+  // A car the magnet emptied: solo cars (and only FULLY-empty groups — matching
+  // finishCar's leave-together rule) depart. Parked ones drive off and free their
+  // bay(s) (slam refills from the queue); queued ones vanish and the columns close up.
+  private onMagnetEmptied(v: ChestView) {
+    const group = this.liveGroup(v);
+    if (group.some((m) => m.chest.count > 0)) return; // some member still has seats → all stay
+    const parked = group.filter((m) => this.slots.includes(m));
+    const queued = group.filter((m) => !this.slots.includes(m) && m.container.scene);
+    for (const m of parked) this.leaveCar(m);
+    if (parked.length) this.updateSlotWarning();
+    let relayout = false;
+    for (const m of queued) {
+      const p = this.findInInventory(m);
+      if (p) {
+        p.col.splice(p.r, 1);
+        relayout = true;
+      }
+      m.left = true;
+      this.tweens.add({ targets: m.container, scale: 0.15, alpha: 0, duration: 260, ease: "Back.in", onComplete: () => m.container.destroy() });
     }
-    if (emptiedQueue.length) this.layoutInventory(true);
+    if (relayout) this.layoutInventory(true);
   }
 
   // The VIP magnet car (bigger, premium sprite, its seat count on top).
