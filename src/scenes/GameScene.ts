@@ -33,6 +33,22 @@ import {
 // instead of showing letterbox bars. Clamped to a sane portrait range so a
 // landscape/desktop window still renders as a phone-shaped board (with side bars).
 export const GAME_W = 480;
+
+// Base tone of the play screen's checkerboard "tablecloth". Also painted onto the canvas
+// and the HTML page so the letterbox / safe-area bands match the cloth (see create()).
+export const BG_CHECKER_DARK = 0xe5d2bc;
+
+// Paint the HTML page behind the canvas. Whatever the FIT scaler and the device's safe
+// areas leave uncovered shows THIS, so each scene sets it to its own edge colour.
+export function setPageBackground(color: number) {
+  const css = `#${color.toString(16).padStart(6, "0")}`;
+  try {
+    document.body.style.background = css;
+    document.documentElement.style.background = css;
+  } catch {
+    /* no DOM (tests) — nothing to paint */
+  }
+}
 const _aspect =
   typeof window !== "undefined" && window.innerWidth > 0
     ? window.innerHeight / window.innerWidth
@@ -434,7 +450,14 @@ export class GameScene extends Phaser.Scene {
     const dpr = this.scale.gameSize.width / GAME_W;
     this.cameras.main.setZoom(dpr);
     this.cameras.main.centerOn(GAME_W / 2, GAME_H / 2);
-    this.cameras.main.setBackgroundColor(0xbfe3a0);
+    // The canvas only ever covers GAME_W x GAME_H. Anything outside it — the FIT
+    // letterbox on screens outside the 1.6-2.3 aspect range, and the iOS status-bar /
+    // home-indicator safe areas — shows the PAGE background, which was the Home screen's
+    // green and read as a bare band above and below the play area (user 2026-08-02).
+    // Paint both the camera and the page in the checkerboard's own base tone so those
+    // bands blend into the tablecloth instead of framing it.
+    this.cameras.main.setBackgroundColor(BG_CHECKER_DARK);
+    setPageBackground(BG_CHECKER_DARK);
     this.gold = this.loadGold();
     // One-time wallet reset: everyone starts from a clean 0 (wipes leftover dev/test
     // gold once). After this, wins accumulate normally and the balance persists.
@@ -998,19 +1021,23 @@ export class GameScene extends Phaser.Scene {
   // dark navy board panel reads as a tray on a picnic cloth. Two tones only, kept low
   // in contrast so the bright board tiles stay the star.
   private buildBackground() {
-    const beige = 0xe5d2bc; // ô caro TỐI — be trầm (user 2026-08-02, mã #E5D2BC)
+    const beige = BG_CHECKER_DARK; // ô caro TỐI — be trầm (user 2026-08-02, mã #E5D2BC)
     const sage = 0xf2e6d8; //  ô caro SÁNG — kem sáng (#F2E6D8)
     const g = this.add.graphics().setDepth(DEPTH_BG);
-    g.fillStyle(beige, 1);
-    g.fillRect(0, 0, GAME_W, GAME_H);
     const cs = Math.round(GAME_W / 20); // ô caro NHỎ hơn 1 chút (user 2026-08-02: 16→20 ô ngang)
-    const cols = Math.ceil(GAME_W / cs) + 1;
-    const rows = Math.ceil(GAME_H / cs) + 1;
+    // Overdraw a whole screen past every edge so the cloth still fills the view if the
+    // camera ever shows more than the design rect (a wider safe area, a future scale
+    // change) — the pattern reaches the edges instead of stopping short.
+    const bleed = Math.ceil(GAME_H / cs) * cs;
+    g.fillStyle(beige, 1);
+    g.fillRect(-bleed, -bleed, GAME_W + 2 * bleed, GAME_H + 2 * bleed);
+    const cols = Math.ceil((GAME_W + 2 * bleed) / cs);
+    const rows = Math.ceil((GAME_H + 2 * bleed) / cs);
     g.fillStyle(sage, 1);
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
         if (((r + c) & 1) === 0) continue; // only "odd" squares → checker
-        g.fillRect(c * cs, r * cs, cs, cs);
+        g.fillRect(-bleed + c * cs, -bleed + r * cs, cs, cs);
       }
     }
   }
@@ -3297,7 +3324,16 @@ export class GameScene extends Phaser.Scene {
     try {
       localStorage.setItem("pf_progress", "1");
       localStorage.setItem("pf_current", "1");
-      ["pf_twin_intro", "pf_rock_intro", "pf_boost_gifted"].forEach((k) => localStorage.removeItem(k));
+      [
+        "pf_twin_intro", "pf_rock_intro", // one-time intros explain themselves again
+        // Starting over means a FRESH WALLET AND EMPTY BOOSTERS (user 2026-08-02). Carrying
+        // a full run's gold and boosters back to level 1 would trivialise the early levels,
+        // and boosters would sit unlocked long before the levels that are meant to grant them.
+        "pf_gold", "pf_boost_gifted", "pf_boost_counts",
+        "pf_rewarded", // per-level first-clear payouts, so the gold can be earned again
+      ].forEach((k) => localStorage.removeItem(k));
+      // Hearts (pf_lives) are deliberately NOT reset: refilling them would turn "start over"
+      // into a way to skip the wait.
     } catch { /* storage unavailable — nothing to reset */ }
     this.scene.start("game", { level: 1 });
   }

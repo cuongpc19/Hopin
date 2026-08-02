@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import { t as tr, tf as trf, getLang, setLang, type Lang } from "../game/i18n";
 import { getLives, msToNextHeart, formatCountdown, showHeartsModal } from "../game/lives";
-import { GAME_W, GAME_H } from "./GameScene";
+import { GAME_W, GAME_H, setPageBackground } from "./GameScene";
 import { levelDifficulty } from "../game/level";
 import {
   getProgress,
@@ -50,6 +50,9 @@ export class LevelSelectScene extends Phaser.Scene {
     const dpr = this.scale.gameSize.width / GAME_W;
     this.cameras.main.setZoom(dpr);
     this.cameras.main.centerOn(GAME_W / 2, GAME_H / 2);
+    // Home keeps the leafy green in the letterbox / safe-area bands, matching the forest
+    // art (the play screen swaps it for the checkerboard tone — see GameScene.create).
+    setPageBackground(0xbfe3a0);
 
     this.gold = this.readInt("pf_gold", 0);
     const progress = Math.max(1, this.readInt("pf_progress", 1));

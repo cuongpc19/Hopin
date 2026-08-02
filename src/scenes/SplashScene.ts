@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { GAME_W, GAME_H } from "./GameScene";
+import { GAME_W, GAME_H, setPageBackground } from "./GameScene";
 import { Audio } from "../game/audio";
 import { t as tr } from "../game/i18n";
 
@@ -37,6 +37,7 @@ export class SplashScene extends Phaser.Scene {
     this.cameras.main.setZoom(dpr);
     this.cameras.main.centerOn(GAME_W / 2, GAME_H / 2);
     this.cameras.main.setBackgroundColor(0xf4efe0); // cream, matches poster top
+    setPageBackground(0xf4efe0); // …and the bands outside the canvas, so the poster floats on cream
 
     // Poster, scaled to COVER the screen (crop overflow, no stretch).
     const img = this.add.image(GAME_W / 2, GAME_H / 2, "splash");

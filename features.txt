@@ -1041,6 +1041,25 @@ GỘP BẢN (user: "chỉ còn bản Hop-In"):
   PHẢN HỒI, không phải logic. Còn 3 việc user chưa chọn làm: hiệu ứng "-1 ❤",
   hiện số tim trên HUD trong game, và tăng thời gian hồi tim.
 
+29) NỀN TRÀN VIỀN + CHƠI LẠI TỪ ĐẦU XOÁ SẠCH VÍ/BOOSTER (2026-08-02)
+────────────────────────────────────────────────────────────────────────────
+• NỀN HỤT TRÊN/DƯỚI (user: "background hơi thiếu, trên dưới còn nền trắng"):
+  canvas CHỈ phủ đúng GAME_W×GAME_H. Phần ngoài canvas — dải letterbox của
+  Phaser.Scale.FIT (máy có tỉ lệ ngoài khoảng 1.6-2.3) + safe-area status bar /
+  home-indicator trên iOS — hiện MÀU NỀN TRANG (index.html body), trước là xanh
+  lá của màn Home → ở màn chơi trông như viền lạ kẹp trên dưới.
+  FIX: hàm setPageBackground(color) export từ GameScene, MỖI MÀN tự sơn nền
+  trang theo màu mép của mình: Splash = kem 0xf4efe0, Home = xanh 0xbfe3a0,
+  GameScene = BG_CHECKER_DARK 0xe5d2bc (đúng tông nền caro) + camera cũng đổi
+  sang tông đó. buildBackground vẽ TRÀN thêm 1 màn ra ngoài mỗi mép (bleed) để
+  hoạ tiết không bao giờ hụt nếu camera lộ ra ngoài khung thiết kế.
+  ⚠ Đổi màu nền chơi thì phải sửa CẢ 3 chỗ: BG_CHECKER_DARK, camera, page.
+• CHƠI LẠI TỪ ĐẦU (Settings → Reset) giờ XOÁ LUÔN VÍ VÀ BOOSTER (user
+  2026-08-02). resetProgress xoá: pf_gold, pf_boost_gifted, pf_boost_counts,
+  pf_rewarded (để tiền thưởng first-clear kiếm lại được), pf_twin_intro,
+  pf_rock_intro; đặt pf_progress/pf_current = 1.
+  ⚠ CỐ Ý KHÔNG xoá pf_lives: cho reset để hồi đầy tim = lách luật chờ tim.
+
 ────────────────────────────────────────────────────────────────────────────
 GHI CHÚ CHUNG
 ────────────────────────────────────────────────────────────────────────────
