@@ -144,7 +144,7 @@ const S: Record<string, { vi: string; en: string }> = {
   guide: { vi: "🧭 Chỉ dẫn từng bước", en: "🧭 Step-by-step guide" },
   resetBtn: { vi: "🔄 Chơi lại từ đầu", en: "🔄 Restart from Level 1" },
   resetConfirm: { vi: "⚠ Xoá tiến trình? Bấm lần nữa", en: "⚠ Erase progress? Tap again" },
-  levelsBtn: { vi: "🗺  Levels", en: "🗺  Levels" },
+  levelsBtn: { vi: "🏠 Home", en: "🏠 Home" },
   language: { vi: "🌐 Ngôn ngữ: Tiếng Việt", en: "🌐 Language: English" },
 
   // ---- Home (level select) ----
