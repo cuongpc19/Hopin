@@ -102,7 +102,18 @@ interface Runner {
 }
 
 const SLOT_COUNT = 5;
+// DESIGN sizes for the bottom cluster (bays → queue → boosters). The BOARD is fixed on
+// every device, so when a screen is too short for the cluster at full size the cluster
+// SCALES DOWN as one unit (user 2026-08-02) rather than losing rows or pushing the
+// booster row off-screen. Live values are this.slotSize / this.chestSize / this.invGap*.
 const SLOT_SIZE = 49; // waiting bay size — giảm 10% (54→49) để queue nhích lên (user 2026-08-02)
+const INV_GAP_X = 30; // queue column gap at scale 1
+const INV_GAP_Y = 16; // queue row gap at scale 1
+const CLUSTER_MIN_SCALE = 0.6; // never shrink the cluster past this — cars stay tappable
+// How long the board must sit unchanged, with the bays full and one lap already wasted,
+// before we offer Revive (user 2026-08-02). Long enough that a player who is simply
+// thinking about their next tap doesn't get interrupted.
+const STUCK_OFFER_MS = 7000;
 // Fixed car size — the SAME on every level (independent of the grid's cell size,
 // which changes with the level's rows/cols). ~30% bigger than the old sizing.
 const CAR_SIZE = 55;
@@ -255,8 +266,9 @@ export class GameScene extends Phaser.Scene {
   private invColumns: ChestView[][] = [];
   private invTop = 0;
   private invStartX = 0;
-  private invGapX = 30;
-  private invGapY = 16;
+  private invGapX = INV_GAP_X;
+  private invGapY = INV_GAP_Y;
+  private slotSize = SLOT_SIZE; // live bay size (SLOT_SIZE, scaled down on short screens)
   private invVisRows = 2; // inventory rows shown before the mask clips (flexes to fit ≤40%)
   private invPeek = 0; // px of the next (partly-hidden) row the mask reveals
   private invMask?: Phaser.Display.Masks.GeometryMask;
@@ -504,6 +516,7 @@ export class GameScene extends Phaser.Scene {
     try { localStorage.setItem("pf_current", String(levelNum)); } catch { /* storage unavailable */ }
     this.playLog = []; this.playStart = (typeof performance !== "undefined" ? performance.now() : 0); this.peakUsed = 0;
     this.boardSeq = 0; this.lastStuckProbe = 0; // fresh board → fresh futility bookkeeping
+    this.boardChangedAt = this.time.now; this.stuckOfferedSeq = -1; this.stuckOfferOpen = false;
     try { this.guideMode = localStorage.getItem("hopin_guide") === "1"; } catch { this.guideMode = false; }
     this.guideKey = ""; this.guideHand = undefined; this.guideRing = undefined; this.guidePlan = null; this.guidePlanWinning = false; this.guidePlanNonce = 0;
     if (typeof window !== "undefined") { (window as any).hopLog = () => console.log(localStorage.getItem("hopin_playlog") || "[]"); (window as any).hopLogClear = () => localStorage.removeItem("hopin_playlog"); }
@@ -581,51 +594,56 @@ export class GameScene extends Phaser.Scene {
     const boostH = 78;
     const margin = 6;
 
-    // Bottom cluster (waiting slots → inventory → boosters) is capped at 40% of the
-    // screen height — the board (zone 1) takes everything else. If the cap is tight,
-    // the inventory shows fewer rows rather than shrinking the cars.
-    const rowStep = chest + this.invGapY;
-    // Reveal most of the next row (was 0.45) so row 3 is clearly visible, not a sliver.
-    const peek = Math.round(chest * 0.8);
-    this.invPeek = peek; // mask uses the same value so the clip matches the reserved space
-    const regionH = (rows: number) => (rows - 1) * rowStep + chest + peek + 8;
-    const bottomFixed = SLOT_SIZE + gSlots + gInv + boostH;
-    // Đảm bảo đủ chỗ cho 2 HÀNG ĐẦY + lấp ló hàng thứ 3 (user 2026-08-02): bottomMax không nhỏ
-    // hơn (bottomFixed + regionH(2)); nếu màn hình cao thì lấy 35% để cân đối.
-    const bottomMax = Math.max(Math.round(GAME_H * 0.35), bottomFixed + regionH(2));
-    // GROW the inventory to fill the 40% budget (up to 3 rows) so the bottom cluster
-    // sits near 40% and the board lands around the real game's ~53% — instead of the
-    // board ballooning and leaving an empty gap.
-    let visRows = 1;
-    while (visRows < 3 && bottomFixed + regionH(visRows + 1) <= bottomMax) visRows++;
-    let invH = regionH(visRows);
-    if (bottomFixed + invH > bottomMax) invH = Math.max(chest + peek + 8, bottomMax - bottomFixed);
-    const bottomH = bottomFixed + invH; // ≤ 40% of GAME_H
-
-    // Board absorbs ALL the remaining height between the HUD and the bottom cluster
-    // (no artificial cap) so the ring road grows as large as the screen allows and the
-    // slimes scale up with it. The square is still bounded to GAME_W in computeMetrics.
-    const topFixed = hudH + gTop + gBoard;
-    let boardBudget = GAME_H - topFixed - bottomH - 2 * margin;
-    boardBudget = Math.round(Math.max(boardBudget, 220));
-    const m = this.computeMetrics(boardBudget);
-
+    // ---- Bottom cluster: laid out BOTTOM-UP so the boosters can never be lost -------
+    // (user 2026-08-02, iPad: booster row "bị lùi xuống sâu quá" = pushed off the canvas.)
+    // The old code stacked downwards from the board and let the booster row land wherever
+    // it fell, which on a SHORT viewport was past GAME_H — invisible and untappable. Now:
+    //   boosters  → pinned to the bottom margin, always on screen, non-negotiable
+    //   queue     → fills whatever is left between the bays and the boosters
+    //   bays      → hug the board (gBoard), so there is no empty band under the ray
+    //   board     → capped so the cluster's minimum always fits; only shrinks when it must
+    // The BOARD IS FIXED on every device (user 2026-08-02) — same ring, same slime size,
+    // so a level plays identically everywhere. Everything from the waiting bays down is
+    // one cluster that SCALES to whatever height is left, instead of the board yielding
+    // space or the booster row falling off the bottom (iPad) .
     const boardTop = hudH + gTop;
+    const m = this.computeMetrics(GAME_H - boardTop - gBoard); // ring frame ignores this
     this.buildBoard(boardTop, m); // zone 1
+    const clusterTop = boardTop + m.frameH + gBoard; // bays hug the board — no empty band
 
-    // Cụm dưới (user 2026-08-02): Ô CHỜ neo NGAY DƯỚI board (gần đường ray), BOOSTER ghim SÁT
-    // ĐÁY, và QUEUE GIÃN lấp khoảng giữa — thay vì để hở board↔bays trên màn hình cao. Số hàng
-    // queue hiển thị = vừa đủ lấp khoảng trống (tối thiểu 2 hàng + lấp ló hàng 3, tối đa 5).
-    const clusterTop = boardTop + m.frameH + gBoard;
-    this.buildSlots(clusterTop); // zone 2 — ô chờ sát board
-    const invTop = clusterTop + SLOT_SIZE + gSlots;
-    const boosterPin = GAME_H - margin - boostH; // booster ở đáy
-    const invAvail = boosterPin - gInv - invTop;
+    // Cluster at design size = bays + two full queue rows + a peek of the third + boosters.
+    // (Two rows plus the peek is the intended queue; on the APK the third row never showed.)
+    const designPeek = Math.round(chest * 0.8);
+    const designRegion = (rows: number, pk: number) => (rows - 1) * (chest + INV_GAP_Y) + chest + pk + 8;
+    const designCluster = SLOT_SIZE + gSlots + designRegion(2, designPeek) + gInv + boostH;
+    const avail = GAME_H - clusterTop - margin;
+    const s = Phaser.Math.Clamp(avail / designCluster, CLUSTER_MIN_SCALE, 1); // only ever shrinks
+    this.slotSize = Math.round(SLOT_SIZE * s);
+    this.chestSize = Math.round(chest * s);
+    this.invGapX = Math.round(INV_GAP_X * s);
+    this.invGapY = Math.round(INV_GAP_Y * s);
+    const gSlotsS = Math.round(gSlots * s);
+    const gInvS = Math.round(gInv * s);
+    const boostHS = Math.round(boostH * s);
+
+    const boosterTop = GAME_H - margin - boostHS; // ALWAYS on screen — the fixed anchor
+    this.buildSlots(clusterTop); // zone 2
+    const invTop = clusterTop + this.slotSize + gSlotsS;
+    const invAvail = boosterTop - gInvS - invTop;
+    // Fill the gap with as many WHOLE rows as fit, then spend the remainder on the peek:
+    // whole rows show more cars you can actually pick than one fat sliver would.
+    const rowStep = this.chestSize + this.invGapY;
+    const regionOf = (rows: number, pk: number) => (rows - 1) * rowStep + this.chestSize + pk + 8;
     let vis = 1;
-    while (vis < 5 && regionH(vis + 1) <= invAvail) vis++;
-    this.buildInventory(invTop, perRow, vis); // zone 3 — giãn lấp khoảng giữa
-    // Màn cao: booster ở đáy (queue đã lấp đầy). Màn thấp: đặt ngay dưới queue để không đè.
-    this.buildBoosters(Math.max(boosterPin, invTop + regionH(vis) + gInv), boostH); // zone 4
+    while (vis < 5 && regionOf(vis + 1, 0) <= invAvail) vis++;
+    let peek = invAvail - regionOf(vis, 0);
+    // A row that lands flush with the booster row leaves no sliver, so the player gets no
+    // hint that more cars are queued below. Give the last row back in that case — two rows
+    // plus a clear peek reads better than three rows that look like the whole queue.
+    if (peek < 14 && vis > 2) { vis--; peek = invAvail - regionOf(vis, 0); }
+    this.invPeek = Phaser.Math.Clamp(peek, 0, Math.round(designPeek * s));
+    this.buildInventory(invTop, perRow, vis); // zone 3
+    this.buildBoosters(boosterTop, boostHS); // zone 4
 
     // Gift + tutorialise any booster whose unlock level this level reaches.
     this.checkBoosterUnlocks(levelNum);
@@ -947,7 +965,7 @@ export class GameScene extends Phaser.Scene {
   // "bay is locked" lesson so play continues while the car circles (user 2026-07-31).
   private tutFloatTip(x: number, y: number, msg: string) {
     const label = this.add
-      .text(x, y - SLOT_SIZE * 0.95, msg, {
+      .text(x, y - this.slotSize * 0.95, msg, {
         fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "14px",
         color: "#ffffff", backgroundColor: "#e08a1e", padding: { x: 12, y: 6 }, align: "center",
       })
@@ -973,8 +991,10 @@ export class GameScene extends Phaser.Scene {
     // left/right edges (user 2026-08-02 "chưa sát 2 bên"). Was min(boardBudget, GAME_W) which
     // let a short viewport shrink the square → side gaps. Now the board always spans GAME_W;
     // the bottom cluster yields the vertical room (pushed down / compressed).
-    const frameH = isRing ? Math.round(GAME_W * 0.95) : boardBudget; // board thu nhỏ ~5% (user 2026-08-02)
-    this.chestSize = CAR_SIZE; // fixed — consistent car size on every level
+    // Ring frame is FIXED at ~95% of the width on every device, so the board, the ring
+    // road and the slimes are identical everywhere (user 2026-08-02). The bottom cluster
+    // absorbs the difference in screen height instead — see the layout block.
+    const frameH = isRing ? Math.round(GAME_W * 0.95) : boardBudget;
     return { frameW, frameH, ringW: frameW, ringH: frameH };
   }
 
@@ -1576,7 +1596,7 @@ export class GameScene extends Phaser.Scene {
   // ---- Zone 2: waiting slots -----------------------------------------
 
   private buildSlots(topY: number) {
-    this.slotY = topY + SLOT_SIZE / 2;
+    this.slotY = topY + this.slotSize / 2;
     this.layoutSlots();
     if (this.trayMode && TRAY_BATCH && !this.slamMode) this.buildGoButton(); // slam: tap bays, no GO
   }
@@ -1607,7 +1627,7 @@ export class GameScene extends Phaser.Scene {
   // the full width and leaves no side margin, which used to make GO jump to the left.
   private positionGoButton() {
     if (!this.goBtn) return;
-    const art = Math.round(SLOT_SIZE * 1.5);
+    const art = Math.round(this.slotSize * 1.5);
     this.goBtn.setPosition(GAME_W - 40, this.slotY - art / 2 - 30);
   }
 
@@ -1632,7 +1652,7 @@ export class GameScene extends Phaser.Scene {
     // Render the tile bigger than the logical slot so its dirt centre comfortably
     // holds a parked car. Space the bays so their grass borders slightly overlap
     // into one continuous strip, centered.
-    const art = Math.round(SLOT_SIZE * 1.5);
+    const art = Math.round(this.slotSize * 1.5);
     const pitch = art - 8;
     const totalW = (this.slotCount - 1) * pitch;
     const startX = (GAME_W - totalW) / 2;
@@ -1684,7 +1704,7 @@ export class GameScene extends Phaser.Scene {
         const tex = this.textures.exists(key) ? key : "car-0";
         if (!ghost) {
           ghost = this.add.image(this.slotXs[i] ?? 0, this.slotY, tex).setOrigin(0.5).setDepth(DEPTH_RUNNER + 6).setAlpha(0.4);
-          ghost.setDisplaySize(SLOT_SIZE - 12, SLOT_SIZE - 12);
+          ghost.setDisplaySize(this.slotSize - 12, this.slotSize - 12);
           this.slotLocks[i] = ghost;
         }
         ghost.setTexture(tex).setPosition(this.slotXs[i] ?? ghost.x, this.slotY).setVisible(true);
@@ -1780,7 +1800,7 @@ export class GameScene extends Phaser.Scene {
 
   private startSlotWarning() {
     this.slotWarnActive = true;
-    const art = Math.round(SLOT_SIZE * 1.5);
+    const art = Math.round(this.slotSize * 1.5);
     for (let i = 0; i < this.slotCount; i++) {
       const ring = this.add
         .rectangle(this.slotXs[i], this.slotY, art - 6, art - 6)
@@ -2266,7 +2286,7 @@ export class GameScene extends Phaser.Scene {
   // Pulse a green ring on a bay a few times to call out that it's newly added.
   private flashNewSlot(index: number) {
     if (!this.slotXs[index]) return;
-    const s = Math.round(SLOT_SIZE * 1.5) - 6;
+    const s = Math.round(this.slotSize * 1.5) - 6;
     const ring = this.add
       .rectangle(this.slotXs[index], this.slotY, s, s)
       .setStrokeStyle(4, 0x3ad14a, 1)
@@ -3201,7 +3221,7 @@ export class GameScene extends Phaser.Scene {
 
   // Small contextual notice just above the waiting bays.
   private smallNotice(msg: string) {
-    const y = this.slotY - SLOT_SIZE * 0.9;
+    const y = this.slotY - this.slotSize * 0.9;
     const t = this.add
       .text(GAME_W / 2, y, msg, {
         fontFamily: "Arial, sans-serif",
@@ -4103,6 +4123,11 @@ export class GameScene extends Phaser.Scene {
   // the board is exactly as that trip toured it.
   private boardSeq = 0;
   private lastStuckProbe = 0; // throttle for the stuck-state telemetry probe
+  // "Looks stuck" offer: bays full + a lap already came back empty + nothing has changed
+  // for a while → offer Revive instead of making the player prove all five bays futile.
+  private boardChangedAt = 0; // this.time.now of the last board change (pairs with boardSeq)
+  private stuckOfferedSeq = -1; // boardSeq the offer was last shown/dismissed for (no nagging)
+  private stuckOfferOpen = false;
   private computeReachableColors(sample?: Map<number, number>) {
     this.reachableColors.clear();
     const cols = this.level.cols, rows = this.level.rows;
@@ -4776,6 +4801,91 @@ export class GameScene extends Phaser.Scene {
     return false;
   }
 
+  // "Looks stuck" offer (user 2026-08-02): the bays are full and a lap already ate nothing,
+  // so rather than leave the board sitting there — or make the player prove every bay futile
+  // one wasted lap at a time — put the Revive choice in front of them. Deliberately an OFFER,
+  // not a loss: "let me keep trying" dismisses it, and it won't ask again until the board
+  // changes. A genuine dead end still ends the level through the normal lose path below.
+  private showStuckOffer() {
+    if (this.stuckOfferOpen || this.won || this.lost || this.tutPaused) return;
+    this.stuckOfferOpen = true;
+    this.tutPaused = true; // freeze the board behind the modal
+    const REVIVE_COST = 900;
+    const canAfford = this.gold >= REVIVE_COST;
+    const D = 420;
+    const pw = 320;
+    const ph = 268;
+    const x0 = GAME_W / 2 - pw / 2;
+    const y0 = GAME_H / 2 - ph / 2;
+    const objs: Phaser.GameObjects.GameObject[] = [];
+    const dim = this.add
+      .rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0x000000, 0.6)
+      .setDepth(D)
+      .setInteractive();
+    objs.push(dim);
+    const panel = this.add.graphics().setDepth(D + 1);
+    panel.fillStyle(0xf7edd0, 1);
+    panel.fillRoundedRect(x0, y0, pw, ph, 20);
+    panel.lineStyle(4, 0x8a5a12, 1);
+    panel.strokeRoundedRect(x0, y0, pw, ph, 20);
+    objs.push(panel);
+    objs.push(
+      this.add.text(GAME_W / 2, y0 + 54, "😵", { fontSize: "34px" }).setOrigin(0.5).setDepth(D + 2),
+      this.add
+        .text(GAME_W / 2, y0 + 100, tr("stuckTitle"), {
+          fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "21px", color: "#6a4a12",
+        })
+        .setOrigin(0.5)
+        .setDepth(D + 2),
+      this.add
+        .text(GAME_W / 2, y0 + 150, tr("stuckBody"), {
+          fontFamily: "Arial, sans-serif", fontSize: "14px", color: "#6a4a12", align: "center",
+          wordWrap: { width: pw - 44 },
+        })
+        .setOrigin(0.5)
+        .setDepth(D + 2)
+    );
+
+    const close = () => {
+      objs.forEach((o) => o.destroy());
+      this.stuckOfferOpen = false;
+      this.tutPaused = false;
+    };
+    const reviveBtn = this.add
+      .text(GAME_W / 2, y0 + ph - 74, canAfford ? trf("reviveBtn", { n: REVIVE_COST }) : trf("reviveNeed", { n: REVIVE_COST }), {
+        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "17px", color: "#ffffff",
+        backgroundColor: canAfford ? "#35b04a" : "#a39b8c", padding: { x: 26, y: 10 },
+      })
+      .setOrigin(0.5)
+      .setDepth(D + 2);
+    objs.push(reviveBtn);
+    if (canAfford) {
+      reviveBtn.setInteractive({ useHandCursor: true });
+      reviveBtn.on("pointerdown", () => {
+        this.addGold(-REVIVE_COST);
+        close();
+        // Same escape hatch as the lose screen: one more waiting bay, so a queue car can
+        // flow in and change the board (slam auto-fills bays).
+        this.slotCount += 1;
+        this.slots.push(null);
+        this.layoutSlots();
+        if (this.slotWarnActive) this.stopSlotWarning();
+        this.flashNewSlot(this.slotCount - 1);
+      });
+    }
+    const keep = this.add
+      .text(GAME_W / 2, y0 + ph - 28, tr("stuckKeep"), {
+        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "15px", color: "#ffffff",
+        backgroundColor: "#8a5a12", padding: { x: 20, y: 8 },
+      })
+      .setOrigin(0.5)
+      .setDepth(D + 2)
+      .setInteractive({ useHandCursor: true });
+    objs.push(keep);
+    keep.on("pointerdown", close);
+    dim.on("pointerdown", close);
+  }
+
   // TRAY-mode lose. Batch mode: the bays are full of blocked cars, nothing is out on the
   // ray, there's nothing new to stage (no free bay / empty queue) and pressing GO would
   // collect nothing (no bay car's colour is reachable) → deadlock. Auto mode: original
@@ -4792,6 +4902,20 @@ export class GameScene extends Phaser.Scene {
       // exact board doesn't hold the lose back, even if the ray model still calls it reachable
       // (user 2026-08-01: bays full, taps ate nothing, yet the game never ended).
       const freeSlots = this.slots.reduce((n, s) => n + (s ? 0 : 1), 0);
+      // Bays FULL and a lap has already come back EMPTY on this exact board? Then the
+      // player is probably stuck — offer Revive now instead of making them send all five
+      // cars out one by one to prove it (user 2026-08-02). It stays an OFFER, dismissible,
+      // because the ray model can still be right about a colour we haven't tried yet.
+      if (
+        freeSlots === 0 &&
+        this.stuckOfferedSeq !== this.boardSeq &&
+        this.slots.some((v) => !!v && v.futileAtSeq === this.boardSeq) &&
+        this.time.now - this.boardChangedAt > STUCK_OFFER_MS
+      ) {
+        this.stuckOfferedSeq = this.boardSeq;
+        this.showStuckOffer();
+        return;
+      }
       if (this.slots.some((v) => !!v && this.bayCarLive(v))) {
         // Bays FULL + idle, and ONLY a model-reachable colour is holding the lose back →
         // breadcrumb the exact cells the model believes in (throttled), so a "stuck but
@@ -4858,7 +4982,7 @@ export class GameScene extends Phaser.Scene {
       const by = m.container.y;
       // 2) a bright up-arrow hopping above the car — the clearest "I'm coming up!" cue.
       const arrow = this.add
-        .text(bx, by - SLOT_SIZE * 0.6, "⬆", {
+        .text(bx, by - this.slotSize * 0.6, "⬆", {
           fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "28px",
           color: "#3ad24a", stroke: "#0a3d12", strokeThickness: 5,
         })
@@ -4869,7 +4993,7 @@ export class GameScene extends Phaser.Scene {
         this.tweens.add({ targets: arrow, y: arrow.y - 12, scale: { from: 0.85, to: 1.15 }, duration: 320, ease: "Sine.inOut", yoyo: true, repeat: -1 }),
       );
       // 3) a pulsing yellow ring around the bay to pull the eye toward it.
-      const ring = this.add.circle(bx, by, SLOT_SIZE * 0.52).setStrokeStyle(3, 0xffe14a, 1).setDepth(59);
+      const ring = this.add.circle(bx, by, this.slotSize * 0.52).setStrokeStyle(3, 0xffe14a, 1).setDepth(59);
       fx.push(ring);
       tweens.push(
         this.tweens.add({ targets: ring, scale: 1.4, alpha: 0.15, duration: 620, ease: "Sine.out", yoyo: true, repeat: -1 }),
@@ -5070,7 +5194,7 @@ export class GameScene extends Phaser.Scene {
       const cells = (key.getData("cells") as number[]) ?? [idx];
       for (const ci of cells) this.keys[ci] = null; // a 2×2 soft rock clears all four
       this.keysRemaining -= 1;
-      this.boardSeq++;
+      this.boardSeq++; this.boardChangedAt = this.time.now;
       this.revealHiddenAround(cells);
       this.explode(key.x, key.y, this.cell * 1.3, 12, 0xcaa06a, 6); // big rock burst
       key.destroy();
@@ -5099,7 +5223,7 @@ export class GameScene extends Phaser.Scene {
     const cells = (key.getData("cells") as number[]) ?? [idx];
     for (const ci of cells) this.keys[ci] = null;
     this.keysRemaining -= 1;
-    this.boardSeq++;
+    this.boardSeq++; this.boardChangedAt = this.time.now;
     this.revealHiddenAround(cells);
     this.explode(key.x, key.y, this.cell * 0.95, 8, 0xb5834a, 5); // small wood burst
     key.destroy();
@@ -5145,7 +5269,7 @@ export class GameScene extends Phaser.Scene {
     const cells = (key.getData("cells") as number[]) ?? [cellIdx];
     for (const ci of cells) this.keys[ci] = null;
     this.keysRemaining -= 1;
-    this.boardSeq++;
+    this.boardSeq++; this.boardChangedAt = this.time.now;
     this.revealHiddenAround(cells); // an opened side reveals any adjacent "?" slime
     view.inFlight += 1; // reserve a seat so the car won't over-collect while this one runs
 
@@ -5597,7 +5721,7 @@ export class GameScene extends Phaser.Scene {
           const si0 = si;
           this.time.delayedCall(700, () => {
             if (this.tutStep === 14 && !this.won && !this.lost) {
-              this.showTutHint(this.slotXs[si0] ?? 0, this.slotY, tr("tutCameBack"), SLOT_SIZE * 0.95);
+              this.showTutHint(this.slotXs[si0] ?? 0, this.slotY, tr("tutCameBack"), this.slotSize * 0.95);
             }
           });
         }
@@ -5720,7 +5844,7 @@ export class GameScene extends Phaser.Scene {
       targets: view.container,
       x: this.slotXs[slotIndex],
       y: this.slotY,
-      scale: (SLOT_SIZE - 6) / this.chestSize,
+      scale: (this.slotSize - 6) / this.chestSize,
       duration: Phaser.Math.Clamp(dist * 2.4, 480, 950), // slow, even pull-in
       ease: "Cubic.out",
     });
@@ -5735,7 +5859,7 @@ export class GameScene extends Phaser.Scene {
       this.tutStep = 3;
       this.time.delayedCall(700, () => {
         if (this.tutStep === 3 && !this.won && !this.lost) {
-          this.showTutHint(this.slotXs[slotIndex], this.slotY, tr("tutTapParked"), SLOT_SIZE * 0.9);
+          this.showTutHint(this.slotXs[slotIndex], this.slotY, tr("tutTapParked"), this.slotSize * 0.9);
         }
       });
     }

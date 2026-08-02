@@ -983,6 +983,42 @@ GỘP BẢN (user: "chỉ còn bản Hop-In"):
   sẵn cờ --release). Build stamp trong game (v0.0.<commit> · hash) lấy từ git,
   không liên quan versionCode của APK.
 
+28) LAYOUT CO GIÃN THEO MÀN HÌNH + ĐỀ NGHỊ REVIVE KHI KẸT (2026-08-02)
+────────────────────────────────────────────────────────────────────────────
+• VẤN ĐỀ: (a) iPad màn thấp → hàng BOOSTER bị đẩy xuống DƯỚI canvas, không thấy;
+  (b) shortcut iPhone màn cao → hở một khoảng lớn giữa ray và ô chờ; (c) trên APK
+  chỉ thấy 2 hàng xe, không thấy hàng 3 lấp ló.
+• NGUYÊN NHÂN: cụm dưới xếp TỪ TRÊN XUỐNG (bays → queue → booster), booster rơi
+  đâu thì rơi. Board lại chiếm cứng 0.95*GAME_W nên màn thấp không đủ chỗ.
+• CÁCH SỬA (GameScene, khối layout trong startLevel):
+  - BOARD CỐ ĐỊNH trên MỌI thiết bị (user: "board cũng phải cố định") = 0.95*GAME_W.
+    Level chơi giống hệt nhau ở mọi máy, slime cùng cỡ. computeMetrics không còn
+    nhận boardBudget cho ring nữa.
+  - Cụm dưới xếp TỪ DƯỚI LÊN: BOOSTER ghim đáy (GAME_H - margin - boostH) → LUÔN
+    NHÌN THẤY, không thương lượng. Ô chờ neo SÁT board (gBoard=14) → hết hở.
+  - Màn không đủ cao → CO CẢ CỤM theo 1 hệ số s (this.slotSize / this.chestSize /
+    invGapX / invGapY / gSlots / gInv / boostH đều nhân s), sàn CLUSTER_MIN_SCALE
+    =0.6. Hằng gốc: SLOT_SIZE 49, CAR_SIZE 55, INV_GAP_X 30, INV_GAP_Y 16.
+    ⚠ SLOT_SIZE/CAR_SIZE giờ chỉ là CỠ THIẾT KẾ — code chạy phải dùng
+    this.slotSize / this.chestSize, đừng dùng lại hằng số.
+  - Số hàng queue = lấp đầy khoảng trống (2-5 hàng NGUYÊN), phần dư thành "lấp ló"
+    hàng kế. Nếu vừa khít mà không còn lấp ló thì TRẢ LẠI 1 hàng để luôn còn
+    ≥14px lấp ló (báo cho người chơi biết còn xe bên dưới).
+  - Đã mô phỏng quét tỉ lệ 1.60→2.30: mọi tỉ lệ đều ≥2 hàng nguyên + lấp ló ≥14,
+    booster luôn trong màn, board luôn 456.
+• ĐỀ NGHỊ REVIVE KHI KẸT (user: "còn 5 xe ô chờ mà k xe nào ăn được thì hỏi luôn"):
+  checkTrayStuck (nhánh slam) — ô chờ ĐẦY + không xe nào trên ray + ĐÃ có ít nhất
+  1 xe chạy hết vòng mà ăn 0 slime trên đúng board này (futileAtSeq===boardSeq) +
+  board không đổi suốt STUCK_OFFER_MS (7s) → hiện modal showStuckOffer.
+  - Là LỜI MỜI, không phải thua: có nút "Để tôi thử tiếp" để đóng; chỉ hỏi 1 lần
+    cho mỗi boardSeq (ăn được 1 slime là hỏi lại được). Cố ý làm vậy vì mô hình
+    tia có thể vẫn đúng với màu chưa thử — báo thua luôn thì oan.
+  - Revive ở đây = y hệt màn thua: trả 900 Coin, THÊM 1 Ô CHỜ trống để xe trong
+    hàng tràn vào, phá thế kẹt.
+  - Thế kẹt thật (cả 5 ô đều đã chứng minh vô ích) vẫn thua theo đường cũ.
+• optimize-art: thêm "tmp" vào danh sách thư mục bỏ khỏi dist (art/tmp ~18MB là
+  thư mục nháp, gitignore nhưng vite vẫn copy cả public/).
+
 ────────────────────────────────────────────────────────────────────────────
 GHI CHÚ CHUNG
 ────────────────────────────────────────────────────────────────────────────

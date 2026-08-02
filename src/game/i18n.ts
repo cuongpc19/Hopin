@@ -137,6 +137,13 @@ const S: Record<string, { vi: string; en: string }> = {
   reviveNeed: { vi: "Cần {n} 🪙 để Revive", en: "Need {n} 🪙 to revive" },
   // "|"-joined praise words for the rare big slime — split before use.
   niceWords: { vi: "Nice!|Great!|Wow!|Cool!", en: "Nice!|Great!|Wow!|Cool!" },
+  // ---- "looks stuck" offer: bays full, a lap already came back empty ----
+  stuckTitle: { vi: "Hình như kẹt rồi!", en: "Looks stuck!" },
+  stuckBody: {
+    vi: "Ô chờ đã đầy mà không xe nào ăn thêm được slime nào.\nRevive để thêm 1 ô chờ, hay thử tiếp?",
+    en: "The bays are full and no car can reach another slime.\nRevive for one more bay, or keep trying?",
+  },
+  stuckKeep: { vi: "Để tôi thử tiếp", en: "Let me keep trying" },
 
   // ---- hearts (lives) ----
   heartsTitle: { vi: 'Tim của bạn', en: 'Your Hearts' },
