@@ -1,12 +1,25 @@
-# Hop In! (folder "Pixel Flow") — project notes for Claude
+# Hop In! — project notes for Claude
 
 Web puzzle game (Phaser 3 + TypeScript + Vite). Cute cars circle a board and peel a
 mosaic picture made of coloured tiles, outside-in. User designs, Claude builds.
 
-- Typecheck: `npx tsc --noEmit`   ·   Dev: `npm run dev`
+- Typecheck: `npx tsc --noEmit`   ·   Dev: `npm run dev`   ·   Android: `npm run apk`
 - **Full feature log: `FEATURES.txt`** (Vietnamese, numbered sections). Read it before
   touching levels, mechanics, or visuals. Windows note: `features.txt` == `FEATURES.txt`
   (case-insensitive filesystem — same file).
+
+## ONE version, ONE folder, ONE branch (2026-08-02)
+
+The game is **SLAM mode only**: tapping a bay car sends it onto the ray and LOCKS that
+bay until it fills or comes back (`GameScene.slamMode`, on for every level unless the
+level sets `slam: false`). There is no longer a second variant to keep in sync.
+
+This folder on branch `main` is the whole project — the old duplicate (`Hopin-slam`
+worktree / `hop-in-slam` branch) has been merged in and removed. Before that merge, main
+was 124 commits stale, and a full day of work went into the wrong copy; if you ever see
+a second worktree appear, treat it as a mistake, not a variant. The pre-merge state of
+the old main is kept on `archive/main-wip-2026-08-02` (it also holds an unfinished 2×2
+big-slime feature and a beige checkerboard background, if either is ever wanted).
 
 ## Visual rules — READ before building/rebuilding levels (FEATURES.txt §20)
 

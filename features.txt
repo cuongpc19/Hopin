@@ -939,11 +939,56 @@ CHỌN ART CHO LEVEL TRANH (để hợp board tối):
   trong level" xử lý lúc khởi động — chưa làm vì sẽ trừ tim mỗi lần dev F5.
 
 
+27) GỘP VỀ MỘT BẢN + ĐÓNG GÓI APK ANDROID (2026-08-02)
+────────────────────────────────────────────────────────────────────────────
+GỘP BẢN (user: "chỉ còn bản Hop-In"):
+• Trước đây có 2 thư mục / 2 nhánh: "Pixel Flow" (nhánh main, CŨ) và
+  "Hopin-slam" (nhánh hop-in-slam, bản thật đang chơi — hơn main 124 commit).
+  Cơ chế chốt = SLAM (khoá ô chờ khi xe lên ray) → bản hop-in-slam là bản duy nhất.
+• Đã gộp: main = hop-in-slam (git reset --hard), xoá worktree Hopin-slam và nhánh
+  hop-in-slam. GIỜ CHỈ CÒN 1 THƯ MỤC + 1 NHÁNH main. Bản cũ không mất: nằm ở
+  nhánh archive/main-wip-2026-08-02 (gồm cả WIP slime-bự 2x2 + nền caro be chưa
+  dùng đến, nếu cần moi lại thì lấy từ đó).
+• ⚠ BÀI HỌC: phiên trước đã sửa nhầm nguyên 1 ngày trong thư mục "Pixel Flow" cũ
+  (tim/Việt hoá/nhịp chờ) — trong khi hop-in-slam đã có sẵn bản tốt hơn. Từ giờ
+  chỉ có 1 thư mục nên không lặp lại được nữa.
+
+ĐÓNG GÓI APK (Capacitor 6):
+• LỆNH DUY NHẤT: **npm run apk** (scripts/build-apk.mjs) — build web (dist/ +
+  optimize-art) → tạo android/ nếu chưa có (cap add) hoặc cap sync → ghi
+  local.properties → setup-android.mjs → gradlew assembleDebug → copy ra
+  HopIn-v0.0.<số commit>-debug.apk ở gốc repo (~8MB).
+  ⚠ ĐỪNG chỉ chạy gradlew: không build+sync lại thì APK vẫn ôm bản web cũ.
+• capacitor.config.ts: appId com.hopin.game, appName "Hop In!", webDir dist.
+  vite base:"./" nên asset chạy được trong WebView (không cần sửa).
+• TOOLCHAIN CÀI CỤC BỘ (không admin, không đụng PATH) ở C:\CuongPC\android-tools\:
+  jdk\jdk-17.* (Temurin) + android-sdk\ (cmdline-tools, platform-tools,
+  platforms;android-34, build-tools;34.0.0). Đừng tải lại — kiểm tra thư mục trước.
+• KHÔNG TRACK android/ (user 2026-08-02): cả thư mục là sinh tự động →
+  .gitignore bỏ android/ + *.apk + *.aab. Thứ được track (đủ dựng lại y hệt):
+  capacitor.config.ts, scripts/setup-android.mjs, scripts/build-apk.mjs, dep
+  @capacitor/* trong package.json. Xoá android/ rồi npm run apk là ra lại.
+• scripts/setup-android.mjs = mọi tuỳ biến tay trên thư mục sinh tự động (chạy
+  lại nhiều lần vẫn an toàn): (1) sinh toàn bộ launcher icon từ art game
+  (public/art/slime3D.png, ô giữa = slime cyan) — cắt nền trắng bằng luật "sáng
+  VÀ không bão hoà" nên giữ được highlight trắng của khối slime, đặt trên nền
+  gradient navy #3d4370→#20233a, đủ 5 mật độ + adaptive icon; (2) khoá
+  android:screenOrientation="portrait" trong AndroidManifest.
+• 2 CÁI BẪY ĐÃ VẤP: local.properties PHẢI dùng dấu / (file .properties coi \ là
+  ký tự escape → "C:\..." hỏng thành "C:..." → lỗi "IOException: The filename,
+  directory name, or volume label syntax is incorrect"); và sdkmanager --licenses
+  KHÔNG nhận "y" qua pipe → ghi thẳng file hash vào android-sdk\licenses\.
+• APK hiện tại = DEBUG (ký debug key): cài thẳng vào máy test được, KHÔNG lên
+  Play Store được. Muốn release phải tạo keystore + ký (build-apk.mjs đã chừa
+  sẵn cờ --release). Build stamp trong game (v0.0.<commit> · hash) lấy từ git,
+  không liên quan versionCode của APK.
+
 ────────────────────────────────────────────────────────────────────────────
 GHI CHÚ CHUNG
 ────────────────────────────────────────────────────────────────────────────
-• Stack: Phaser 3 + TypeScript + Vite. Chạy web; sau đóng gói APK bằng Capacitor.
+• Stack: Phaser 3 + TypeScript + Vite. Web + đóng gói APK bằng Capacitor.
 • Kiểm tra biên dịch:  npx tsc --noEmit
 • Chạy dev:            npm run dev
+• Đóng gói APK:        npm run apk
 • Level đặc biệt test obstacle: mở ?level=999
 ================================================================================
