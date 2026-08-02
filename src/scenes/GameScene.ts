@@ -3036,119 +3036,89 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(D + 2);
     // Music + SFX toggles (procedural audio — no files, so no licensing).
-    const mkToggle = (ty: number, label: string, get: () => boolean, set: (v: boolean) => void) => {
-      const btn = this.add
-        .text(GAME_W / 2, ty, "", {
-          fontFamily: "Arial, sans-serif",
-          fontStyle: "bold",
-          fontSize: "15px",
-          color: "#ffffff",
-          padding: { x: 16, y: 7 },
+    // Uniform rows (user 2026-08-02 "cùng màu, xếp ngay ngắn"): every setting is the
+    // SAME green pill — same size, even 46px vertical rhythm. Toggle state lives in
+    // the label text (BẬT/TẮT), not in the button colour.
+    const ROW_W = 244;
+    const ROW_H = 38;
+    const rows: { g: Phaser.GameObjects.Graphics; tx: Phaser.GameObjects.Text; hit: Phaser.GameObjects.Rectangle }[] = [];
+    const mkRow = (ty: number, label: string, onTap: () => void) => {
+      const g = this.add.graphics().setDepth(D + 2);
+      g.fillStyle(0x3a8a3a, 1);
+      g.fillRoundedRect(GAME_W / 2 - ROW_W / 2, ty - ROW_H / 2, ROW_W, ROW_H, 12);
+      g.lineStyle(3, 0x1f6329, 1);
+      g.strokeRoundedRect(GAME_W / 2 - ROW_W / 2, ty - ROW_H / 2, ROW_W, ROW_H, 12);
+      const tx = this.add
+        .text(GAME_W / 2, ty, label, {
+          fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "15px", color: "#ffffff",
         })
         .setOrigin(0.5)
-        .setDepth(D + 2)
+        .setDepth(D + 3);
+      const hit = this.add
+        .rectangle(GAME_W / 2, ty, ROW_W, ROW_H, 0xffffff, 0.001)
+        .setDepth(D + 4)
         .setInteractive({ useHandCursor: true });
-      const refresh = () => {
-        const on = get();
-        btn.setText(`${label}: ${on ? tr("on") : tr("off")}`);
-        btn.setBackgroundColor(on ? "#3a8a3a" : "#9a9a9a");
-      };
-      refresh();
-      btn.on("pointerdown", () => {
-        set(!get());
-        refresh();
-      });
-      return btn;
+      hit.on("pointerdown", onTap);
+      const row = { g, tx, hit };
+      rows.push(row);
+      return row;
     };
+
     Audio.unlock(); // opening settings is a user gesture — safe to init audio
-    const sfxBtn = mkToggle(y0 + 84, tr("sfx"), () => Audio.isSfxOn, (v) => Audio.setSfx(v));
+    const rowYs = [84, 130, 176, 222, 268].map((dy) => y0 + dy);
+
+    const mkToggle = (ty: number, label: string, get: () => boolean, set: (v: boolean) => void) => {
+      const row = mkRow(ty, "", () => {
+        set(!get());
+        row.tx.setText(`${label}: ${get() ? tr("on") : tr("off")}`);
+      });
+      row.tx.setText(`${label}: ${get() ? tr("on") : tr("off")}`);
+      return row;
+    };
+    mkToggle(rowYs[0], tr("sfx"), () => Audio.isSfxOn, (v) => Audio.setSfx(v));
     // Step guide (user 2026-07-30): default OFF; when ON the game points at the next move.
-    const guideBtn = mkToggle(y0 + 124, tr("guide"), () => this.guideMode, (v) => {
+    mkToggle(rowYs[1], tr("guide"), () => this.guideMode, (v) => {
       this.guideMode = v;
       try { localStorage.setItem("hopin_guide", v ? "1" : "0"); } catch { /* ignore */ }
       if (!v) this.clearGuidePointer();
     });
 
-    // Language switch (user 2026-08-02): Tiếng Việt default, tap flips vi ↔ en.
-    // Rebuild the modal + booster bar so the change shows instantly; the rest of the
-    // HUD keeps universal words (Level/Home/Coin) so no live redraw is needed there.
-    const langBtn = this.add
-      .text(GAME_W / 2, y0 + 164, tr("language"), {
-        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "15px",
-        color: "#ffffff", backgroundColor: "#2f6fd0", padding: { x: 16, y: 7 },
-      })
-      .setOrigin(0.5)
-      .setDepth(D + 2)
-      .setInteractive({ useHandCursor: true });
-    langBtn.on("pointerdown", () => {
+    // Language switch (user 2026-08-02): Tiếng Việt default, tap flips vi ↔ en and the
+    // modal reopens fully redrawn (booster bar too). The rest of the HUD keeps
+    // universal words (Level/Home/Coin) so no live redraw is needed there.
+    mkRow(rowYs[2], tr("language"), () => {
       setLang(getLang() === "vi" ? "en" : "vi");
       this.drawBoosters();
       kill();
-      this.openSettings(); // reopen, fully redrawn in the new language
+      this.openSettings();
     });
 
     // Reset progress — replay from Level 1 (keeps gold; re-arms the tutorials). Two-tap
     // confirm so a stray tap can't wipe the player's climb (user 2026-07-31).
     let resetArmed = false;
-    const reset = this.add
-      .text(GAME_W / 2, y0 + 212, tr("resetBtn"), {
-        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "15px",
-        color: "#ffffff", backgroundColor: "#b23a2a", padding: { x: 16, y: 7 },
-      })
-      .setOrigin(0.5)
-      .setDepth(D + 2)
-      .setInteractive({ useHandCursor: true });
-    reset.on("pointerdown", () => {
+    const resetRow = mkRow(rowYs[3], tr("resetBtn"), () => {
       if (!resetArmed) {
         resetArmed = true;
-        reset.setText(tr("resetConfirm"));
+        resetRow.tx.setText(tr("resetConfirm"));
         this.time.delayedCall(2600, () => {
-          if (reset.active) { resetArmed = false; reset.setText(tr("resetBtn")); }
+          if (resetRow.tx.active) { resetArmed = false; resetRow.tx.setText(tr("resetBtn")); }
         });
         return;
       }
       this.resetProgress();
     });
 
-    // Jump back to the level picker.
-    const select = this.add
-      .text(GAME_W / 2, y0 + 260, tr("levelsBtn"), {
-        fontFamily: "Arial, sans-serif",
-        fontStyle: "bold",
-        fontSize: "16px",
-        color: "#ffffff",
-        backgroundColor: "#3a8a3a",
-        padding: { x: 20, y: 8 },
-      })
-      .setOrigin(0.5)
-      .setDepth(D + 2)
-      .setInteractive({ useHandCursor: true });
-    const close = this.add
-      .text(GAME_W / 2, y0 + ph - 28, tr("close"), {
-        fontFamily: "Arial, sans-serif",
-        fontStyle: "bold",
-        fontSize: "16px",
-        color: "#ffffff",
-        backgroundColor: "#8a5a12",
-        padding: { x: 18, y: 7 },
-      })
-      .setOrigin(0.5)
-      .setDepth(D + 2)
-      .setInteractive({ useHandCursor: true });
+    // Back to the Home screen + Close — same pill as everything above.
+    mkRow(rowYs[4], tr("levelsBtn"), () => this.scene.start("select"));
+    mkRow(y0 + ph - 30, tr("close"), () => kill());
+
     const kill = () => {
       dim.destroy();
       panel.destroy();
       title.destroy();
-      sfxBtn.destroy();
-      guideBtn.destroy();
-      langBtn.destroy();
-      reset.destroy();
-      select.destroy();
-      close.destroy();
+      for (const r of rows) { r.g.destroy(); r.tx.destroy(); r.hit.destroy(); }
     };
     dim.on("pointerdown", kill);
-    close.on("pointerdown", kill);
-    select.on("pointerdown", () => this.scene.start("select"));
   }
 
   // Wipe level progress so the player restarts at Level 1. Keeps gold/boosters bought,
