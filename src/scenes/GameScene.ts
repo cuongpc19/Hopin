@@ -191,27 +191,27 @@ interface BoosterDef {
 }
 const BOOSTERS: BoosterDef[] = [
   {
-    key: "add", img: "booster-add", label: "Add", cost: 300, unlock: 6,
+    key: "add", img: "booster-add", label: "Add", cost: 450, unlock: 6,
     title: "New Booster: Add!",
     desc: "Adds an extra waiting bay, so one more car can park at a time.",
   },
   {
-    key: "hand", img: "booster-hand", label: "Grab", cost: 500, unlock: 11,
+    key: "hand", img: "booster-hand", label: "Grab", cost: 750, unlock: 11,
     title: "New Booster: Grab!",
     desc: "Instantly send out ANY car from the queue — skip the front-only rule.",
   },
   {
-    key: "refresh", img: "booster-refresh", label: "Shuffle", cost: 600, unlock: 16,
+    key: "refresh", img: "booster-refresh", label: "Shuffle", cost: 900, unlock: 16,
     title: "New Booster: Shuffle!",
     desc: "Re-rolls the colors of the queued cars, bringing up a color you need.",
   },
   {
-    key: "magnet", img: "booster-magnet", label: "Magnet", cost: 600, unlock: 21,
+    key: "magnet", img: "booster-magnet", label: "Magnet", cost: 900, unlock: 21,
     title: "New Booster: Magnet!",
     desc: "Tap a slime and a VIP car reels in the whole connected cluster of that color.",
   },
 ];
-const FREE_GIFT = 3; // free copies granted the first time you reach a booster's unlock level
+const FREE_GIFT = 2; // free copies granted the first time you reach a booster's unlock level
 
 // Textures for obstacle tiles + special cars; placeholder-drawn until real PNGs exist.
 const OBSTACLE_ART_KEYS = ["rock-hard", "rock-soft", "rock-soft-cracked", "wood", "car-hammer", "car-wood"];
