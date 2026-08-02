@@ -2697,7 +2697,7 @@ export class GameScene extends Phaser.Scene {
     return out;
   }
 
-  // A VIP car appears and reels in the given cluster of slimes, one every ~90ms,
+  // A VIP car appears and reels in the given cluster of slimes, one every ~40ms,
   // then drives off once full (handled by the runner boarding code).
   private spawnVipCollector(color: number, group: number[]) {
     const remaining = group.filter((i) => this.keys[i] && this.level.board[i] === color);
@@ -2707,6 +2707,7 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     const view = this.makeVipView(color, total);
+    view.waiting = true; // magnet slimes use the runners' RUSH lane (3× speed) — faster suction, user 2026-08-02
     // Park the VIP car down near the waiting row, centred — slimes reel all the
     // way down to it (just above the waiting bays).
     const cx = GAME_W / 2;
@@ -2717,9 +2718,9 @@ export class GameScene extends Phaser.Scene {
     view.container.setScale(baseScale * 0.2);
     this.tweens.add({ targets: view.container, scale: baseScale, duration: 300, ease: "Back.out" });
 
-    // reel slimes in quickly, one at a time
+    // reel slimes in quickly, one at a time (90 → 40ms: snappier suction, user 2026-08-02)
     const timer = this.time.addEvent({
-      delay: 90,
+      delay: 40,
       loop: true,
       callback: () => {
         if (!view.container.scene) {
