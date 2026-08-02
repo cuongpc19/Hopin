@@ -1054,6 +1054,15 @@ GỘP BẢN (user: "chỉ còn bản Hop-In"):
   sang tông đó. buildBackground vẽ TRÀN thêm 1 màn ra ngoài mỗi mép (bleed) để
   hoạ tiết không bao giờ hụt nếu camera lộ ra ngoài khung thiết kế.
   ⚠ Đổi màu nền chơi thì phải sửa CẢ 3 chỗ: BG_CHECKER_DARK, camera, page.
+• 2 DẢI TỐI Ở HOME (user 2026-08-02 "sao có 2 dải màu filter trên/dưới"):
+  buildBackground của LevelSelectScene phủ 2 hình chữ nhật 0x0a2410 alpha .35
+  (trên 64px, dưới 84px) làm vignette cho HUD/nav. Mép dưới của chúng cắt NGANG
+  bức tranh thành đường thẳng cứng → nhìn như bộ lọc dán đè.
+  FIX: dải DƯỚI BỎ HẲN — thanh nav dưới (0x0e2c1c alpha 1, cao 74) vốn đã che
+  kín vùng đó, hình chữ nhật 84px chỉ thừa ra 10px lòi lên trên. Dải TRÊN đổi
+  thành FADE MỀM: 24 lát ngang, alpha 0.34*(1-t)² xuống 0 trong 96px → không
+  còn mép, HUD vẫn đủ tương phản. (Vẽ bằng nhiều lát thay vì gradient để chạy
+  đúng trên cả renderer Canvas lẫn WebGL.)
 • CHƠI LẠI TỪ ĐẦU (Settings → Reset) giờ XOÁ LUÔN VÍ VÀ BOOSTER (user
   2026-08-02). resetProgress xoá: pf_gold, pf_boost_gifted, pf_boost_counts,
   pf_rewarded (để tiền thưởng first-clear kiếm lại được), pf_twin_intro,

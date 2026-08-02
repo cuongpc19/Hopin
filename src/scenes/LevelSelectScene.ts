@@ -86,10 +86,20 @@ export class LevelSelectScene extends Phaser.Scene {
     const img = this.add.image(GAME_W / 2, GAME_H / 2 - RAISE, key).setDepth(-100);
     const sc = Math.max(GAME_W / img.width, GAME_H / img.height);
     img.setScale(sc);
+    // Top shade so the HUD row keeps its contrast over the bright forest art. It used to
+    // be a flat 64px rectangle, whose bottom edge cut a hard line straight across the
+    // picture and read as a "filter band" (user 2026-08-02); it's now a soft fade that
+    // dissolves into the art with no visible seam. The matching band along the BOTTOM is
+    // gone entirely — the nav bar there is fully opaque and already covers that strip, so
+    // all the rectangle ever contributed was a 10px lip peeking out above it.
     const vig = this.add.graphics().setDepth(-98);
-    vig.fillStyle(0x0a2410, 0.35);
-    vig.fillRect(0, 0, GAME_W, 64);
-    vig.fillRect(0, GAME_H - 84, GAME_W, 84);
+    const FADE_H = 96;
+    const STEPS = 24;
+    for (let i = 0; i < STEPS; i++) {
+      const t = i / STEPS; // 0 at the very top → 1 where the fade ends
+      vig.fillStyle(0x0a2410, 0.34 * (1 - t) * (1 - t)); // ease out, so the tail is invisible
+      vig.fillRect(0, (FADE_H * i) / STEPS, GAME_W, FADE_H / STEPS + 1); // +1: no hairline gaps
+    }
   }
 
   // ---- Sân khấu Home (user 2026-08-01: BỎ dây level/bản đồ cuộn) ------------
