@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { t as tr, tf as trf, getLang, setLang, type Lang } from "../game/i18n";
+import { getLives, msToNextHeart, formatCountdown, showHeartsModal } from "../game/lives";
 import { GAME_W, GAME_H } from "./GameScene";
 import { levelDifficulty } from "../game/level";
 import {
@@ -22,6 +23,9 @@ const LEVEL_COUNT = 185; // L1-185 (kid pack L200-300 + rock-wall/logic L301-330
 export class LevelSelectScene extends Phaser.Scene {
   private gold = 0;
   private viewTop = 0;
+  private heartTx?: Phaser.GameObjects.Text; // hearts held (top-bar pill)
+  private goldTx?: Phaser.GameObjects.Text; // Coin held — refreshed after buying hearts
+  private heartTimerTx?: Phaser.GameObjects.Text; // countdown to the next heart
 
   constructor() {
     super("select");
@@ -141,6 +145,7 @@ export class LevelSelectScene extends Phaser.Scene {
       .setDepth(D + 3)
       .setInteractive({ useHandCursor: true });
     hit.on("pointerdown", () => {
+      if (!this.canPlay()) return;
       this.tweens.add({ targets: t, scale: 0.9, duration: 90, yoyo: true, onComplete: () => this.scene.start("game", { level: current }) });
     });
   }
@@ -153,10 +158,25 @@ export class LevelSelectScene extends Phaser.Scene {
     // Avatar góc trái = con slime Ở GIỮA nav (start-slime), không khung xanh (user 2026-08-02).
     this.add.image(42, y, "start-slime").setDisplaySize(54, 54).setDepth(D + 1);
 
-    this.statPill(150, y, 120, 0xef3f5a, "❤", "5", "", "#ffffff", 0xffffff, 15, true);
+    this.heartTx = this.statPill(150, y, 120, 0xef3f5a, "❤", String(getLives()), "", "#ffffff", 0xffffff, 15, true);
+    // Countdown chip under the pill — only while hearts are regenerating.
+    this.heartTimerTx = this.add
+      .text(150, y + 30, "", {
+        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "13px",
+        color: "#ffffff", stroke: "#8a2a2a", strokeThickness: 4,
+      })
+      .setOrigin(0.5)
+      .setDepth(D + 2);
+    this.refreshHearts();
+    this.time.addEvent({ delay: 1000, loop: true, callback: () => this.refreshHearts() });
+    this.add
+      .rectangle(150, y, 120, 40, 0xffffff, 0.001)
+      .setDepth(D + 3)
+      .setInteractive({ useHandCursor: true })
+      .on("pointerdown", () => this.openHearts());
     // Gold coin: a slightly bigger golden disc with a dark-gold rim, no letter.
     // Wider pill so multi-digit gold never overflows on phone (user 2026-08-02). Value centred.
-    this.statPill(334, y, 158, 0xf9c22e, "", String(this.gold), "＋", "#8a5a10", 0xc98a10, 17, true);
+    this.goldTx = this.statPill(334, y, 158, 0xf9c22e, "", String(this.gold), "＋", "#8a5a10", 0xc98a10, 17, true);
 
     const s = this.add
       .circle(GAME_W - 34, y, 22, 0xe23b3b, 1) // đỏ như gear trong game (user 2026-08-02)
@@ -165,6 +185,35 @@ export class LevelSelectScene extends Phaser.Scene {
       .setInteractive({ useHandCursor: true });
     this.add.text(GAME_W - 34, y - 1, "⚙", { fontSize: "24px", color: "#ffffff" }).setOrigin(0.5).setDepth(D + 1);
     s.on("pointerdown", () => this.openSettings());
+  }
+
+  // Keep the hearts pill and its countdown in step with the regen clock.
+  private refreshHearts() {
+    const n = getLives();
+    this.heartTx?.setText(String(n));
+    const ms = msToNextHeart();
+    this.heartTimerTx?.setText(ms > 0 ? formatCountdown(ms) : "");
+  }
+
+  // The hearts panel (info + buy). Shared with GameScene so pricing lives in one place.
+  private openHearts() {
+    showHeartsModal(this, {
+      getGold: () => this.gold,
+      spendGold: (n) => {
+        this.gold = Math.max(0, this.gold - n);
+        try { localStorage.setItem("pf_gold", String(this.gold)); } catch { /* ignore */ }
+        this.goldTx?.setText(String(this.gold));
+      },
+      onChanged: () => this.refreshHearts(),
+    });
+  }
+
+  // Gate every route into a level: you need a heart in the bank to play. At 0 the
+  // hearts panel opens instead (buy with Coin, or watch the refill timer).
+  private canPlay(): boolean {
+    if (getLives() > 0) return true;
+    this.openHearts();
+    return false;
   }
 
   // Level-select mode: false = Sequential (default), true = Any Level.
@@ -320,6 +369,7 @@ export class LevelSelectScene extends Phaser.Scene {
         return;
       }
       close();
+      if (!this.canPlay()) return;
       this.scene.start("game", { level: n });
     });
 
@@ -386,7 +436,7 @@ export class LevelSelectScene extends Phaser.Scene {
     rim = 0xffffff,
     iconR = 15,
     centerVal = false, // căn GIỮA value trong khoảng phải của icon (dùng cho ô Tim)
-  ) {
+  ): Phaser.GameObjects.Text {
     const D = 60;
     const g = this.add.graphics().setDepth(D);
     // Pill GỖ như trong game (user 2026-08-02): đáy tối → thân gỗ → đỉnh bắt sáng + viền sẫm.
@@ -416,16 +466,17 @@ export class LevelSelectScene extends Phaser.Scene {
         })
         .setOrigin(0.5)
         .setDepth(D + 2);
+    let valueTx: Phaser.GameObjects.Text;
     if (centerVal) {
       // căn GIỮA số trong vùng giữa icon và mép phải — né nút "+" nếu có tail
       const rightB = tail === "＋" || tail === "+" ? x + w / 2 - 32 : x + w / 2 - 8;
       const vx = (x - w / 2 + 17 + iconR + rightB) / 2;
-      this.add
+      valueTx = this.add
         .text(vx, y, value, { fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "18px", color: "#ffffff" })
         .setOrigin(0.5, 0.5)
         .setDepth(D + 2);
     } else {
-      this.add
+      valueTx = this.add
         .text(x - w / 2 + 36, y, value, { fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "18px", color: "#ffffff" })
         .setOrigin(0, 0.5)
         .setDepth(D + 2);
@@ -442,6 +493,7 @@ export class LevelSelectScene extends Phaser.Scene {
         .setOrigin(0.5)
         .setDepth(D + 2);
     }
+    return valueTx;
   }
 
   // ---- Bottom nav -----------------------------------------------------

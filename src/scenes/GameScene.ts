@@ -15,6 +15,7 @@ import {
 } from "../game/level";
 import { Audio } from "../game/audio";
 import { t as tr, tf as trf, getLang, setLang } from "../game/i18n";
+import { getLives, spendLife, showHeartsModal } from "../game/lives";
 import {
   awardClovers,
   isEventUnlocked,
@@ -386,6 +387,7 @@ export class GameScene extends Phaser.Scene {
     this.load.image("start-signal", "art/start-signal.png"); // start marker at the car spawn
     this.load.image("victory", "art/victory.png"); // win-screen hero art
     this.load.image("out-of-space", "art/outofspace.png"); // queue-full (lose) hero art
+    this.load.image("heart-icon", "art/heart.png?v=1"); // hearts panel art (shared with Home)
     this.load.image("car-vip", "art/car-vip.png"); // golden/purple VIP car for the Magnet booster
     for (const b of ["add", "hand", "refresh", "magnet"]) {
       this.load.image(`booster-${b}`, `art/booster-${b}.png`);
@@ -3152,7 +3154,12 @@ export class GameScene extends Phaser.Scene {
     });
 
     // Back to the Home screen + Close — same pill as everything above.
-    mkRow(rowYs[4], tr("levelsBtn"), () => this.scene.start("select"));
+    mkRow(rowYs[4], tr("levelsBtn"), () => {
+      // Walking out of a live level is a failed attempt too — otherwise quitting when a
+      // loss looks certain would dodge the heart (user 2026-08-02).
+      if (!this.won && !this.lost) spendLife();
+      this.scene.start("select");
+    });
     mkRow(y0 + ph - 30, tr("close"), () => kill());
 
     const kill = () => {
@@ -3162,6 +3169,23 @@ export class GameScene extends Phaser.Scene {
       for (const r of rows) { r.g.destroy(); r.tx.destroy(); r.hit.destroy(); }
     };
     dim.on("pointerdown", kill);
+  }
+
+  // Out of hearts after a failed attempt: buy with Coin or watch the refill timer, with
+  // Home as the way out. Closing with a heart in hand drops straight back into the level.
+  private showOutOfHearts() {
+    let handled = false;
+    showHeartsModal(this, {
+      getGold: () => this.gold,
+      spendGold: (n) => this.addGold(-n),
+      onClose: () => {
+        if (handled) return;
+        handled = true;
+        if (getLives() > 0) this.startLevel(this.levelNum);
+        else this.scene.start("select");
+      },
+      extra: { label: tr("home"), onTap: () => { handled = true; this.scene.start("select"); } },
+    });
   }
 
   // Wipe level progress so the player restarts at Level 1. Keeps gold/boosters bought,
@@ -5879,11 +5903,17 @@ export class GameScene extends Phaser.Scene {
     const gap = 14;
     const bw = (btnW - gap) / 2;
     const by = reviveY + 60;
+    // A failed attempt costs ONE heart the moment the player gives up on it — retry or
+    // walk away, same price (user 2026-08-02). Revive is the paid escape and is free of
+    // hearts, so the deduction lives here on the two "attempt over" buttons.
     mkBtn(cx - gap / 2 - bw / 2, by, bw, 46, tr("replay"), 0xd98a2b, 0xa5610f, () => {
+      const left = spendLife();
       closeAll();
+      if (left <= 0) { this.showOutOfHearts(); return; } // that was the last heart — can't start again
       this.startLevel(this.levelNum);
     });
     mkBtn(cx + gap / 2 + bw / 2, by, bw, 46, tr("home"), 0x6d7b8a, 0x49525d, () => {
+      spendLife();
       closeAll();
       this.scene.start("select");
     });

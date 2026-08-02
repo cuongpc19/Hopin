@@ -138,6 +138,14 @@ const S: Record<string, { vi: string; en: string }> = {
   // "|"-joined praise words for the rare big slime — split before use.
   niceWords: { vi: "Nice!|Great!|Wow!|Cool!", en: "Nice!|Great!|Wow!|Cool!" },
 
+  // ---- hearts (lives) ----
+  heartsTitle: { vi: 'Tim của bạn', en: 'Your Hearts' },
+  heartsOut: { vi: 'Hết tim rồi!', en: 'Out of Hearts!' },
+  heartsFull: { vi: 'Tim đã đầy — chơi thoải mái!', en: 'Hearts are full — play on!' },
+  heartsNext: { vi: 'Tim tiếp theo sau {t}', en: 'Next heart in {t}' },
+  heartsBuy1: { vi: 'Mua 1 tim — {n} Coin', en: 'Buy 1 heart — {n} Coin' },
+  heartsBuyFull: { vi: 'Đầy 5 tim — {n} Coin', en: 'Refill 5 hearts — {n} Coin' },
+
   // ---- in-game settings ----
   settings: { vi: "CÀI ĐẶT", en: "SETTINGS" },
   sfx: { vi: "🔊 Âm thanh", en: "🔊 Sound FX" },
