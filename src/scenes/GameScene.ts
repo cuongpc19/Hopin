@@ -3076,6 +3076,78 @@ export class GameScene extends Phaser.Scene {
   }
 
   // Minimal settings overlay (placeholder — sound/music toggles come later).
+  // "Go Home?" — quitting a level that's still live costs one heart, so name the price
+  // before charging it (user 2026-08-02: the deduction was silent and felt like it never
+  // happened). Staying just closes this box; leaving spends the heart and exits.
+  // `killSettings` tears down the settings panel underneath once the player commits.
+  private confirmQuitToHome(killSettings: () => void) {
+    const C = 260; // above the settings overlay (200)
+    const pw = 306;
+    const ph = 210;
+    const x0 = GAME_W / 2 - pw / 2;
+    const y0 = GAME_H / 2 - ph / 2;
+    const objs: Phaser.GameObjects.GameObject[] = [];
+    const dim = this.add
+      .rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0x000000, 0.55)
+      .setDepth(C)
+      .setInteractive();
+    objs.push(dim);
+    const panel = this.add.graphics().setDepth(C + 1);
+    panel.fillStyle(0xf7edd0, 1);
+    panel.fillRoundedRect(x0, y0, pw, ph, 18);
+    panel.lineStyle(4, 0x8a5a12, 1);
+    panel.strokeRoundedRect(x0, y0, pw, ph, 18);
+    objs.push(panel);
+    objs.push(
+      this.add
+        .text(GAME_W / 2, y0 + 38, tr("quitTitle"), {
+          fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "21px", color: "#6a4a12",
+        })
+        .setOrigin(0.5)
+        .setDepth(C + 2)
+    );
+    // Price line: the sentence plus the real heart sprite, so the cost is unmistakable.
+    const msg = this.add
+      .text(GAME_W / 2 - 15, y0 + 88, tr("quitBody"), {
+        fontFamily: "Arial, sans-serif", fontSize: "15px", color: "#6a4a12",
+      })
+      .setOrigin(0.5)
+      .setDepth(C + 2);
+    objs.push(msg);
+    if (this.textures.exists("heart-icon")) {
+      const h = this.add.image(msg.x + msg.width / 2 + 18, y0 + 88, "heart-icon").setDepth(C + 2);
+      h.setScale(26 / h.width);
+      objs.push(h);
+    }
+
+    const closeConfirm = () => objs.forEach((o) => o.destroy());
+    const stay = this.add
+      .text(GAME_W / 2 - 70, y0 + ph - 44, tr("quitStay"), {
+        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "16px", color: "#ffffff",
+        backgroundColor: "#3a8a3a", padding: { x: 24, y: 9 },
+      })
+      .setOrigin(0.5)
+      .setDepth(C + 2)
+      .setInteractive({ useHandCursor: true });
+    const leave = this.add
+      .text(GAME_W / 2 + 66, y0 + ph - 44, tr("quitLeave"), {
+        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "15px", color: "#ffffff",
+        backgroundColor: "#c8392e", padding: { x: 18, y: 9 },
+      })
+      .setOrigin(0.5)
+      .setDepth(C + 2)
+      .setInteractive({ useHandCursor: true });
+    objs.push(stay, leave);
+    stay.on("pointerdown", closeConfirm);
+    dim.on("pointerdown", closeConfirm);
+    leave.on("pointerdown", () => {
+      closeConfirm();
+      killSettings();
+      spendLife();
+      this.scene.start("select");
+    });
+  }
+
   private openSettings() {
     const D = 200;
     const pw = 300;
@@ -3175,10 +3247,12 @@ export class GameScene extends Phaser.Scene {
 
     // Back to the Home screen + Close — same pill as everything above.
     mkRow(rowYs[4], tr("levelsBtn"), () => {
-      // Walking out of a live level is a failed attempt too — otherwise quitting when a
-      // loss looks certain would dodge the heart (user 2026-08-02).
-      if (!this.won && !this.lost) spendLife();
-      this.scene.start("select");
+      // Walking out of a LIVE level is a failed attempt too — otherwise quitting when a
+      // loss looks certain would dodge the heart (user 2026-08-02). That charge used to be
+      // silent, which read as "no heart was taken at all", so ask first and name the price.
+      // Once the level is already won/lost there is nothing to charge — leave straight away.
+      if (this.won || this.lost) { this.scene.start("select"); return; }
+      this.confirmQuitToHome(kill);
     });
     mkRow(y0 + ph - 30, tr("close"), () => kill());
 

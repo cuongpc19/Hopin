@@ -144,6 +144,11 @@ const S: Record<string, { vi: string; en: string }> = {
     en: "The bays are full and no car can reach another slime.\nRevive for one more bay, or keep trying?",
   },
   stuckKeep: { vi: "Để tôi thử tiếp", en: "Let me keep trying" },
+  // ---- confirm before walking out of a live level (costs a heart) ----
+  quitTitle: { vi: "Về Home?", en: "Go Home?" },
+  quitBody: { vi: "Bỏ dở level này sẽ mất 1", en: "Quitting this level costs 1" },
+  quitStay: { vi: "Ở LẠI", en: "STAY" },
+  quitLeave: { vi: "Về Home", en: "Leave" },
 
   // ---- hearts (lives) ----
   heartsTitle: { vi: 'Tim của bạn', en: 'Your Hearts' },

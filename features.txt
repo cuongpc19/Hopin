@@ -1018,6 +1018,15 @@ GỘP BẢN (user: "chỉ còn bản Hop-In"):
   - Thế kẹt thật (cả 5 ô đều đã chứng minh vô ích) vẫn thua theo đường cũ.
 • optimize-art: thêm "tmp" vào danh sách thư mục bỏ khỏi dist (art/tmp ~18MB là
   thư mục nháp, gitignore nhưng vite vẫn copy cả public/).
+• XÁC NHẬN TRƯỚC KHI VỀ HOME GIỮA VÁN (user 2026-08-02): Settings → 🏠 Home khi
+  level ĐANG CHƠI giờ hiện hộp confirmQuitToHome ("Về Home? Bỏ dở level này sẽ
+  mất 1 ❤" + art tim thật) — Ở LẠI / Về Home. Chỉ bấm "Về Home" mới spendLife().
+  Level đã thắng/thua rồi thì đi thẳng, không hỏi (không còn gì để trừ).
+  ⚠ LÝ DO: tim VẪN LUÔN bị trừ đúng (thua→Replay, thua→Home, Settings→Home) —
+  nhưng trừ ÂM THẦM, trong game lại KHÔNG hiển thị số tim ở đâu, cộng thêm hồi
+  tim chỉ 5 phút/quả (REGEN_MS) → user tưởng tính năng chưa có. Đây là vấn đề
+  PHẢN HỒI, không phải logic. Còn 3 việc user chưa chọn làm: hiệu ứng "-1 ❤",
+  hiện số tim trên HUD trong game, và tăng thời gian hồi tim.
 
 ────────────────────────────────────────────────────────────────────────────
 GHI CHÚ CHUNG
