@@ -7,9 +7,13 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build && node scripts/optimize-art.mjs",
     "preview": "vite preview",
+    "apk": "node scripts/build-apk.mjs",
     "deploy": "npm run build && gh-pages -d dist -f"
   },
   "dependencies": {
+    "@capacitor/android": "^6.2.1",
+    "@capacitor/cli": "^6.2.1",
+    "@capacitor/core": "^6.2.1",
     "phaser": "^3.90.0"
   },
   "devDependencies": {

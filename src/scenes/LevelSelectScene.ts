@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { GAME_W, GAME_H } from "./GameScene";
 import { levelDifficulty, type Difficulty } from "../game/level";
+import { MAX_HEARTS, getHearts, heartsMsToNext } from "../game/hearts";
 import {
   getProgress,
   isEventUnlocked,
@@ -76,7 +77,7 @@ export class LevelSelectScene extends Phaser.Scene {
 
     // Discoverability: make it clear every level is pickable.
     this.add
-      .text(GAME_W / 2, this.viewTop - 12, "Tap any level to play · Drag to scroll", {
+      .text(GAME_W / 2, this.viewTop - 12, "Chạm level để chơi · Kéo để cuộn", {
         fontFamily: "Arial, sans-serif",
         fontStyle: "bold",
         fontSize: "12px",
@@ -324,7 +325,18 @@ export class LevelSelectScene extends Phaser.Scene {
             .setStrokeStyle(4, 0xe23b3b, 0.9)
             .setDepth(200);
           this.tweens.add({ targets: ring, scale: 1.4, alpha: 0, duration: 240, onComplete: () => ring.destroy() });
-          this.toast("Locked — finish the levels in order");
+          this.toast("Chưa mở — chơi lần lượt từng level nhé");
+          return;
+        }
+        // No hearts → can't start a level. Red deny pulse + the refill countdown.
+        if (getHearts() <= 0) {
+          const ring = this.add
+            .circle(n.x, sy, n.r, 0xffffff, 0.001)
+            .setStrokeStyle(4, 0xe23b3b, 0.9)
+            .setDepth(200);
+          this.tweens.add({ targets: ring, scale: 1.4, alpha: 0, duration: 240, onComplete: () => ring.destroy() });
+          const mins = Math.max(1, Math.ceil(heartsMsToNext() / 60000));
+          this.toast(`Hết tim ❤ — ~${mins} phút nữa có tim mới`);
           return;
         }
         // quick "you picked it" pop, then launch that level
@@ -350,7 +362,10 @@ export class LevelSelectScene extends Phaser.Scene {
     av.strokeRoundedRect(14, y - 26, 56, 56, 14);
     this.add.image(42, y + 2, "avatar").setDisplaySize(46, 46).setDepth(D + 1);
 
-    this.statPill(148, y, 96, 0xef3f5a, "❤", "5", "MAX");
+    // Real heart stock; when below max the tail shows minutes until the next refill.
+    const hearts = getHearts();
+    const heartTail = hearts >= MAX_HEARTS ? "MAX" : `${Math.max(1, Math.ceil(heartsMsToNext() / 60000))}m`;
+    this.statPill(148, y, 96, 0xef3f5a, "❤", String(hearts), heartTail);
     // Gold coin: a slightly bigger golden disc with a dark-gold rim, no letter.
     this.statPill(300, y, 108, 0xf9c22e, "", String(this.gold), "＋", "#8a5a10", 0xc98a10, 17);
 
@@ -408,13 +423,13 @@ export class LevelSelectScene extends Phaser.Scene {
         .setOrigin(0.5)
         .setDepth(D + 2),
       this.add
-        .text(x0 + 22, y0 + 66, "Level Select", {
+        .text(x0 + 22, y0 + 66, "Chọn Level", {
           fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "16px", color: "#6a4a12",
         })
         .setOrigin(0, 0.5)
         .setDepth(D + 2),
       this.add
-        .text(x0 + 22, y0 + 88, "How you choose which level to play", {
+        .text(x0 + 22, y0 + 88, "Cách chọn level để chơi", {
           fontFamily: "Arial, sans-serif", fontSize: "12px", color: "#8a6a2a",
         })
         .setOrigin(0, 0.5)
@@ -458,12 +473,12 @@ export class LevelSelectScene extends Phaser.Scene {
     };
     const close = () => objs.forEach((o) => o.destroy());
     // Picking a DIFFERENT mode saves it and rebuilds the map (locks update live).
-    mkSeg(x0 + 22, "Sequential", "In order", !free, () => {
+    mkSeg(x0 + 22, "Tuần tự", "Theo thứ tự", !free, () => {
       if (!free) return close();
       this.setFreeSelect(false);
       this.scene.restart();
     });
-    mkSeg(x0 + 22 + segW + 12, "Any Level", "Free pick", free, () => {
+    mkSeg(x0 + 22 + segW + 12, "Tự do", "Chọn thoải mái", free, () => {
       if (free) return close();
       this.setFreeSelect(true);
       this.scene.restart();
@@ -475,13 +490,13 @@ export class LevelSelectScene extends Phaser.Scene {
     // fallback, so every number 1..LEVEL_COUNT is playable even if it isn't hand-designed.
     objs.push(
       this.add
-        .text(x0 + 22, segY + segH + 24, "Jump to Level", {
+        .text(x0 + 22, segY + segH + 24, "Nhảy tới Level", {
           fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "16px", color: "#6a4a12",
         })
         .setOrigin(0, 0.5)
         .setDepth(D + 2),
       this.add
-        .text(x0 + 22, segY + segH + 44, `Type a number (1–${LEVEL_COUNT}) to start there`, {
+        .text(x0 + 22, segY + segH + 44, `Nhập số (1–${LEVEL_COUNT}) để vào thẳng level đó`, {
           fontFamily: "Arial, sans-serif", fontSize: "12px", color: "#8a6a2a",
         })
         .setOrigin(0, 0.5)
@@ -497,7 +512,7 @@ export class LevelSelectScene extends Phaser.Scene {
     jumpG.lineStyle(3, 0x1c4a94, 1);
     jumpG.strokeRoundedRect(x0 + 22, jumpY, jumpW, jumpH, 12);
     const jumpLabel = this.add
-      .text(GAME_W / 2, jumpY + jumpH / 2, "✏  Enter Level Number", {
+      .text(GAME_W / 2, jumpY + jumpH / 2, "✏  Nhập số Level", {
         fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "16px", color: "#ffffff",
       })
       .setOrigin(0.5)
@@ -508,11 +523,11 @@ export class LevelSelectScene extends Phaser.Scene {
       .setInteractive({ useHandCursor: true });
     objs.push(jumpG, jumpLabel, jumpHit);
     jumpHit.on("pointerdown", () => {
-      const raw = window.prompt(`Start at which level? (1–${LEVEL_COUNT})`, String(progress));
+      const raw = window.prompt(`Vào Level số mấy? (1–${LEVEL_COUNT})`, String(progress));
       if (raw == null) return; // cancelled
       const n = parseInt(raw.trim(), 10);
       if (!Number.isFinite(n) || n < 1 || n > LEVEL_COUNT) {
-        this.toast(`Enter a number from 1 to ${LEVEL_COUNT}`);
+        this.toast(`Nhập số từ 1 đến ${LEVEL_COUNT} nhé`);
         return;
       }
       close();
@@ -770,7 +785,7 @@ export class LevelSelectScene extends Phaser.Scene {
 
     // Next-reward line.
     this.add
-      .text(textX, y0 + 61, p.done ? "All rewards claimed!" : `Next: ${rewardLabel(p.next!.reward)}`, {
+      .text(textX, y0 + 61, p.done ? "Đã nhận hết quà!" : `Tiếp theo: ${rewardLabel(p.next!.reward)}`, {
         fontFamily: "Arial, sans-serif", fontSize: "12px", color: "#e9f4d6",
       })
       .setOrigin(0, 0.5)
@@ -870,7 +885,7 @@ export class LevelSelectScene extends Phaser.Scene {
         this.add.text(nodeX + 32, ny - 8, rewardLabel(m.reward), {
           fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "14px", color: labelColor,
         }).setOrigin(0, 0.5).setDepth(D + 3),
-        this.add.text(nodeX + 32, ny + 9, claimed ? "Claimed" : `${m.threshold} ${CLOVER_ICON}`, {
+        this.add.text(nodeX + 32, ny + 9, claimed ? "Đã nhận" : `${m.threshold} ${CLOVER_ICON}`, {
           fontFamily: "Arial, sans-serif", fontSize: "11px", color: claimed ? "#7ab585" : "#92b498",
         }).setOrigin(0, 0.5).setDepth(D + 3),
       );

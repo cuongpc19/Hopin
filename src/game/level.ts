@@ -74,6 +74,43 @@ export interface Level {
   // BOARD THEME: default is the dark navy mat (bright tiles pop). Set true to use the
   // old light sand mat instead (per-level override, e.g. for a design comparison).
   lightBoard?: boolean;
+  // BIG SLIME ("slime bự"): a 2×2 slime of ONE colour that needs several matching-colour
+  // shots to collect. bigHp[i] = hits-to-clear (e.g. 4) at the TOP-LEFT cell of the block;
+  // the other three cells are 0. All four `board` cells carry that colour (for LoS/matching).
+  // A little number badge on the slime shows the remaining hits. -1/0 = an ordinary cell.
+  bigHp?: number[];
+}
+
+// Resolve every BIG SLIME in a level into its block: the anchor (top-left) carries the
+// hit count in `bigHp`; the block is the largest same-colour square growing down-right from
+// it (so the author just paints an S×S patch of one colour + one bigHp mark). Single source
+// of truth for both rendering and the win count.
+export interface BigSlimeBlock { anchor: number; size: number; color: number; hp: number; cells: number[]; }
+export function bigSlimeBlocks(level: Level): BigSlimeBlock[] {
+  const { cols, rows, board, bigHp } = level;
+  if (!bigHp) return [];
+  const blocks: BigSlimeBlock[] = [];
+  for (let i = 0; i < bigHp.length; i++) {
+    if (bigHp[i] <= 0) continue;
+    const r = Math.floor(i / cols), c = i % cols, color = board[i];
+    let S = 1;
+    for (;;) {
+      const ns = S + 1;
+      if (r + ns > rows || c + ns > cols) break;
+      let ok = true;
+      for (let rr = r; rr < r + ns && ok; rr++)
+        for (let cc = c; cc < c + ns; cc++) {
+          const j = rr * cols + cc;
+          if (board[j] !== color || (bigHp[j] > 0 && j !== i)) { ok = false; break; }
+        }
+      if (!ok) break;
+      S = ns;
+    }
+    const cells: number[] = [];
+    for (let rr = r; rr < r + S; rr++) for (let cc = c; cc < c + S; cc++) cells.push(rr * cols + cc);
+    blocks.push({ anchor: i, size: S, color, hp: bigHp[i], cells });
+  }
+  return blocks;
 }
 
 // Difficulty tiers: every 5th level is HARD, every 15th is SUPER-HARD.
@@ -172,8 +209,43 @@ function obstacleDemo(): Level {
   };
 }
 
+// Big-slime demo (open via ?level=998). One 2×2 red slime showing "4" — a red car must
+// shoot it FOUR times before it's collected — plus two teal bands to show big & ordinary
+// slimes side by side. Board is otherwise open so both are reachable from the start.
+function bigSlimeDemo(): Level {
+  const N = 25; // standard board size
+  const board = new Array(N * N).fill(-1);
+  // teal (id 4) bands top & bottom row
+  for (let c = 0; c < N; c++) {
+    board[0 * N + c] = 4;
+    board[(N - 1) * N + c] = 4;
+  }
+  // 3×3 red (id 0) GIANT slime centred (≈ 9 normal slimes)
+  const S = 3;
+  const mid = Math.floor((N - S) / 2); // 11
+  const anchor = mid * N + mid;
+  for (let rr = mid; rr < mid + S; rr++) for (let cc = mid; cc < mid + S; cc++) board[rr * N + cc] = 0;
+  const bigHp = new Array(N * N).fill(0);
+  bigHp[anchor] = 4; // needs 4 hits
+
+  return {
+    cols: N,
+    rows: N,
+    board,
+    bigHp,
+    track: "square",
+    chests: [
+      { color: 4, count: 17 },
+      { color: 4, count: 17 },
+      { color: 4, count: 16 }, // 50 teal band slimes
+      { color: 0, count: 4 }, // one red car with exactly 4 shots for the big slime
+    ],
+  };
+}
+
 export function makeLevel(levelNum = 1): Level {
   if (levelNum === 999) return obstacleDemo();
+  if (levelNum === 998) return bigSlimeDemo();
 
   // Every level uses the SQUARE ring road now (U/arch/line shapes were dropped);
   // a designed level's own `track` still overrides this if it ever sets one.
@@ -195,6 +267,7 @@ export function makeLevel(levelNum = 1): Level {
       lanes: designed.lanes,
       tray: designed.tray,
       lightBoard: designed.lightBoard,
+      bigHp: designed.bigHp ? [...designed.bigHp] : undefined,
     };
   }
 

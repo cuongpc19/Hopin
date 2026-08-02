@@ -853,6 +853,105 @@ CHỌN ART CHO LEVEL TRANH (để hợp board tối):
   L6/L9 (easy-tier, hơi dễ nhưng chấp nhận được). Muốn khó hơn: board to hơn, hoặc
   art CHI TIẾT (nhiều mảng nhỏ xen kẽ, không phải mảng to). Đòn bẩy chắc = tường đá.
 
+23) REVIVE = THÊM Ô CHỜ (2026-08-02)
+────────────────────────────────────────────────────────────────────────────
+• Thua (queue tràn / tray kẹt) → màn "Out of Space" có nút REVIVE (900 vàng).
+  ĐỔI HÀNH VI: trước đây revive DỌN SẠCH 5 ô chờ (xe đỗ bay đi hết); giờ revive
+  THÊM 1 Ô CHỜ (hàng bay rộng ra), xe đang đỗ GIỮ NGUYÊN, xe vừa bị tràn được
+  đỗ vào ô mới → chơi tiếp. (GameScene.showLoseModal → revive)
+• Xe đôi/xe 3 làm tràn: thêm ĐỦ ô cho cả nhóm (need − free, tối thiểu 1) —
+  tránh trả 900 vàng xong thua lại ngay vì nhóm vẫn không đủ chỗ.
+• CHỈ 1 LẦN/VÁN (user 2026-08-02): cờ revivedThisAttempt (reset trong
+  startLevel — Replay/level mới lại có 1 lượt). Thua lần 2 sau khi đã revive →
+  ẨN HẲN nút revive (kể cả bản xám "Need 900"), chỉ còn Replay | Home (hàng nút
+  dồn lên chỗ nút revive).
+• GIÁ HIỂN THỊ = COIN VẼ (đĩa vàng 0xf9c22e viền 0xc98a10, giống HUD/booster
+  bar) — bỏ emoji 🪙 vì trên Windows nhìn như VIÊN ĐÁ xám (user 2026-08-02).
+  Sửa luôn dòng "+50" màn thắng + toast mua booster ("900 gold").
+  layoutSlots co pitch khi hàng > 6 ô để mọi ô vẫn nằm gọn màn 480px (≤6 ô
+  pitch giữ nguyên như cũ). Booster "Add" vẫn cap 6 ô như trước.
+• Tray-stuck lose (không có xe pending): revive vẫn +1 ô trống → stage thêm
+  1 xe từ hàng đợi để tự gỡ kẹt.
+
+24) TIM (LIVES) — THUA TRỪ 1 TIM, 0 TIM KHÔNG ĐƯỢC CHƠI (2026-08-02)
+────────────────────────────────────────────────────────────────────────────
+• src/game/hearts.ts: MAX_HEARTS=5, sàn 0. Lưu pf_hearts + pf_hearts_ts.
+  HỒI TIM: +1 mỗi 20 phút (HEART_REGEN_MS), tính LƯỜI từ timestamp khi đọc —
+  không cần đồng hồ chạy, sống qua reload. Đầy 5 thì đồng hồ nghỉ.
+• THUA 1 LEVEL = -1 TIM: trừ khi user rời màn thua qua Retry/Home (revive thì
+  KHÔNG mất tim — ván còn sống). Animation (GameScene showLoseModal →
+  exitWithHeart): tim to (art/heart.png) pop giữa màn, "-1" bay lên, tim xám
+  dần + chìm xuống, kèm hàng 5 tim (đỏ = còn, xám = mất) rồi mới chuyển màn.
+• 0 TIM = KHÔNG ĐƯỢC CHƠI TIẾP:
+  - Màn thua: nút Replay XÁM (chỉ còn Home) + dòng "Out of hearts — next in ~Xm".
+  - Map (LevelSelectScene.tapAt): tap level → nhịp deny đỏ + toast đếm phút.
+  - GameScene create: vào thẳng bằng ?level=/refresh với 0 tim → đá về map.
+• Pill ❤ trên Home nối SỐ THẬT: "N + MAX" khi đầy, "N + Xm" khi đang hồi.
+• BỎ NGANG CŨNG MẤT TIM (user 2026-08-02): Settings trong ván → nút "🏠 Home"
+  (đổi từ "🗺 Levels") KHÔNG về thẳng nữa — hiện confirm "GO HOME? Quitting
+  this level costs 1 ❤" (STAY / Leave -1 ❤). Đồng ý mới trừ tim + chạy beat
+  "-1 ❤" (playHeartLoss — dùng chung với màn thua) rồi mới về map.
+  playHeartLoss set tutPaused để đóng băng ván trong lúc beat chạy.
+• ?reset=all xoá pf_hearts/pf_hearts_ts (prefix pf_) → về 5 tim. Chưa có mua
+  tim bằng vàng/xem ads — thêm sau nếu cần.
+
+25) NHỊP CHỜ NHANH HƠN + VIỆT HOÁ UI (2026-08-02)
+────────────────────────────────────────────────────────────────────────────
+• NHỊP CHỜ (beatMs, GameScene): mọi khoảng "chờ 1 nhịp" quanh thắng/thua/trừ
+  tim chạy NHANH HƠN thiết kế gốc — ×2/3 bình thường, ×1/2 ở 10 LEVEL ĐẦU
+  (user: "3s → 2s; 10 level đầu 1.5s"). Áp cho: hold trước màn thắng (750→500/
+  375ms), hold trước màn thua (650→433/325ms), toàn bộ beat "-1 ❤"
+  (1300→867/650ms). KHÔNG áp cho nhịp tutorial (700ms chờ xe đỗ) — đó là nhịp
+  dạy, không phải loading.
+• NGÔN NGỮ UI: toàn bộ câu chữ hiển thị đổi sang TIẾNG VIỆT, GIỮ NGUYÊN từ
+  thông dụng: Level, Home, Revive, Coin, GO, MAX, Booster + tên booster
+  (Add/Grab/Shuffle/Magnet), Settings, Sound FX, Close, Replay, TAP TO START,
+  Nice!/Great!/Wow!/Cool!. Tiền gọi là COIN (rewardLabel: "Gold"→"Coin").
+  Sweep: tutorial L1/xe đôi/booster, toast/notice, màn thắng/thua, confirm về
+  Home, Settings map (Tuần tự/Tự do, Nhảy tới Level), event Clover (Quà Đặc
+  Biệt, Đã nhận). Intro Đá Cứng vốn đã tiếng Việt (§21).
+
+26) ĐÓNG GÓI APK ANDROID (Capacitor) (2026-08-02)
+────────────────────────────────────────────────────────────────────────────
+• Đã cài @capacitor/core+cli+android v6; capacitor.config.ts: appId
+  "com.hopin.game", appName "Hop In!", webDir "dist". Thư mục android/ đã sinh.
+  vite.config base:"./" nên asset chạy được trong WebView (không cần sửa).
+• TOOLCHAIN CÀI CỤC BỘ (không cần admin, không đụng PATH hệ thống) ở
+  C:\CuongPC\android-tools\ : jdk\jdk-17.* (Temurin 17) + android-sdk\
+  (cmdline-tools, platform-tools, platforms;android-34, build-tools;34.0.0).
+  android/local.properties trỏ sdk.dir tới đó.
+  ⚠ local.properties PHẢI dùng dấu / (hoặc \\): file .properties coi \ là ký tự
+  escape → "C:\CuongPC\..." bị hỏng thành "C:CuongPC..." → build lỗi
+  "IOException: The filename, directory name, or volume label syntax is
+  incorrect". Đây là lỗi đã vấp 1 lần.
+  ⚠ sdkmanager --licenses KHÔNG nhận được "y" qua pipe (stdin bị chặn) → ghi
+  thẳng file hash vào android-sdk\licenses\ (android-sdk-license,
+  -preview-license, -arm-dbt-license).
+• LỆNH BUILD = **npm run apk** (scripts/build-apk.mjs làm hết): npm run build
+  (web -> dist/, optimize-art 94MB -> 3.2MB) → tạo android/ nếu chưa có (cap add)
+  hoặc cap sync nếu có rồi → ghi local.properties → chạy setup-android.mjs →
+  gradlew assembleDebug → copy ra HopIn-v0.0.<số commit>-debug.apk ở gốc repo
+  (~7.7MB). Tự dò JAVA_HOME/ANDROID_HOME, override được bằng env.
+  ⚠ ĐỪNG chỉ chạy gradlew: phải build lại web + sync, không thì APK vẫn ôm bản
+  web cũ.
+• KHÔNG TRACK android/ (user 2026-08-02): cả thư mục là sinh tự động →
+  .gitignore bỏ android/ + *.apk + *.aab. Thứ ĐƯỢC track (đủ để dựng lại y hệt):
+  capacitor.config.ts, scripts/setup-android.mjs, scripts/build-apk.mjs, dep
+  @capacitor/* trong package.json. Xoá android/ đi chạy npm run apk là ra lại.
+• scripts/setup-android.mjs = mọi tuỳ biến tay trên thư mục sinh tự động (chạy
+  lại được nhiều lần, idempotent): icon + khoá portrait trong AndroidManifest.
+  Sinh toàn bộ launcher icon từ art game
+  (public/art/slime3D.png, ô giữa = slime xanh cyan) — cắt nền trắng bằng luật
+  "sáng VÀ không bão hoà" (giữ được highlight trắng của khối slime), đặt trên
+  nền gradient navy #3d4370→#20233a. Sinh cả 5 mật độ: ic_launcher (bo góc),
+  ic_launcher_round (tròn), ic_launcher_foreground (adaptive, vùng an toàn 56%)
+  + drawable/ic_launcher_background.xml. Chạy lại sau khi đổi art rồi rebuild.
+• APK hiện tại = DEBUG (ký bằng debug key) → cài thẳng vào máy để test được,
+  KHÔNG lên Play Store được. Muốn bản release phải tạo keystore riêng + ký
+  (chưa làm; build-apk.mjs đã có sẵn cờ --release chờ nối signing).
+  versionCode/versionName vẫn mặc định 1 / "1.0" — build stamp hiển thị TRONG
+  game (v0.0.<số commit> · hash) vẫn lấy từ git như cũ, không liên quan.
+
 ────────────────────────────────────────────────────────────────────────────
 GHI CHÚ CHUNG
 ────────────────────────────────────────────────────────────────────────────

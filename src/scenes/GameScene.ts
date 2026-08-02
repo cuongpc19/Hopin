@@ -8,11 +8,13 @@ import {
   obstacleKind,
   softHp,
   isRemovable,
+  bigSlimeBlocks,
   type Chest,
   type Level,
   type TrackKind,
 } from "../game/level";
 import { Audio } from "../game/audio";
+import { MAX_HEARTS, getHearts, spendHeart, heartsMsToNext } from "../game/hearts";
 import {
   awardClovers,
   isEventUnlocked,
@@ -186,23 +188,23 @@ interface BoosterDef {
 const BOOSTERS: BoosterDef[] = [
   {
     key: "add", img: "booster-add", label: "Add", cost: 300, unlock: 6,
-    title: "New Booster: Add!",
-    desc: "Adds an extra waiting bay, so one more car can park at a time.",
+    title: "Booster mới: Add!",
+    desc: "Thêm 1 ô chờ — đỗ được thêm 1 xe cùng lúc.",
   },
   {
     key: "hand", img: "booster-hand", label: "Grab", cost: 500, unlock: 11,
-    title: "New Booster: Grab!",
-    desc: "Instantly send out ANY car from the queue — skip the front-only rule.",
+    title: "Booster mới: Grab!",
+    desc: "Cho ngay 1 xe BẤT KỲ trong hàng chạy — không cần chờ tới lượt.",
   },
   {
     key: "refresh", img: "booster-refresh", label: "Shuffle", cost: 600, unlock: 16,
-    title: "New Booster: Shuffle!",
-    desc: "Re-rolls the colors of the queued cars, bringing up a color you need.",
+    title: "Booster mới: Shuffle!",
+    desc: "Đổi màu ngẫu nhiên các xe trong hàng — dễ ra màu bạn đang cần.",
   },
   {
     key: "magnet", img: "booster-magnet", label: "Magnet", cost: 600, unlock: 21,
-    title: "New Booster: Magnet!",
-    desc: "Tap a slime and a VIP car reels in the whole connected cluster of that color.",
+    title: "Booster mới: Magnet!",
+    desc: "Chạm 1 slime, xe VIP sẽ hút cả cụm slime màu đó.",
   },
 ];
 const FREE_GIFT = 3; // free copies granted the first time you reach a booster's unlock level
@@ -228,6 +230,8 @@ export class GameScene extends Phaser.Scene {
   // Cells whose slime is still a hidden "?" (real colour unknown to the player, in
   // level.hidden). Untargetable until a 4-neighbour opens, then revealed.
   private hiddenSet = new Set<number>();
+  // Big slimes keyed by their top-left anchor cell (resolved from level.bigHp).
+  private bigByAnchor = new Map<number, ReturnType<typeof bigSlimeBlocks>[number]>();
 
   private track: TrackNode[] = [];
   private startIndex = 0;
@@ -303,6 +307,9 @@ export class GameScene extends Phaser.Scene {
   // so a later win counts as 1 rock (not a clean 2-rock First-Try win). Reset only
   // on a fresh entry from the map (create), NOT on the in-place Replay.
   private failedThisAttempt = false;
+  // REVIVE is one-shot: once used in an attempt, a second loss offers only Replay/Home.
+  // Reset in startLevel (a Replay or the next level is a fresh attempt with a fresh revive).
+  private revivedThisAttempt = false;
 
   private gold = 0; // player's currency (persists across levels + reloads)
   private goldText?: Phaser.GameObjects.Text;
@@ -335,6 +342,7 @@ export class GameScene extends Phaser.Scene {
     this.load.image("victory", "art/victory.png"); // win-screen hero art
     this.load.image("out-of-space", "art/outofspace.png"); // queue-full (lose) hero art
     this.load.image("car-vip", "art/car-vip.png"); // golden/purple VIP car for the Magnet booster
+    this.load.image("heart", "art/heart.png"); // player lives — shown when a loss costs one
     for (const b of ["add", "hand", "refresh", "magnet"]) {
       this.load.image(`booster-${b}`, `art/booster-${b}.png`);
     }
@@ -412,6 +420,12 @@ export class GameScene extends Phaser.Scene {
     const q = parseInt(new URLSearchParams(location.search).get("level") ?? "", 10);
     const fromUrl = Number.isFinite(q) && q > 0 ? q : undefined;
     this.failedThisAttempt = false; // fresh entry from the map → a clean First-Try win is possible
+    // No hearts → can't play. Bounce to the map (its ❤ pill shows the refill timer);
+    // also covers sneaking in via a page refresh or a ?level= URL.
+    if (getHearts() <= 0) {
+      this.scene.start("select");
+      return;
+    }
     this.startLevel(this.startAt ?? fromUrl ?? 1);
   }
 
@@ -440,6 +454,7 @@ export class GameScene extends Phaser.Scene {
     this.runners = [];
     this.won = false;
     this.lost = false;
+    this.revivedThisAttempt = false; // fresh attempt → one revive available again
     this.tutObjs = [];
     this.tutStep = 0;
     this.tutPaused = false;
@@ -460,7 +475,9 @@ export class GameScene extends Phaser.Scene {
     // stay forever and are not counted. A 2-layer cell counts TWICE (top + hidden bottom).
     this.keysRemaining =
       this.level.board.filter((v) => isRemovable(v)).length +
-      (this.level.layer2 ? this.level.layer2.filter((v) => v >= 0).length : 0);
+      (this.level.layer2 ? this.level.layer2.filter((v) => v >= 0).length : 0) -
+      // an S×S big slime fills S² removable cells but counts as ONE collectable unit
+      bigSlimeBlocks(this.level).reduce((sum, b) => sum + (b.cells.length - 1), 0);
     // "?" slimes start hidden (scene restart safe — rebuilt from the level data).
     this.hiddenSet.clear();
     if (this.level.hidden) this.level.hidden.forEach((v, i) => { if (v >= 0) this.hiddenSet.add(i); });
@@ -602,7 +619,7 @@ export class GameScene extends Phaser.Scene {
     this.tutStep = 1;
     const front = this.invColumns.find((col) => col.length > 0)?.[0];
     if (!front) return;
-    this.showTutHint(front.container.x, front.container.y, "Tap the car to\nsend it out!", this.chestSize * 0.95);
+    this.showTutHint(front.container.x, front.container.y, "Chạm vào xe để\nxe chạy nhé!", this.chestSize * 0.95);
   }
 
   // ---- Twin-car intro (only on its designated level) -----------------
@@ -649,20 +666,20 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(D + 2);
     const title = this.add
-      .text(GAME_W / 2, y0 + 118, "Twin Cars!", {
+      .text(GAME_W / 2, y0 + 118, "Xe Đôi!", {
         fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "22px", color: "#6a4a12",
       })
       .setOrigin(0.5)
       .setDepth(D + 2);
     const desc = this.add
-      .text(GAME_W / 2, y0 + 172, "These two are best buddies — they set off, park, and leave TOGETHER, always side by side. Tap one and BOTH roll out!", {
+      .text(GAME_W / 2, y0 + 172, "Hai bạn này thân nhau lắm — cùng chạy, cùng đỗ, cùng rời đi, luôn kề vai nhau. Chạm 1 xe là CẢ HAI cùng lăn bánh!", {
         fontFamily: "Arial, sans-serif", fontSize: "14px", color: "#6a4a12", align: "center",
         wordWrap: { width: pw - 44 },
       })
       .setOrigin(0.5)
       .setDepth(D + 2);
     const ok = this.add
-      .text(GAME_W / 2, y0 + ph - 34, "GOT IT!", {
+      .text(GAME_W / 2, y0 + ph - 34, "ĐÃ HIỂU!", {
         fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "16px", color: "#ffffff",
         backgroundColor: "#3a8a3a", padding: { x: 26, y: 8 },
       })
@@ -691,7 +708,7 @@ export class GameScene extends Phaser.Scene {
     const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
     const radius = (Math.max(...xs) - Math.min(...xs)) / 2 + this.chestSize * 0.78;
     this.tutStep = 8; // group-launch step
-    this.showTutHint(cx, cy, "Tap to send the\nlinked cars out together!", radius);
+    this.showTutHint(cx, cy, "Chạm để cả cặp xe\ncùng chạy nhé!", radius);
   }
 
   // Spotlight a spot on screen: freeze the game, dim everything AROUND a clear
@@ -804,13 +821,26 @@ export class GameScene extends Phaser.Scene {
     return { frameW, frameH, ringW: frameW, ringH: frameH };
   }
 
-  // Full-screen forest-floor background image (bottom layer). Play scene keeps the
-  // LIGHT forest art (Home uses the dark premium one).
+  // Full-screen background (bottom layer). Was the forest-floor photo; now a soft
+  // BEIGE "caro" (checkerboard) tablecloth — light beige + a muted sage green — so the
+  // dark navy board panel reads as a tray on a picnic cloth. Two tones only, kept low
+  // in contrast so the bright board tiles stay the star.
   private buildBackground() {
-    this.add
-      .image(GAME_W / 2, GAME_H / 2, "background")
-      .setDisplaySize(GAME_W, GAME_H)
-      .setDepth(DEPTH_BG);
+    const beige = 0xe3d5b0; // "be" — the darker caro tone
+    const sage = 0xf1e7cd; // 2nd tone: now a LIGHT beige (user: đổi xanh → be sáng) — two-tone beige caro
+    const g = this.add.graphics().setDepth(DEPTH_BG);
+    g.fillStyle(beige, 1);
+    g.fillRect(0, 0, GAME_W, GAME_H);
+    const cs = Math.round(GAME_W / 16); // ~16 squares wide → tablecloth scale
+    const cols = Math.ceil(GAME_W / cs) + 1;
+    const rows = Math.ceil(GAME_H / cs) + 1;
+    g.fillStyle(sage, 1);
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (((r + c) & 1) === 0) continue; // only "odd" squares → checker
+        g.fillRect(c * cs, r * cs, cs, cs);
+      }
+    }
   }
 
   // ---- Zone 1: board, Line track, keys -------------------------------
@@ -929,6 +959,8 @@ export class GameScene extends Phaser.Scene {
     this.buildGroundMat(cols, rows, roadW);
 
     const keySize = this.cell;
+    // Resolve big slimes (S×S blocks) so the build loop can claim all their cells at once.
+    this.bigByAnchor = new Map(bigSlimeBlocks(this.level).map((b) => [b.anchor, b]));
     // Index-addressed (not push) so a 2×2 BIG obstacle can claim its 4 cells.
     this.keys = new Array(rows * cols).fill(null);
     for (let r = 0; r < rows; r++) {
@@ -938,7 +970,15 @@ export class GameScene extends Phaser.Scene {
         const id = board[idx];
         if (id < 0) continue;
         const { x, y } = this.cellCenter(r, c);
-        if (isBigObstacle(id) && r + 1 < rows && c + 1 < cols) {
+        const bigBlock = this.bigByAnchor.get(idx);
+        if (bigBlock) {
+          // S×S BIG SLIME: one colour, needs `hp` matching-colour shots. One sprite over all
+          // S² cells; every cell points at the same object (blocks line of sight like a wall).
+          const cxp = this.gridX + (c + bigBlock.size / 2) * this.cell;
+          const cyp = this.gridY + (r + bigBlock.size / 2) * this.cell;
+          const obj = this.makeBigSlime(id, cxp, cyp, this.cell * bigBlock.size, bigBlock.cells, bigBlock.hp);
+          for (const ci of bigBlock.cells) this.keys[ci] = obj;
+        } else if (isBigObstacle(id) && r + 1 < rows && c + 1 < cols) {
           // 2×2: the same code fills all four cells (for line-of-sight + matching);
           // one big sprite centred on the block; every cell points at the same object.
           const cells = [idx, idx + 1, idx + cols, idx + cols + 1];
@@ -1182,6 +1222,26 @@ export class GameScene extends Phaser.Scene {
     const c = this.add.container(x, y, [img]);
     c.setSize(s, s);
     c.setData("body", img); // kept so the collect animation can bob the body alone
+    return c;
+  }
+
+  // A 2×2 BIG SLIME: one colour, tileSize = cell*2 footprint, `cells` = the 4 board indices
+  // it occupies, `hp` = matching-colour shots still needed. A number badge shows the count.
+  private makeBigSlime(colorId: number, x: number, y: number, tileSize: number, cells: number[], hp: number) {
+    const img = this.add.image(0, 0, `tile-${colorId}`).setDisplaySize(tileSize * 1.08, tileSize * 1.08);
+    const c = this.add.container(x, y, [img]);
+    c.setSize(tileSize, tileSize);
+    c.setData("body", img);
+    c.setData("cells", cells);
+    c.setData("slimeHp", hp);
+    const num = this.add
+      .text(0, 0, String(hp), {
+        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: `${Math.round(tileSize * 0.4)}px`,
+        color: "#ffffff", stroke: "#1a1a24", strokeThickness: Math.max(2, Math.round(tileSize * 0.05)),
+      })
+      .setOrigin(0.5);
+    c.add(num);
+    c.setData("hpText", num);
     return c;
   }
 
@@ -1444,7 +1504,9 @@ export class GameScene extends Phaser.Scene {
     // holds a parked car. Space the bays so their grass borders slightly overlap
     // into one continuous strip, centered.
     const art = Math.round(SLOT_SIZE * 1.5);
-    const pitch = art - 8;
+    // Fixed pitch up to 6 bays; revives can grow the row past that, so tighten the
+    // spacing when needed to keep every bay (and its parked car) on the 480 screen.
+    const pitch = Math.min(art - 8, Math.floor((GAME_W - 60) / Math.max(1, this.slotCount - 1)));
     const totalW = (this.slotCount - 1) * pitch;
     const startX = (GAME_W - totalW) / 2;
 
@@ -1758,7 +1820,7 @@ export class GameScene extends Phaser.Scene {
 
     const icon = this.add.image(GAME_W / 2, y0 + 56, def.img).setDisplaySize(60, 60).setDepth(D + 2);
     const title = this.add
-      .text(GAME_W / 2, y0 + 104, `Buy ${def.label}?`, {
+      .text(GAME_W / 2, y0 + 104, `Mua ${def.label}?`, {
         fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "20px", color: "#6a4a12",
       })
       .setOrigin(0.5)
@@ -1777,7 +1839,7 @@ export class GameScene extends Phaser.Scene {
       this.tutPaused = false; // unfreeze
     };
     const no = this.add
-      .text(GAME_W / 2 - 66, y0 + ph - 30, "CANCEL", {
+      .text(GAME_W / 2 - 66, y0 + ph - 30, "THÔI", {
         fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "15px", color: "#ffffff",
         backgroundColor: "#b0392b", padding: { x: 16, y: 8 },
       })
@@ -1785,7 +1847,7 @@ export class GameScene extends Phaser.Scene {
       .setDepth(D + 2)
       .setInteractive({ useHandCursor: true });
     const yes = this.add
-      .text(GAME_W / 2 + 56, y0 + ph - 30, "BUY", {
+      .text(GAME_W / 2 + 56, y0 + ph - 30, "MUA", {
         fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "15px", color: "#ffffff",
         backgroundColor: "#3a8a3a", padding: { x: 24, y: 8 },
       })
@@ -1799,7 +1861,7 @@ export class GameScene extends Phaser.Scene {
     yes.on("pointerdown", () => {
       if (this.gold < def.cost) {
         close();
-        this.toast(`Need ${def.cost} gold`);
+        this.toast(`Cần ${def.cost} coin`);
         return;
       }
       this.addGold(-def.cost);
@@ -1807,7 +1869,7 @@ export class GameScene extends Phaser.Scene {
       this.saveBoosterCounts();
       this.drawBoosters();
       close();
-      this.toast(`${def.label} purchased! Tap to use.`);
+      this.toast(`Đã mua ${def.label}! Chạm để dùng.`);
     });
   }
 
@@ -1901,13 +1963,13 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(D + 2);
     const gift = this.add
-      .text(GAME_W / 2, y0 + ph - 66, `🎁 You got ${FREE_GIFT} free!`, {
+      .text(GAME_W / 2, y0 + ph - 66, `🎁 Tặng bạn ${FREE_GIFT} cái miễn phí!`, {
         fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "15px", color: "#2a7a2a",
       })
       .setOrigin(0.5)
       .setDepth(D + 2);
     const ok = this.add
-      .text(GAME_W / 2, y0 + ph - 32, "SHOW ME!", {
+      .text(GAME_W / 2, y0 + ph - 32, "DÙNG THỬ!", {
         fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "16px", color: "#ffffff",
         backgroundColor: "#3a8a3a", padding: { x: 26, y: 8 },
       })
@@ -1937,7 +1999,7 @@ export class GameScene extends Phaser.Scene {
     }
     this.tutBooster = { list, idx, key: b.key };
     const size = Math.min(this.boostBarH - 26, 52);
-    this.showTutHint(pos.x, pos.y, "Tap this booster\nto use it!", size * 0.72);
+    this.showTutHint(pos.x, pos.y, "Chạm booster này\nđể dùng nhé!", size * 0.72);
   }
 
   // World position of a booster's button (mirrors the layout math in drawBoosters).
@@ -1969,7 +2031,7 @@ export class GameScene extends Phaser.Scene {
   private affordToast(key: string): boolean {
     if (this.canUseBooster(key)) return true;
     const def = BOOSTERS.find((b) => b.key === key)!;
-    this.toast(`Tap ${def.label} to buy one (${def.cost} 🪙)`);
+    this.toast(`Chạm ${def.label} để mua (${def.cost} coin)`);
     return false;
   }
 
@@ -1977,7 +2039,7 @@ export class GameScene extends Phaser.Scene {
   private boosterAdd() {
     if (this.won) return;
     if (this.slotCount >= 6) {
-      this.toast("Max 6 bays");
+      this.toast("Tối đa 6 ô chờ");
       return;
     }
     if (!this.affordToast("add")) return;
@@ -1987,7 +2049,7 @@ export class GameScene extends Phaser.Scene {
     this.layoutSlots();
     if (this.slotWarnActive) this.stopSlotWarning(); // a fresh empty bay clears the warning
     this.flashNewSlot(this.slotCount - 1); // draw the eye to the brand-new bay
-    this.toast("+1 waiting bay!");
+    this.toast("+1 ô chờ!");
   }
 
   // Pulse a green ring on a bay a few times to call out that it's newly added.
@@ -2016,12 +2078,12 @@ export class GameScene extends Phaser.Scene {
     if (this.won || this.handMode || this.magnetMode) return;
     const queued = this.invColumns.flat().filter((v) => v.container.scene);
     if (queued.length === 0) {
-      this.toast("Queue is empty");
+      this.toast("Hàng chờ trống rồi");
       return;
     }
     if (!this.affordToast("hand")) return;
     this.handMode = true;
-    this.toast("Grab any car — a back-row one is best!");
+    this.toast("Chạm lấy xe bất kỳ — xe hàng dưới càng lợi!");
     this.armHandHighlight(); // spotlight the buried back-row cars (Grab's best use)
     // Defer one tick so the tap that pressed the booster button isn't captured.
     this.time.delayedCall(40, () =>
@@ -2048,15 +2110,15 @@ export class GameScene extends Phaser.Scene {
               return p && p.r <= 1;
             });
             if (!ok) {
-              this.toast("Linked cars: all must be in the first 2 rows to grab them together");
+              this.toast("Xe đôi: cả cặp phải nằm trong 2 hàng đầu mới lấy cùng nhau được");
               return;
             }
           }
           this.consumeBooster("hand");
           this.launchQueued(best);
-          this.toast("Car sent!");
+          this.toast("Xe chạy rồi!");
         } else {
-          this.toast("Cancelled");
+          this.toast("Đã huỷ");
         }
       }),
     );
@@ -2127,7 +2189,7 @@ export class GameScene extends Phaser.Scene {
     // Only recolour ordinary colour cars (leave hammer/wood cars as they are).
     const cars = this.invColumns.flat().filter((v) => v.container.scene && (v.chest.kind ?? "color") === "color");
     if (cars.length === 0) {
-      this.toast("Queue is empty");
+      this.toast("Hàng chờ trống rồi");
       return;
     }
     // colours that still have uncollected SLIMES on the board (skip obstacles)
@@ -2143,7 +2205,7 @@ export class GameScene extends Phaser.Scene {
       }
     }
     if (left.length === 0) {
-      this.toast("No slimes left");
+      this.toast("Hết slime rồi");
       return;
     }
     if (!this.affordToast("refresh")) return;
@@ -2176,7 +2238,7 @@ export class GameScene extends Phaser.Scene {
         },
       });
     });
-    this.time.delayedCall(total + 120, () => this.toast("Cars recolored!"));
+    this.time.delayedCall(total + 120, () => this.toast("Đã đổi màu xe!"));
   }
 
   // Briefly dim everything EXCEPT the lineup queue (zone 3), with a pulsing frame, so
@@ -2235,19 +2297,19 @@ export class GameScene extends Phaser.Scene {
   private boosterMagnet() {
     if (this.won || this.handMode || this.magnetMode) return;
     if (this.keysRemaining <= 0) {
-      this.toast("No slimes left");
+      this.toast("Hết slime rồi");
       return;
     }
     if (!this.affordToast("magnet")) return;
     this.magnetMode = true;
-    this.toast("Tap a slime to pull its cluster");
+    this.toast("Chạm 1 slime để hút cả cụm");
     // Defer one tick so the tap that pressed the booster button isn't captured.
     this.time.delayedCall(40, () =>
       this.input.once("pointerdown", (p: Phaser.Input.Pointer) => {
         this.magnetMode = false;
         const idx = this.nearestSlime(p.worldX, p.worldY);
         if (idx < 0) {
-          this.toast("Cancelled");
+          this.toast("Đã huỷ");
           return;
         }
         // Easy to mis-tap → confirm the picked cluster first.
@@ -2291,7 +2353,7 @@ export class GameScene extends Phaser.Scene {
     const group = this.connectedSameColor(startIdx);
     const total = group.length;
     if (total === 0) {
-      this.toast("No slimes there");
+      this.toast("Chỗ đó không có slime");
       return;
     }
     this.tutPaused = true;
@@ -2351,7 +2413,7 @@ export class GameScene extends Phaser.Scene {
     objs.push(no, yes);
     no.on("pointerdown", () => {
       close();
-      this.toast("Cancelled");
+      this.toast("Đã huỷ");
     });
     yes.on("pointerdown", () => {
       close();
@@ -2409,7 +2471,7 @@ export class GameScene extends Phaser.Scene {
     const remaining = group.filter((i) => this.keys[i] && this.level.board[i] === color);
     const total = remaining.length;
     if (total === 0) {
-      this.toast("No slimes of that color");
+      this.toast("Không còn slime màu đó");
       return;
     }
     const view = this.makeVipView(color, total);
@@ -2448,7 +2510,7 @@ export class GameScene extends Phaser.Scene {
         this.fireTo(view, idx); // slime runs to the VIP car; boards on arrival
       },
     });
-    this.toast("VIP car incoming!");
+    this.toast("Xe VIP đang tới!");
   }
 
   // The VIP magnet car (bigger, premium sprite, its seat count on top).
@@ -2634,7 +2696,7 @@ export class GameScene extends Phaser.Scene {
   // no limit (testing convenience).
   private buyGold() {
     this.addGold(5000);
-    this.toast("+5000 Gold");
+    this.toast("+5000 Coin");
   }
 
   // Minimal settings overlay (placeholder — sound/music toggles come later).
@@ -2690,9 +2752,10 @@ export class GameScene extends Phaser.Scene {
     Audio.unlock(); // opening settings is a user gesture — safe to init audio
     const sfxBtn = mkToggle(y0 + 90, "🔊 Sound FX", () => Audio.isSfxOn, (v) => Audio.setSfx(v));
 
-    // Jump back to the level picker.
+    // Back to Home (the level map). Quitting mid-level costs a heart, so this only
+    // ASKS — confirmGoHome() does the deduction after an explicit OK.
     const select = this.add
-      .text(GAME_W / 2, y0 + 156, "🗺  Levels", {
+      .text(GAME_W / 2, y0 + 156, "🏠  Home", {
         fontFamily: "Arial, sans-serif",
         fontStyle: "bold",
         fontSize: "16px",
@@ -2725,7 +2788,76 @@ export class GameScene extends Phaser.Scene {
     };
     dim.on("pointerdown", kill);
     close.on("pointerdown", kill);
-    select.on("pointerdown", () => this.scene.start("select"));
+    select.on("pointerdown", () => this.confirmGoHome(kill));
+  }
+
+  // "Go Home?" confirm — quitting a level mid-run costs 1 heart (user 2026-08-02),
+  // so never leave without an explicit OK. `killSettings` closes the settings panel
+  // underneath once the player confirms; Stay / tapping outside just closes this box.
+  private confirmGoHome(killSettings: () => void) {
+    const C = 260; // above the settings overlay (200)
+    const pw = 306;
+    const ph = 206;
+    const x0 = GAME_W / 2 - pw / 2;
+    const y0 = GAME_H / 2 - ph / 2;
+    const objs: Phaser.GameObjects.GameObject[] = [];
+    const dim = this.add
+      .rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0x000000, 0.55)
+      .setDepth(C)
+      .setInteractive();
+    objs.push(dim);
+    const panel = this.add.graphics().setDepth(C + 1);
+    panel.fillStyle(0xf7edd0, 1);
+    panel.fillRoundedRect(x0, y0, pw, ph, 18);
+    panel.lineStyle(4, 0x8a5a12, 1);
+    panel.strokeRoundedRect(x0, y0, pw, ph, 18);
+    objs.push(panel);
+    objs.push(
+      this.add
+        .text(GAME_W / 2, y0 + 36, "VỀ HOME?", {
+          fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "21px", color: "#6a4a12",
+        })
+        .setOrigin(0.5)
+        .setDepth(C + 2)
+    );
+    // Price line: text + the real heart art, so the cost is unmistakable.
+    const msg = this.add
+      .text(GAME_W / 2 - 15, y0 + 84, "Rời level bây giờ sẽ mất 1", {
+        fontFamily: "Arial, sans-serif", fontSize: "15px", color: "#6a4a12",
+      })
+      .setOrigin(0.5)
+      .setDepth(C + 2);
+    objs.push(msg);
+    const hImg = this.add.image(msg.x + msg.width / 2 + 17, y0 + 84, "heart").setDepth(C + 2);
+    hImg.setScale(26 / hImg.width);
+    objs.push(hImg);
+
+    const stay = this.add
+      .text(GAME_W / 2 - 72, y0 + ph - 42, "Ở LẠI", {
+        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "16px", color: "#ffffff",
+        backgroundColor: "#3a8a3a", padding: { x: 24, y: 9 },
+      })
+      .setOrigin(0.5)
+      .setDepth(C + 2)
+      .setInteractive({ useHandCursor: true });
+    const leave = this.add
+      .text(GAME_W / 2 + 64, y0 + ph - 42, "Về Home  -1 ❤", {
+        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "15px", color: "#ffffff",
+        backgroundColor: "#c8392e", padding: { x: 14, y: 9 },
+      })
+      .setOrigin(0.5)
+      .setDepth(C + 2)
+      .setInteractive({ useHandCursor: true });
+    objs.push(stay, leave);
+
+    const closeConfirm = () => objs.forEach((o) => o.destroy());
+    stay.on("pointerdown", closeConfirm);
+    dim.on("pointerdown", closeConfirm);
+    leave.on("pointerdown", () => {
+      closeConfirm();
+      killSettings();
+      this.playHeartLoss(() => this.scene.start("select"));
+    });
   }
 
   // Small contextual notice just above the waiting bays.
@@ -2767,7 +2899,7 @@ export class GameScene extends Phaser.Scene {
         ease: "Quad.out",
       });
     }
-    this.smallNotice(`Max ${MAX_ON_TRACK}/${MAX_ON_TRACK} cars on the track!`);
+    this.smallNotice(`Tối đa ${MAX_ON_TRACK}/${MAX_ON_TRACK} xe trên đường!`);
   }
 
   private toast(msg: string) {
@@ -3080,7 +3212,7 @@ export class GameScene extends Phaser.Scene {
     for (const v of group) {
       const p = this.findInInventory(v);
       if (!p || !p.col.slice(0, p.r).every((c) => group.includes(c))) {
-        this.smallNotice(group.length > 2 ? "Wait for all linked cars to reach the front!" : "Wait for both cars to reach the front!");
+        this.smallNotice(group.length > 2 ? "Chờ cả nhóm xe lên đầu hàng nhé!" : "Chờ đủ 2 xe lên đầu hàng nhé!");
         return;
       }
     }
@@ -3089,7 +3221,7 @@ export class GameScene extends Phaser.Scene {
     // straight to the ray — the bay then auto-launches them when their colour is reachable
     // (see autoRelaunchBays). Needs a free bay per member; a group needs that many.
     if (this.trayMode) {
-      if (TRAY_BATCH && this.batchRunning) { this.smallNotice("Wait — the batch is out collecting!"); return; } // bays locked mid-run
+      if (TRAY_BATCH && this.batchRunning) { this.smallNotice("Chờ chút — cả lô đang đi gắp!"); return; } // bays locked mid-run
       const freeBays = this.slots.reduce((n, s) => n + (s ? 0 : 1), 0);
       if (freeBays < group.length) { this.trackFullNotice(); return; }
       this.playPop();
@@ -3512,8 +3644,10 @@ export class GameScene extends Phaser.Scene {
       // In-place effects (no runner): soft rock cracks/shatters, wood pops.
       const code = this.level.board[idx];
       const kind = isObstacle(code) ? obstacleKind(code) : null;
+      const key = this.keys[idx];
       if (kind === "soft") this.hitSoftRock(a, idx);
       else if (kind === "wood") this.collectWood(a, idx);
+      else if (key && ((key.getData("slimeHp") as number) ?? 0) > 0) this.hitBigSlime(a, idx);
       else this.fire(a, idx);
       openSeats--;
       fired = true;
@@ -3988,6 +4122,39 @@ export class GameScene extends Phaser.Scene {
     }
     Audio.board();
     if (view.chest.count <= 0) this.finishCar(view); // out of swings → drive off
+    if (this.keysRemaining <= 0 && this.runners.length === 0) this.win();
+  }
+
+  // A matching-colour car shoots a 2×2 BIG SLIME: each shot spends one seat and knocks a
+  // hit off; on the final hit it's collected (clears all four cells at once). No runner —
+  // the collect happens in place, like chipping a soft rock, so "shoot N times to get it".
+  private hitBigSlime(a: ActiveChest, idx: number) {
+    const key = this.keys[idx];
+    if (!key) return;
+    const view = a.view;
+    view.chest.count = Math.max(0, view.chest.count - 1); // one shot spent
+    view.countText.setText(String(view.chest.count));
+
+    const color = COLORS[this.level.board[idx]] ?? 0xffffff;
+    this.aimBeam(view.container.x, view.container.y, key.x, key.y, color);
+
+    const hp = ((key.getData("slimeHp") as number) ?? 4) - 1;
+    if (hp <= 0) {
+      const cells = (key.getData("cells") as number[]) ?? [idx];
+      for (const ci of cells) this.keys[ci] = null; // clears all four cells together
+      this.keysRemaining -= 1; // the 2×2 counts as one collected unit
+      this.revealHiddenAround(cells);
+      this.explode(key.x, key.y, this.cell * 1.6, 16, color, 8); // big colourful burst
+      key.destroy();
+    } else {
+      key.setData("slimeHp", hp);
+      const num = key.getData("hpText") as Phaser.GameObjects.Text | undefined;
+      if (num) num.setText(String(hp)); // remaining hits
+      this.tweens.add({ targets: key, angle: 6, duration: 55, yoyo: true }); // shake
+      this.sparkle(key.x, key.y, color);
+    }
+    Audio.board();
+    if (view.chest.count <= 0) this.finishCar(view); // out of shots → drive off
     if (this.keysRemaining <= 0 && this.runners.length === 0) this.win();
   }
 
@@ -4519,7 +4686,7 @@ export class GameScene extends Phaser.Scene {
       this.tutStep = 3;
       this.time.delayedCall(700, () => {
         if (this.tutStep === 3 && !this.won && !this.lost) {
-          this.showTutHint(this.slotXs[slotIndex], this.slotY, "Tap the parked car\nto send it out again!", SLOT_SIZE * 0.9);
+          this.showTutHint(this.slotXs[slotIndex], this.slotY, "Chạm xe đang đỗ để\nxe chạy tiếp nhé!", SLOT_SIZE * 0.9);
         }
       });
     }
@@ -4542,12 +4709,66 @@ export class GameScene extends Phaser.Scene {
 
     // Let the queue-full board sit for a beat so the moment registers before the
     // curtain drops — popping the lose screen instantly felt abrupt (user 2026-07-24).
-    this.time.delayedCall(650, () => this.showLoseModal(pending));
+    this.time.delayedCall(this.beatMs(650), () => this.showLoseModal(pending));
+  }
+
+  // Transition beats (the "loading" feel around win/lose curtains and the -1 ❤ beat)
+  // run faster than their designed base values: ×2/3 normally, ×1/2 on the first 10
+  // levels so new players fall back into play almost immediately (user 2026-08-02:
+  // "3s thì còn 2s; 10 level đầu 1.5s").
+  private beatMs(base: number): number {
+    return Math.round(base * (this.levelNum <= 10 ? 0.5 : 2 / 3));
+  }
+
+  // The "-1 ❤" beat used whenever leaving costs a heart (losing a level, or quitting
+  // to Home mid-level): freeze the game, drop a dark cover, big heart pops in, sheds
+  // a "-1" as it greys out & sinks, then a row of MAX_HEARTS hearts shows what's left
+  // before `after` runs (~1.3s). Every caller switches level/scene in `after`, which
+  // sweeps these objects up — no manual cleanup here.
+  private playHeartLoss(after: () => void) {
+    const before = getHearts();
+    const remain = spendHeart(); // -1, never below 0
+    this.tutPaused = true; // freeze the board so nothing (not even a lose) fires mid-beat
+    const cx = GAME_W / 2;
+    const cy = GAME_H / 2;
+    const D = 500;
+    this.add
+      .rectangle(cx, cy, GAME_W + 240, GAME_H + 240, 0x000000, 0.6)
+      .setDepth(D)
+      .setInteractive(); // swallow taps while the beat plays
+    const big = this.add.image(cx, cy - 16, "heart").setDepth(D + 1).setScale(0);
+    const bigScale = 76 / big.width;
+    this.tweens.add({ targets: big, scale: bigScale, duration: this.beatMs(240), ease: "Back.out" });
+    if (before > 0) {
+      const minus = this.add
+        .text(cx + 54, cy - 44, "-1", {
+          fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "28px",
+          color: "#ff6b6b", stroke: "#3a0d12", strokeThickness: 5,
+        })
+        .setOrigin(0.5)
+        .setDepth(D + 1);
+      this.tweens.add({ targets: minus, y: cy - 84, alpha: { from: 1, to: 0 }, delay: this.beatMs(300), duration: this.beatMs(700), ease: "Cubic.out" });
+      // the heart is spent: turn to a dark silhouette and sink away
+      this.time.delayedCall(this.beatMs(430), () => big.setTintFill(0x57515e));
+      this.tweens.add({ targets: big, alpha: 0.3, y: cy + 34, angle: 16, delay: this.beatMs(430), duration: this.beatMs(520), ease: "Cubic.in" });
+    }
+    // Remaining stock: filled hearts + dark silhouettes for the spent ones.
+    const pitch = 40;
+    const rowY = cy + 66;
+    const x0 = cx - ((MAX_HEARTS - 1) * pitch) / 2;
+    for (let i = 0; i < MAX_HEARTS; i++) {
+      const h = this.add.image(x0 + i * pitch, rowY, "heart").setDepth(D + 1).setScale(0);
+      const hs = 30 / h.width;
+      if (i >= remain) h.setTintFill(0x57515e).setAlpha(0.55);
+      this.tweens.add({ targets: h, scale: hs, duration: this.beatMs(200), delay: this.beatMs(140 + i * 60), ease: "Back.out" });
+    }
+    this.time.delayedCall(this.beatMs(1300), after);
   }
 
   private showLoseModal(pending?: ActiveChest) {
     const REVIVE_COST = 900;
     const canAfford = this.gold >= REVIVE_COST;
+    const canRevive = !this.revivedThisAttempt; // one revive per attempt — then the option disappears
     const cx = GAME_W / 2;
     const cy = GAME_H / 2;
     const objs: Phaser.GameObjects.GameObject[] = [];
@@ -4578,7 +4799,7 @@ export class GameScene extends Phaser.Scene {
     } else {
       objs.push(
         this.add
-          .text(cx, heroCY, "QUEUE FULL! 😵", {
+          .text(cx, heroCY, "HẾT CHỖ ĐỖ! 😵", {
             fontFamily: "Arial, sans-serif",
             fontStyle: "bold",
             fontSize: "23px",
@@ -4600,7 +4821,8 @@ export class GameScene extends Phaser.Scene {
       fill: number,
       stroke: number,
       onClick: () => void,
-      enabled = true
+      enabled = true,
+      coinAfter = false
     ) => {
       const r = Math.min(bh / 2, 16);
       const g = this.add.graphics().setDepth(402);
@@ -4609,18 +4831,30 @@ export class GameScene extends Phaser.Scene {
       g.lineStyle(3, enabled ? stroke : 0x7d766a, 1);
       g.strokeRoundedRect(bx - bw / 2, by - bh / 2, bw, bh, r);
       objs.push(g);
-      objs.push(
-        this.add
-          .text(bx, by, label, {
-            fontFamily: "Arial, sans-serif",
-            fontStyle: "bold",
-            fontSize: `${Math.round(bh * 0.34)}px`,
-            color: enabled ? "#ffffff" : "#efe9dc",
-            align: "center",
-          })
-          .setOrigin(0.5)
-          .setDepth(403)
-      );
+      const txt = this.add
+        .text(bx, by, label, {
+          fontFamily: "Arial, sans-serif",
+          fontStyle: "bold",
+          fontSize: `${Math.round(bh * 0.34)}px`,
+          color: enabled ? "#ffffff" : "#efe9dc",
+          align: "center",
+        })
+        .setOrigin(0.5)
+        .setDepth(403);
+      objs.push(txt);
+      // Price coin: the same drawn golden disc used by the HUD/booster bar — the 🪙
+      // emoji renders as a grey pebble on Windows and read as a "rock" (user 2026-08-02).
+      if (coinAfter) {
+        const cr = Math.max(7, Math.round(bh * 0.17));
+        const cgap = 8;
+        txt.setX(bx - (cgap + cr * 2) / 2); // shift left so [label + coin] stays centred
+        objs.push(
+          this.add
+            .circle(txt.x + txt.width / 2 + cgap + cr, by, cr, 0xf9c22e)
+            .setStrokeStyle(2, 0xc98a10)
+            .setDepth(403)
+        );
+      }
       if (enabled) {
         const hit = this.add
           .rectangle(bx, by, bw, bh, 0xffffff, 0.001)
@@ -4632,46 +4866,95 @@ export class GameScene extends Phaser.Scene {
     };
 
     const closeAll = () => objs.forEach((o) => o.destroy());
+    let leaving = false; // heart-loss animation running → all modal buttons dead
 
-    // REVIVE: pay gold, clear the 5 waiting bays (cars drive up & off), then park
-    // the car that couldn't fit — and resume play.
+    // REVIVE: pay gold, ADD one extra waiting bay (or as many as a linked group
+    // needs to fit), park the stranded car there and resume play — the parked cars
+    // all STAY, the player just gets a wider queue to dig themselves out with.
     const revive = () => {
+      if (leaving) return;
       if (this.gold < REVIVE_COST) return;
       this.addGold(-REVIVE_COST);
+      this.revivedThisAttempt = true; // spend the attempt's single revive
       this.lost = false;
       closeAll();
-      const parked = this.slots.filter(Boolean) as ChestView[];
-      for (const v of parked) this.leaveCar(v); // drift up & leave → free the slot
+      if (this.slotWarnActive) this.stopSlotWarning(); // re-arm at the NEW bay positions
+      // +1 bay normally; a twin/triple that overflowed needs enough free bays for the
+      // whole group (paying 900 and instantly losing again would be a rip-off).
+      const free = this.slots.reduce((n, s) => n + (s ? 0 : 1), 0);
+      const need = pending && this.isGrouped(pending.view) ? this.liveGroup(pending.view).length : 1;
+      const grow = Math.max(1, need - free);
+      for (let k = 0; k < grow; k++) {
+        this.slotCount += 1;
+        this.slots.push(null);
+      }
+      this.layoutSlots(); // re-centres the row, slides parked cars & GO along
+      for (let k = 0; k < grow; k++) this.flashNewSlot(this.slotCount - 1 - k);
       if (pending) this.parkChest(pending);
+      else this.updateSlotWarning(); // tray-stuck lose: the fresh empty bay clears the flash
     };
 
-    // Revive button (green, big). Greyed out with a hint if the player can't pay.
+    // Revive button (green, big). Greyed out with a hint if the player can't pay;
+    // GONE entirely once this attempt's revive is spent (second loss = Replay/Home only).
     const btnW = Math.min(GAME_W - 70, 280);
     const reviveY = heroBottom + 34;
-    mkBtn(
-      cx,
-      reviveY,
-      btnW,
-      60,
-      canAfford ? `REVIVE   ${REVIVE_COST} 🪙` : `Need ${REVIVE_COST} 🪙 to revive`,
-      0x35b04a,
-      0x1f7d33,
-      revive,
-      canAfford
-    );
+    if (canRevive) {
+      mkBtn(
+        cx,
+        reviveY,
+        btnW,
+        60,
+        canAfford ? `REVIVE   ${REVIVE_COST}` : `Revive — cần ${REVIVE_COST}`,
+        0x35b04a,
+        0x1f7d33,
+        revive,
+        canAfford,
+        true // draw the price as a golden coin disc after the label
+      );
+    }
 
-    // Secondary row: replay this level | back to Home.
+    // Leaving the lose modal COSTS ONE HEART — play the shared "-1 ❤" beat, then
+    // hand over to `after`.
+    const exitWithHeart = (after: () => void) => {
+      if (leaving) return;
+      leaving = true;
+      this.playHeartLoss(after);
+    };
+
+    // Secondary row: replay this level | back to Home. Slides up into the revive
+    // button's spot when the revive is already used up. This loss costs a heart, so
+    // Replay is only offered if a heart REMAINS after paying it — at 0 you can't
+    // start a level, only head Home and wait for the refill.
+    const heartsAfter = Math.max(0, getHearts() - 1);
+    const canReplay = heartsAfter > 0;
     const gap = 14;
     const bw = (btnW - gap) / 2;
-    const by = reviveY + 60;
-    mkBtn(cx - gap / 2 - bw / 2, by, bw, 46, "Replay", 0xd98a2b, 0xa5610f, () => {
-      closeAll();
-      this.startLevel(this.levelNum);
-    });
-    mkBtn(cx + gap / 2 + bw / 2, by, bw, 46, "Home", 0x6d7b8a, 0x49525d, () => {
-      closeAll();
-      this.scene.start("select");
-    });
+    const by = canRevive ? reviveY + 60 : reviveY;
+    mkBtn(
+      cx - gap / 2 - bw / 2, by, bw, 46, "Replay", 0xd98a2b, 0xa5610f,
+      () => exitWithHeart(() => {
+        closeAll();
+        this.startLevel(this.levelNum);
+      }),
+      canReplay
+    );
+    mkBtn(cx + gap / 2 + bw / 2, by, bw, 46, "Home", 0x6d7b8a, 0x49525d, () =>
+      exitWithHeart(() => {
+        closeAll();
+        this.scene.start("select");
+      })
+    );
+    if (!canReplay) {
+      const mins = Math.max(1, Math.ceil(heartsMsToNext() / 60000));
+      objs.push(
+        this.add
+          .text(cx, by + 42, `Hết tim rồi — ~${mins} phút nữa có tim mới`, {
+            fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "13px", color: "#ffb9b0",
+          })
+          .setOrigin(0.5)
+          .setDepth(402)
+      );
+    }
   }
 
   // ---- Win ------------------------------------------------------------
@@ -4696,7 +4979,7 @@ export class GameScene extends Phaser.Scene {
     }
     // Hold on the freshly-cleared board for a beat before the curtain — popping the
     // victory screen the instant the last slime boards felt abrupt (user 2026-07-24).
-    this.time.delayedCall(750, () => this.showWinModal(reward, cloverAward));
+    this.time.delayedCall(this.beatMs(750), () => this.showWinModal(reward, cloverAward));
   }
 
   private showWinModal(reward: number, cloverAward: ReturnType<typeof awardClovers> | undefined) {
@@ -4728,7 +5011,7 @@ export class GameScene extends Phaser.Scene {
     const t1 = this.textures.exists("victory")
       ? undefined
       : this.add
-          .text(cx, heroCY, `LEVEL ${this.levelNum} COMPLETE! 🎉`, {
+          .text(cx, heroCY, `LEVEL ${this.levelNum} HOÀN THÀNH! 🎉`, {
             fontFamily: "Arial, sans-serif",
             fontStyle: "bold",
             fontSize: "24px",
@@ -4757,7 +5040,17 @@ export class GameScene extends Phaser.Scene {
     let infoY = heroBottom + 22;
     // Only show the "+50" line on a first clear; replays award nothing.
     if (reward > 0) {
-      extra.push(line(infoY, `+${reward}  🪙`, 20, "#b5720a"));
+      // "+50" + drawn coin disc (not the 🪙 emoji — it looks like a grey pebble on Windows).
+      const t = line(infoY, `+${reward}`, 20, "#b5720a");
+      const cr = 9;
+      t.setX(cx - (8 + cr * 2) / 2); // keep [amount + coin] centred as a pair
+      extra.push(
+        t,
+        this.add
+          .circle(t.x + t.width / 2 + 8 + cr, infoY, cr, 0xf9c22e)
+          .setStrokeStyle(2, 0xc98a10)
+          .setDepth(401)
+      );
       infoY += 30;
     }
     // Lucky Clover progress lines (only while the event is running).
@@ -4765,22 +5058,22 @@ export class GameScene extends Phaser.Scene {
       extra.push(line(infoY, `+${cloverAward.gained}  ${CLOVER_ICON} ${EVENT_NAME}`, 18, "#2f7a34"));
       infoY += 26;
       for (const m of cloverAward.granted) {
-        extra.push(line(infoY, `🎉 Reward: ${rewardLabel(m.reward)}`, 16, "#2a7a2a"));
+        extra.push(line(infoY, `🎉 Quà: ${rewardLabel(m.reward)}`, 16, "#2a7a2a"));
         infoY += 24;
       }
       const p = cloverAward.progress;
       if (!p.done && p.next) {
-        extra.push(line(infoY, `${p.remaining} more → ${rewardLabel(p.next.reward)}`, 13, "#3a6a3a", false));
+        extra.push(line(infoY, `Còn ${p.remaining} nữa → ${rewardLabel(p.next.reward)}`, 13, "#3a6a3a", false));
         infoY += 24;
       } else if (p.done) {
-        extra.push(line(infoY, `${EVENT_NAME} event complete! 🏆`, 14, "#2f7a34"));
+        extra.push(line(infoY, `Xong event ${EVENT_NAME}! 🏆`, 14, "#2f7a34"));
         infoY += 24;
       }
     }
 
     const nextLevel = this.levelNum + 1;
     const t2 = this.add
-      .text(cx, infoY + 12, `Tap for Level ${nextLevel}`, {
+      .text(cx, infoY + 12, `Chạm để vào Level ${nextLevel}`, {
         fontFamily: "Arial, sans-serif",
         fontStyle: "bold",
         fontSize: "15px",

@@ -63,7 +63,7 @@ export const MILESTONES: Milestone[] = (() => {
     cum += incrementFor(i);
     let reward: EventReward;
     if (i === 30) {
-      reward = { kind: "grand", gold: 3000, key: "magnet", label: "Grand Reward" };
+      reward = { kind: "grand", gold: 3000, key: "magnet", label: "Quà Đặc Biệt" };
     } else if (i % 2 === 1) {
       reward = { kind: "gold", amount: goldAmt };
       goldAmt += 100;
@@ -81,9 +81,9 @@ export const EVENT_GOAL = MILESTONES[MILESTONES.length - 1].threshold; // total 
 
 // A short human label for a reward (used in popups / the progress bar).
 export function rewardLabel(r: EventReward): string {
-  if (r.kind === "gold") return `${r.amount} Gold`;
+  if (r.kind === "gold") return `${r.amount} Coin`;
   if (r.kind === "booster") return r.label;
-  return `${r.gold} Gold + ${r.label}`;
+  return `${r.gold} Coin + ${r.label}`;
 }
 
 function readInt(key: string, def = 0): number {
