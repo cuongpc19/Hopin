@@ -14,6 +14,7 @@ import {
   type TrackKind,
 } from "../game/level";
 import { Audio } from "../game/audio";
+import { t as tr, tf as trf, getLang, setLang } from "../game/i18n";
 import {
   awardClovers,
   isEventUnlocked,
@@ -687,7 +688,7 @@ export class GameScene extends Phaser.Scene {
     const D = 420;
     const cy = GAME_H * 0.38;
     const color = superhard ? 0xd11e5e : 0xe06a12;
-    const label = superhard ? "💀 SUPER HARD" : "🔥 HARD LEVEL";
+    const label = superhard ? tr("superHardLevel") : tr("hardLevel");
     this.tutPaused = true;
     const dim = this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0x000000, 0.45).setDepth(D).setInteractive();
     const band = this.add.rectangle(GAME_W / 2, cy, GAME_W + 40, 88, color, 0.96).setDepth(D + 1).setScale(1, 0.1);
@@ -726,9 +727,7 @@ export class GameScene extends Phaser.Scene {
     if (!front) return;
     // SLAM (L1 mới): dạy 2-hop — bấm xe → chiếm Ô CHỜ → lao ra ray. Các bước sau (khoá ô,
     // xe quay về) nối tiếp bằng sentinel 11-14 (xem launchFromInventory/updateSlotLocks/parkChest).
-    const msg = this.slamMode
-      ? "Tap the car — it grabs a\nwaiting slot & rolls out!"
-      : "Tap the car to\nsend it out!";
+    const msg = this.slamMode ? tr("tutTapCarSlam") : tr("tutTapCar");
     this.showTutHint(front.container.x, front.container.y, msg, this.chestSize * 0.95);
   }
 
@@ -776,20 +775,20 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(D + 2);
     const title = this.add
-      .text(GAME_W / 2, y0 + 118, "Twin Cars!", {
+      .text(GAME_W / 2, y0 + 118, tr("twinTitle"), {
         fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "22px", color: "#6a4a12",
       })
       .setOrigin(0.5)
       .setDepth(D + 2);
     const desc = this.add
-      .text(GAME_W / 2, y0 + 172, "These two are best buddies — they set off, park, and leave TOGETHER, always side by side. Tap one and BOTH roll out!", {
+      .text(GAME_W / 2, y0 + 172, tr("twinDesc"), {
         fontFamily: "Arial, sans-serif", fontSize: "14px", color: "#6a4a12", align: "center",
         wordWrap: { width: pw - 44 },
       })
       .setOrigin(0.5)
       .setDepth(D + 2);
     const ok = this.add
-      .text(GAME_W / 2, y0 + ph - 34, "GOT IT!", {
+      .text(GAME_W / 2, y0 + ph - 34, tr("gotIt"), {
         fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "16px", color: "#ffffff",
         backgroundColor: "#3a8a3a", padding: { x: 26, y: 8 },
       })
@@ -818,7 +817,7 @@ export class GameScene extends Phaser.Scene {
     const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
     const radius = (Math.max(...xs) - Math.min(...xs)) / 2 + this.chestSize * 0.78;
     this.tutStep = 8; // group-launch step
-    this.showTutHint(cx, cy, "Tap to send the\nlinked cars out together!", radius);
+    this.showTutHint(cx, cy, tr("tutTwinLaunch"), radius);
   }
 
   // Spotlight a spot on screen: freeze the game, dim everything AROUND a clear
@@ -1450,7 +1449,7 @@ export class GameScene extends Phaser.Scene {
     }
     // While using placeholder art, stamp a readable label so it's obvious what it is.
     if (this.missingArt.has(key) && kind !== "soft") {
-      const label = kind === "hard" ? "HARD\nROCK" : "WOOD";
+      const label = kind === "hard" ? tr("hardRockTile") : tr("woodTile");
       const t = this.add
         .text(0, 0, label, {
           fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: `${Math.round(tileSize * 0.22)}px`,
@@ -1661,7 +1660,7 @@ export class GameScene extends Phaser.Scene {
         // không bấm được). Game vẫn chạy; đợi xe quay về (bước 13) mới spotlight tiếp.
         if (this.tutStep === 11) {
           this.tutStep = 13;
-          this.tutFloatTip(this.slotXs[i] ?? 0, this.slotY, "This bay stays LOCKED\nwhile its car is out!");
+          this.tutFloatTip(this.slotXs[i] ?? 0, this.slotY, tr("tutBayLocked"));
         }
       } else if (ghost) {
         ghost.setVisible(false);
@@ -1999,7 +1998,7 @@ export class GameScene extends Phaser.Scene {
 
     const icon = this.add.image(GAME_W / 2, y0 + 56, def.img).setDisplaySize(60, 60).setDepth(D + 2);
     const title = this.add
-      .text(GAME_W / 2, y0 + 104, `Buy ${def.label}?`, {
+      .text(GAME_W / 2, y0 + 104, trf("buyTitle", { name: tr(`boost_${key}_label`) }), {
         fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "20px", color: "#6a4a12",
       })
       .setOrigin(0.5)
@@ -2018,7 +2017,7 @@ export class GameScene extends Phaser.Scene {
       this.tutPaused = false; // unfreeze
     };
     const no = this.add
-      .text(GAME_W / 2 - 66, y0 + ph - 30, "CANCEL", {
+      .text(GAME_W / 2 - 66, y0 + ph - 30, tr("cancel"), {
         fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "15px", color: "#ffffff",
         backgroundColor: "#b0392b", padding: { x: 16, y: 8 },
       })
@@ -2026,7 +2025,7 @@ export class GameScene extends Phaser.Scene {
       .setDepth(D + 2)
       .setInteractive({ useHandCursor: true });
     const yes = this.add
-      .text(GAME_W / 2 + 56, y0 + ph - 30, "BUY", {
+      .text(GAME_W / 2 + 56, y0 + ph - 30, tr("buy"), {
         fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "15px", color: "#ffffff",
         backgroundColor: "#3a8a3a", padding: { x: 24, y: 8 },
       })
@@ -2040,7 +2039,7 @@ export class GameScene extends Phaser.Scene {
     yes.on("pointerdown", () => {
       if (this.gold < def.cost) {
         close();
-        this.toast(`Need ${def.cost} gold`);
+        this.toast(trf("needGold", { n: def.cost }));
         return;
       }
       this.addGold(-def.cost);
@@ -2048,7 +2047,7 @@ export class GameScene extends Phaser.Scene {
       this.saveBoosterCounts();
       this.drawBoosters();
       close();
-      this.toast(`${def.label} purchased! Tap to use.`);
+      this.toast(trf("purchased", { name: tr(`boost_${key}_label`) }));
     });
   }
 
@@ -2129,26 +2128,26 @@ export class GameScene extends Phaser.Scene {
     panel.strokeRoundedRect(x0, y0, pw, ph, 20);
     const icon = this.add.image(GAME_W / 2, y0 + 66, b.img).setDisplaySize(72, 72).setDepth(D + 2);
     const title = this.add
-      .text(GAME_W / 2, y0 + 126, b.title, {
+      .text(GAME_W / 2, y0 + 126, tr(`boost_${b.key}_title`), {
         fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "21px", color: "#6a4a12",
       })
       .setOrigin(0.5)
       .setDepth(D + 2);
     const desc = this.add
-      .text(GAME_W / 2, y0 + 178, b.desc, {
+      .text(GAME_W / 2, y0 + 178, tr(`boost_${b.key}_desc`), {
         fontFamily: "Arial, sans-serif", fontSize: "14px", color: "#6a4a12", align: "center",
         wordWrap: { width: pw - 44 },
       })
       .setOrigin(0.5)
       .setDepth(D + 2);
     const gift = this.add
-      .text(GAME_W / 2, y0 + ph - 66, `🎁 You got ${FREE_GIFT} free!`, {
+      .text(GAME_W / 2, y0 + ph - 66, trf("giftFree", { n: FREE_GIFT }), {
         fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "15px", color: "#2a7a2a",
       })
       .setOrigin(0.5)
       .setDepth(D + 2);
     const ok = this.add
-      .text(GAME_W / 2, y0 + ph - 32, "SHOW ME!", {
+      .text(GAME_W / 2, y0 + ph - 32, tr("showMe"), {
         fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "16px", color: "#ffffff",
         backgroundColor: "#3a8a3a", padding: { x: 26, y: 8 },
       })
@@ -2178,7 +2177,7 @@ export class GameScene extends Phaser.Scene {
     }
     this.tutBooster = { list, idx, key: b.key };
     const size = Math.min(this.boostBarH - 26, 52);
-    this.showTutHint(pos.x, pos.y, "Tap this booster\nto use it!", size * 0.72);
+    this.showTutHint(pos.x, pos.y, tr("tutBooster"), size * 0.72);
   }
 
   // World position of a booster's button (mirrors the layout math in drawBoosters).
@@ -2210,7 +2209,7 @@ export class GameScene extends Phaser.Scene {
   private affordToast(key: string): boolean {
     if (this.canUseBooster(key)) return true;
     const def = BOOSTERS.find((b) => b.key === key)!;
-    this.toast(`Tap ${def.label} to buy one (${def.cost} 🪙)`);
+    this.toast(trf("tapToBuy", { name: tr(`boost_${key}_label`), n: def.cost }));
     return false;
   }
 
@@ -2218,7 +2217,7 @@ export class GameScene extends Phaser.Scene {
   private boosterAdd() {
     if (this.won) return;
     if (this.slotCount >= 6) {
-      this.toast("Max 6 bays");
+      this.toast(tr("max6"));
       return;
     }
     if (!this.affordToast("add")) return;
@@ -2228,7 +2227,7 @@ export class GameScene extends Phaser.Scene {
     this.layoutSlots();
     if (this.slotWarnActive) this.stopSlotWarning(); // a fresh empty bay clears the warning
     this.flashNewSlot(this.slotCount - 1); // draw the eye to the brand-new bay
-    this.toast("+1 waiting bay!");
+    this.toast(tr("plusBay"));
   }
 
   // Pulse a green ring on a bay a few times to call out that it's newly added.
@@ -2257,12 +2256,12 @@ export class GameScene extends Phaser.Scene {
     if (this.won || this.handMode || this.magnetMode) return;
     const queued = this.invColumns.flat().filter((v) => v.container.scene);
     if (queued.length === 0) {
-      this.toast("Queue is empty");
+      this.toast(tr("queueEmptyT"));
       return;
     }
     if (!this.affordToast("hand")) return;
     this.handMode = true;
-    this.toast("Grab any car — a back-row one is best!");
+    this.toast(tr("grabHint"));
     this.armHandHighlight(); // spotlight the buried back-row cars (Grab's best use)
     // Defer one tick so the tap that pressed the booster button isn't captured.
     this.time.delayedCall(40, () =>
@@ -2289,15 +2288,15 @@ export class GameScene extends Phaser.Scene {
               return p && p.r <= 1;
             });
             if (!ok) {
-              this.toast("Linked cars: all must be in the first 2 rows to grab them together");
+              this.toast(tr("twinGrabAll"));
               return;
             }
           }
           this.consumeBooster("hand");
           this.launchQueued(best);
-          this.toast("Car sent!");
+          this.toast(tr("carSent"));
         } else {
-          this.toast("Cancelled");
+          this.toast(tr("cancelled"));
         }
       }),
     );
@@ -2368,7 +2367,7 @@ export class GameScene extends Phaser.Scene {
     // Only recolour ordinary colour cars (leave hammer/wood cars as they are).
     const cars = this.invColumns.flat().filter((v) => v.container.scene && (v.chest.kind ?? "color") === "color");
     if (cars.length === 0) {
-      this.toast("Queue is empty");
+      this.toast(tr("queueEmptyT"));
       return;
     }
     // colours that still have uncollected SLIMES on the board (skip obstacles)
@@ -2384,7 +2383,7 @@ export class GameScene extends Phaser.Scene {
       }
     }
     if (left.length === 0) {
-      this.toast("No slimes left");
+      this.toast(tr("noSlimes"));
       return;
     }
     if (!this.affordToast("refresh")) return;
@@ -2417,7 +2416,7 @@ export class GameScene extends Phaser.Scene {
         },
       });
     });
-    this.time.delayedCall(total + 120, () => this.toast("Cars recolored!"));
+    this.time.delayedCall(total + 120, () => this.toast(tr("recolored")));
   }
 
   // Briefly dim everything EXCEPT the lineup queue (zone 3), with a pulsing frame, so
@@ -2477,13 +2476,13 @@ export class GameScene extends Phaser.Scene {
   private boosterMagnet() {
     if (this.won || this.handMode || this.magnetMode) return;
     if (this.keysRemaining <= 0) {
-      this.toast("No slimes left");
+      this.toast(tr("noSlimes"));
       return;
     }
     // Seat accounting needs every same-colour car settled in a bay or the queue —
     // with cars mid-run the books can't be squared (user 2026-08-02: block + tell them).
     if (this.active.length > 0 || this.pending.length > 0) {
-      this.toast("Wait for the running cars to finish!");
+      this.toast(tr("waitCars"));
       return;
     }
     if (!this.affordToast("magnet")) return;
@@ -2544,13 +2543,13 @@ export class GameScene extends Phaser.Scene {
 
     const hi = this.add.graphics().setDepth(D + 3); // picked-cluster highlight
     const title = this.add
-      .text(GAME_W / 2, y0 + 28, "Magnet: tap a slime cluster", {
+      .text(GAME_W / 2, y0 + 28, tr("magnetTitle"), {
         fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "19px", color: "#6a4a12",
       })
       .setOrigin(0.5)
       .setDepth(D + 2);
     const info = this.add
-      .text(GAME_W / 2, by + bh + 20, "Tap any slime on the zoomed board", {
+      .text(GAME_W / 2, by + bh + 20, tr("magnetHint"), {
         fontFamily: "Arial, sans-serif", fontSize: "13px", color: "#6a4a12", align: "center",
         wordWrap: { width: pw - 44 },
       })
@@ -2558,7 +2557,7 @@ export class GameScene extends Phaser.Scene {
       .setDepth(D + 2);
     const btnY = y0 + ph - 32;
     const no = this.add
-      .text(GAME_W / 2 - 66, btnY, "CANCEL", {
+      .text(GAME_W / 2 - 66, btnY, tr("cancel"), {
         fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "15px", color: "#ffffff",
         backgroundColor: "#b0392b", padding: { x: 16, y: 8 },
       })
@@ -2566,7 +2565,7 @@ export class GameScene extends Phaser.Scene {
       .setDepth(D + 5)
       .setInteractive({ useHandCursor: true });
     const yes = this.add
-      .text(GAME_W / 2 + 60, btnY, "USE", {
+      .text(GAME_W / 2 + 60, btnY, tr("use"), {
         fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "15px", color: "#ffffff",
         backgroundColor: "#3a8a3a", padding: { x: 22, y: 8 },
       })
@@ -2633,17 +2632,17 @@ export class GameScene extends Phaser.Scene {
         hi.fillRect(bx + c * zc, by + r * zc, zc, zc);
         hi.strokeRect(bx + c * zc + 1, by + r * zc + 1, zc - 2, zc - 2);
       }
-      info.setText(`${picked.length} slime${picked.length > 1 ? "s" : ""} will board the VIP car`);
+      info.setText(trf("magnetCount", { n: picked.length }));
       yes.setVisible(true);
     });
 
     no.on("pointerdown", () => {
       closeAll();
-      this.toast("Cancelled");
+      this.toast(tr("cancelled"));
     });
     dim.on("pointerdown", () => {
       closeAll();
-      this.toast("Cancelled");
+      this.toast(tr("cancelled"));
     });
     yes.on("pointerdown", () => {
       if (!picked.length) return;
@@ -2652,7 +2651,7 @@ export class GameScene extends Phaser.Scene {
       const alive = picked.filter((i) => this.keys[i] && board[i] === pickedColor);
       closeAll();
       if (!alive.length) {
-        this.toast("Those slimes are gone");
+        this.toast(tr("slimesGone"));
         return;
       }
       this.consumeBooster("magnet");
@@ -2698,7 +2697,7 @@ export class GameScene extends Phaser.Scene {
     const remaining = group.filter((i) => this.keys[i] && this.level.board[i] === color);
     const total = remaining.length;
     if (total === 0) {
-      this.toast("No slimes of that color");
+      this.toast(tr("noColorSlimes"));
       return;
     }
     // Same-colour cars pay the pulled seats back one-by-one as the suction runs
@@ -2742,7 +2741,7 @@ export class GameScene extends Phaser.Scene {
         this.payMagnetDebt(debtPlan); // one seat off a same-colour car, in step with the pull
       },
     });
-    this.toast("VIP car incoming!");
+    this.toast(tr("vipIncoming"));
   }
 
   // MAGNET accounting (user 2026-08-02, refined): the pulled cluster's seats come off
@@ -3028,7 +3027,7 @@ export class GameScene extends Phaser.Scene {
     panel.lineStyle(4, 0x8a5a12, 1);
     panel.strokeRoundedRect(x0, y0, pw, ph, 18);
     const title = this.add
-      .text(GAME_W / 2, y0 + 34, "SETTINGS", {
+      .text(GAME_W / 2, y0 + 34, tr("settings"), {
         fontFamily: "Arial, sans-serif",
         fontStyle: "bold",
         fontSize: "22px",
@@ -3051,7 +3050,7 @@ export class GameScene extends Phaser.Scene {
         .setInteractive({ useHandCursor: true });
       const refresh = () => {
         const on = get();
-        btn.setText(`${label}: ${on ? "BẬT" : "TẮT"}`);
+        btn.setText(`${label}: ${on ? tr("on") : tr("off")}`);
         btn.setBackgroundColor(on ? "#3a8a3a" : "#9a9a9a");
       };
       refresh();
@@ -3062,19 +3061,37 @@ export class GameScene extends Phaser.Scene {
       return btn;
     };
     Audio.unlock(); // opening settings is a user gesture — safe to init audio
-    const sfxBtn = mkToggle(y0 + 84, "🔊 Sound FX", () => Audio.isSfxOn, (v) => Audio.setSfx(v));
+    const sfxBtn = mkToggle(y0 + 84, tr("sfx"), () => Audio.isSfxOn, (v) => Audio.setSfx(v));
     // Step guide (user 2026-07-30): default OFF; when ON the game points at the next move.
-    const guideBtn = mkToggle(y0 + 124, "🧭 Chỉ dẫn từng bước", () => this.guideMode, (v) => {
+    const guideBtn = mkToggle(y0 + 124, tr("guide"), () => this.guideMode, (v) => {
       this.guideMode = v;
       try { localStorage.setItem("hopin_guide", v ? "1" : "0"); } catch { /* ignore */ }
       if (!v) this.clearGuidePointer();
+    });
+
+    // Language switch (user 2026-08-02): Tiếng Việt default, tap flips vi ↔ en.
+    // Rebuild the modal + booster bar so the change shows instantly; the rest of the
+    // HUD keeps universal words (Level/Home/Coin) so no live redraw is needed there.
+    const langBtn = this.add
+      .text(GAME_W / 2, y0 + 164, tr("language"), {
+        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "15px",
+        color: "#ffffff", backgroundColor: "#2f6fd0", padding: { x: 16, y: 7 },
+      })
+      .setOrigin(0.5)
+      .setDepth(D + 2)
+      .setInteractive({ useHandCursor: true });
+    langBtn.on("pointerdown", () => {
+      setLang(getLang() === "vi" ? "en" : "vi");
+      this.drawBoosters();
+      kill();
+      this.openSettings(); // reopen, fully redrawn in the new language
     });
 
     // Reset progress — replay from Level 1 (keeps gold; re-arms the tutorials). Two-tap
     // confirm so a stray tap can't wipe the player's climb (user 2026-07-31).
     let resetArmed = false;
     const reset = this.add
-      .text(GAME_W / 2, y0 + 172, "🔄 Chơi lại từ đầu", {
+      .text(GAME_W / 2, y0 + 212, tr("resetBtn"), {
         fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "15px",
         color: "#ffffff", backgroundColor: "#b23a2a", padding: { x: 16, y: 7 },
       })
@@ -3084,9 +3101,9 @@ export class GameScene extends Phaser.Scene {
     reset.on("pointerdown", () => {
       if (!resetArmed) {
         resetArmed = true;
-        reset.setText("⚠ Xoá tiến trình? Bấm lần nữa");
+        reset.setText(tr("resetConfirm"));
         this.time.delayedCall(2600, () => {
-          if (reset.active) { resetArmed = false; reset.setText("🔄 Chơi lại từ đầu"); }
+          if (reset.active) { resetArmed = false; reset.setText(tr("resetBtn")); }
         });
         return;
       }
@@ -3095,7 +3112,7 @@ export class GameScene extends Phaser.Scene {
 
     // Jump back to the level picker.
     const select = this.add
-      .text(GAME_W / 2, y0 + 216, "🗺  Levels", {
+      .text(GAME_W / 2, y0 + 260, tr("levelsBtn"), {
         fontFamily: "Arial, sans-serif",
         fontStyle: "bold",
         fontSize: "16px",
@@ -3107,7 +3124,7 @@ export class GameScene extends Phaser.Scene {
       .setDepth(D + 2)
       .setInteractive({ useHandCursor: true });
     const close = this.add
-      .text(GAME_W / 2, y0 + ph - 28, "Close", {
+      .text(GAME_W / 2, y0 + ph - 28, tr("close"), {
         fontFamily: "Arial, sans-serif",
         fontStyle: "bold",
         fontSize: "16px",
@@ -3124,6 +3141,7 @@ export class GameScene extends Phaser.Scene {
       title.destroy();
       sfxBtn.destroy();
       guideBtn.destroy();
+      langBtn.destroy();
       reset.destroy();
       select.destroy();
       close.destroy();
@@ -3510,7 +3528,7 @@ export class GameScene extends Phaser.Scene {
     if (this.slamMode) {
       const need = group.length;
       const freeSlots = this.slots.reduce((n, s) => n + (s ? 0 : 1), 0);
-      if (freeSlots < need) { this.smallNotice("All waiting slots are locked!"); return; }
+      if (freeSlots < need) { this.smallNotice(tr("slotsLocked")); return; }
       if (this.active.length + this.pending.length + need > MAX_ON_TRACK) { this.trackFullNotice(); return; }
       this.playPop();
       this.idleSince = this.time.now; // player acted → restart the idle-nudge timer
@@ -5400,7 +5418,7 @@ export class GameScene extends Phaser.Scene {
 
   // Rare celebration: a bouncy praise banner + a gold star burst at the car.
   private niceEffect(x: number, y: number) {
-    const words = ["Nice!", "Great!", "Wow!", "Cool!"];
+    const words = tr("niceWords").split("|");
     const word = words[Math.floor(Math.random() * words.length)];
     const t = this.add
       .text(x, y - 8, word, {
@@ -5511,7 +5529,7 @@ export class GameScene extends Phaser.Scene {
           const si0 = si;
           this.time.delayedCall(700, () => {
             if (this.tutStep === 14 && !this.won && !this.lost) {
-              this.showTutHint(this.slotXs[si0] ?? 0, this.slotY, "Not full yet, so it came back!\nTap it to run again. If NO car\ncan move, you lose!", SLOT_SIZE * 0.95);
+              this.showTutHint(this.slotXs[si0] ?? 0, this.slotY, tr("tutCameBack"), SLOT_SIZE * 0.95);
             }
           });
         }
@@ -5649,7 +5667,7 @@ export class GameScene extends Phaser.Scene {
       this.tutStep = 3;
       this.time.delayedCall(700, () => {
         if (this.tutStep === 3 && !this.won && !this.lost) {
-          this.showTutHint(this.slotXs[slotIndex], this.slotY, "Tap the parked car\nto send it out again!", SLOT_SIZE * 0.9);
+          this.showTutHint(this.slotXs[slotIndex], this.slotY, tr("tutTapParked"), SLOT_SIZE * 0.9);
         }
       });
     }
@@ -5727,7 +5745,7 @@ export class GameScene extends Phaser.Scene {
     } else {
       objs.push(
         this.add
-          .text(cx, heroCY, "QUEUE FULL! 😵", {
+          .text(cx, heroCY, tr("queueFull"), {
             fontFamily: "Arial, sans-serif",
             fontStyle: "bold",
             fontSize: "23px",
@@ -5806,7 +5824,7 @@ export class GameScene extends Phaser.Scene {
       reviveY,
       btnW,
       60,
-      canAfford ? `REVIVE   ${REVIVE_COST} 🪙` : `Need ${REVIVE_COST} 🪙 to revive`,
+      canAfford ? trf("reviveBtn", { n: REVIVE_COST }) : trf("reviveNeed", { n: REVIVE_COST }),
       0x35b04a,
       0x1f7d33,
       revive,
@@ -5817,11 +5835,11 @@ export class GameScene extends Phaser.Scene {
     const gap = 14;
     const bw = (btnW - gap) / 2;
     const by = reviveY + 60;
-    mkBtn(cx - gap / 2 - bw / 2, by, bw, 46, "Replay", 0xd98a2b, 0xa5610f, () => {
+    mkBtn(cx - gap / 2 - bw / 2, by, bw, 46, tr("replay"), 0xd98a2b, 0xa5610f, () => {
       closeAll();
       this.startLevel(this.levelNum);
     });
-    mkBtn(cx + gap / 2 + bw / 2, by, bw, 46, "Home", 0x6d7b8a, 0x49525d, () => {
+    mkBtn(cx + gap / 2 + bw / 2, by, bw, 46, tr("home"), 0x6d7b8a, 0x49525d, () => {
       closeAll();
       this.scene.start("select");
     });
@@ -5991,7 +6009,7 @@ export class GameScene extends Phaser.Scene {
       }
       // Loading... với dấu chấm nhảy
       const loadTx = this.add
-        .text(cx, GAME_H - 64, "Loading", { fontFamily: '"Lilita One", "Arial Black", Arial, sans-serif', fontSize: "20px", color: "#e8e0c8" })
+        .text(cx, GAME_H - 64, tr("loading"), { fontFamily: '"Lilita One", "Arial Black", Arial, sans-serif', fontSize: "20px", color: "#e8e0c8" })
         .setOrigin(0.5)
         .setDepth(502);
       objs.push(loadTx);
@@ -6000,7 +6018,7 @@ export class GameScene extends Phaser.Scene {
         this.time.addEvent({
           delay: 320,
           loop: true,
-          callback: () => { dots = (dots + 1) % 4; loadTx.setText("Loading" + ".".repeat(dots)); },
+          callback: () => { dots = (dots + 1) % 4; loadTx.setText(tr("loading") + ".".repeat(dots)); },
         })
       );
       // mặc định 3.5s rồi sang màn (user 2026-08-01: loading lâu hơn, 3-4s;
@@ -6190,7 +6208,7 @@ export class GameScene extends Phaser.Scene {
     banner.setAlpha(0);
     objs.push(banner);
     const bText = this.add
-      .text(cx, bannerY, "LEVEL COMPLETE!", { fontFamily: '"Lilita One", "Arial Black", Arial, sans-serif', fontSize: "28px", color: "#ffffff", stroke: "#b97a08", strokeThickness: 5 })
+      .text(cx, bannerY, tr("levelComplete"), { fontFamily: '"Lilita One", "Arial Black", Arial, sans-serif', fontSize: "28px", color: "#ffffff", stroke: "#b97a08", strokeThickness: 5 })
       .setOrigin(0.5)
       .setDepth(403)
       .setScale(0.2);
@@ -6335,7 +6353,7 @@ export class GameScene extends Phaser.Scene {
     claimBtn.strokeRoundedRect(cx - cbw / 2, claimY - 25, cbw, 50, 24);
     objs.push(claimBtn);
     const cText = this.add
-      .text(cx, claimY, "CLAIM", { fontFamily: '"Lilita One", "Arial Black", Arial, sans-serif', fontSize: "22px", color: "#ffffff", stroke: "#187029", strokeThickness: 4 })
+      .text(cx, claimY, tr("claim"), { fontFamily: '"Lilita One", "Arial Black", Arial, sans-serif', fontSize: "22px", color: "#ffffff", stroke: "#187029", strokeThickness: 4 })
       .setOrigin(0.5)
       .setDepth(403);
     objs.push(cText);

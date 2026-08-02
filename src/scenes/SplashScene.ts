@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { GAME_W, GAME_H } from "./GameScene";
 import { Audio } from "../game/audio";
+import { t as tr } from "../game/i18n";
 
 // Fade out and remove the pre-boot loading screen baked into index.html.
 function hideBootScreen() {
@@ -44,7 +45,7 @@ export class SplashScene extends Phaser.Scene {
     // "Loading…" pill a bit below the screen centre, gently pulsing (auto-advance, no tap).
     const y = Math.round(GAME_H * 0.62);
     const label = this.add
-      .text(GAME_W / 2, y, "Loading…", {
+      .text(GAME_W / 2, y, tr("loading") + "…", {
         fontFamily: "Arial, sans-serif",
         fontStyle: "bold",
         fontSize: "20px",
@@ -61,7 +62,7 @@ export class SplashScene extends Phaser.Scene {
     // animated dots so it reads as "working"
     this.time.addEvent({
       delay: 420, loop: true,
-      callback: () => { const n = ((label.text.match(/\./g)?.length ?? 0) % 3) + 1; label.setText("Loading" + ".".repeat(n)); },
+      callback: () => { const n = ((label.text.match(/\./g)?.length ?? 0) % 3) + 1; label.setText(tr("loading") + ".".repeat(n)); },
     });
     this.tweens.add({
       targets: [label, pill],

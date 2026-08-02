@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { t as tr, tf as trf, getLang, setLang, type Lang } from "../game/i18n";
 import { GAME_W, GAME_H } from "./GameScene";
 import { levelDifficulty } from "../game/level";
 import {
@@ -31,8 +32,12 @@ export class LevelSelectScene extends Phaser.Scene {
     this.load.image("background2", "art/background2.jpg"); // Home mới: xe + slime giữa rừng (user 2026-08-01)
     this.load.image("avatar", "art/slime-3.png"); // a cute face for the profile chip
     this.load.image("star-icon", "art/star.png"); // xu sao — icon vàng thống nhất (user 2026-08-01)
+    this.load.image("heart-icon", "art/heart.png?v=1"); // trái tim (lives) — art thật thay emoji ❤
     // Start-nav mascot. Placeholder for now → swap to the real cute-slime art when ready.
     this.load.image("start-slime", "art/slime-3.png");
+    // Nav icons (user 2026-08-02): nút Shop & Cup đã cắt-viền tròn, thay emoji 🛒/🏆.
+    this.load.image("nav-shop", "art/nav-shop.png");
+    this.load.image("nav-trophy", "art/nav-trophy.png");
     // Lucky Clover event: booster sprites for the reward previews (clover drawn/emoji).
     for (const b of ["add", "hand", "refresh", "magnet"]) this.load.image(`booster-${b}`, `art/booster-${b}.png`);
   }
@@ -115,7 +120,7 @@ export class LevelSelectScene extends Phaser.Scene {
     // tag tier ngay dưới ô — cùng ngôn ngữ với banner cảnh báo trong GameScene
     if (d !== "normal") {
       const tag = this.add
-        .text(px, py + h / 2 + 17, d === "superhard" ? "💀 SUPER HARD" : "🔥 HARD", {
+        .text(px, py + h / 2 + 17, d === "superhard" ? tr("tagSuper") : tr("tagHard"), {
           fontFamily: "Arial, sans-serif",
           fontStyle: "bold",
           fontSize: "14px",
@@ -145,20 +150,17 @@ export class LevelSelectScene extends Phaser.Scene {
   private buildTopBar() {
     const y = 46;
     const D = 60;
-    const av = this.add.graphics().setDepth(D);
-    av.fillStyle(0x123a78, 1);
-    av.fillRoundedRect(14, y - 26, 56, 56, 14);
-    av.lineStyle(3, 0x8fc0ff, 1);
-    av.strokeRoundedRect(14, y - 26, 56, 56, 14);
-    this.add.image(42, y + 2, "avatar").setDisplaySize(46, 46).setDepth(D + 1);
+    // Avatar góc trái = con slime Ở GIỮA nav (start-slime), không khung xanh (user 2026-08-02).
+    this.add.image(42, y, "start-slime").setDisplaySize(54, 54).setDepth(D + 1);
 
-    this.statPill(148, y, 96, 0xef3f5a, "❤", "5", "MAX");
+    this.statPill(150, y, 120, 0xef3f5a, "❤", "5", "", "#ffffff", 0xffffff, 15, true);
     // Gold coin: a slightly bigger golden disc with a dark-gold rim, no letter.
-    this.statPill(300, y, 108, 0xf9c22e, "", String(this.gold), "＋", "#8a5a10", 0xc98a10, 17);
+    // Wider pill so multi-digit gold never overflows on phone (user 2026-08-02). Value centred.
+    this.statPill(334, y, 158, 0xf9c22e, "", String(this.gold), "＋", "#8a5a10", 0xc98a10, 17, true);
 
     const s = this.add
-      .circle(GAME_W - 34, y, 22, 0x2f6fd0, 1)
-      .setStrokeStyle(3, 0x8fc0ff, 1)
+      .circle(GAME_W - 34, y, 22, 0xe23b3b, 1) // đỏ như gear trong game (user 2026-08-02)
+      .setStrokeStyle(3, 0xffffff, 0.95)
       .setDepth(D)
       .setInteractive({ useHandCursor: true });
     this.add.text(GAME_W - 34, y - 1, "⚙", { fontSize: "24px", color: "#ffffff" }).setOrigin(0.5).setDepth(D + 1);
@@ -185,7 +187,7 @@ export class LevelSelectScene extends Phaser.Scene {
   private openSettings() {
     const D = 400;
     const pw = 320;
-    const ph = 346;
+    const ph = 412;
     const x0 = GAME_W / 2 - pw / 2;
     const y0 = GAME_H / 2 - ph / 2;
     const progress = Math.max(1, this.readInt("pf_progress", 1));
@@ -204,19 +206,19 @@ export class LevelSelectScene extends Phaser.Scene {
 
     objs.push(
       this.add
-        .text(GAME_W / 2, y0 + 28, "Settings", {
+        .text(GAME_W / 2, y0 + 28, tr("selSettings"), {
           fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "22px", color: "#6a4a12",
         })
         .setOrigin(0.5)
         .setDepth(D + 2),
       this.add
-        .text(x0 + 22, y0 + 66, "Level Select", {
+        .text(x0 + 22, y0 + 66, tr("selMode"), {
           fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "16px", color: "#6a4a12",
         })
         .setOrigin(0, 0.5)
         .setDepth(D + 2),
       this.add
-        .text(x0 + 22, y0 + 88, "How you choose which level to play", {
+        .text(x0 + 22, y0 + 88, tr("selModeSub"), {
           fontFamily: "Arial, sans-serif", fontSize: "12px", color: "#8a6a2a",
         })
         .setOrigin(0, 0.5)
@@ -260,12 +262,12 @@ export class LevelSelectScene extends Phaser.Scene {
     };
     const close = () => objs.forEach((o) => o.destroy());
     // Picking a DIFFERENT mode saves it and rebuilds the map (locks update live).
-    mkSeg(x0 + 22, "Sequential", "In order", !free, () => {
+    mkSeg(x0 + 22, tr("seqTitle"), tr("seqSub"), !free, () => {
       if (!free) return close();
       this.setFreeSelect(false);
       this.scene.restart();
     });
-    mkSeg(x0 + 22 + segW + 12, "Any Level", "Free pick", free, () => {
+    mkSeg(x0 + 22 + segW + 12, tr("anyTitle"), tr("anySub"), free, () => {
       if (free) return close();
       this.setFreeSelect(true);
       this.scene.restart();
@@ -277,13 +279,13 @@ export class LevelSelectScene extends Phaser.Scene {
     // fallback, so every number 1..LEVEL_COUNT is playable even if it isn't hand-designed.
     objs.push(
       this.add
-        .text(x0 + 22, segY + segH + 24, "Jump to Level", {
+        .text(x0 + 22, segY + segH + 24, tr("jump"), {
           fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "16px", color: "#6a4a12",
         })
         .setOrigin(0, 0.5)
         .setDepth(D + 2),
       this.add
-        .text(x0 + 22, segY + segH + 44, `Type a number (1–${LEVEL_COUNT}) to start there`, {
+        .text(x0 + 22, segY + segH + 44, trf("jumpSub", { n: LEVEL_COUNT }), {
           fontFamily: "Arial, sans-serif", fontSize: "12px", color: "#8a6a2a",
         })
         .setOrigin(0, 0.5)
@@ -299,7 +301,7 @@ export class LevelSelectScene extends Phaser.Scene {
     jumpG.lineStyle(3, 0x1c4a94, 1);
     jumpG.strokeRoundedRect(x0 + 22, jumpY, jumpW, jumpH, 12);
     const jumpLabel = this.add
-      .text(GAME_W / 2, jumpY + jumpH / 2, "✏  Enter Level Number", {
+      .text(GAME_W / 2, jumpY + jumpH / 2, tr("enterLevel"), {
         fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "16px", color: "#ffffff",
       })
       .setOrigin(0.5)
@@ -310,19 +312,57 @@ export class LevelSelectScene extends Phaser.Scene {
       .setInteractive({ useHandCursor: true });
     objs.push(jumpG, jumpLabel, jumpHit);
     jumpHit.on("pointerdown", () => {
-      const raw = window.prompt(`Start at which level? (1–${LEVEL_COUNT})`, String(progress));
+      const raw = window.prompt(trf("jumpPrompt", { n: LEVEL_COUNT }), String(progress));
       if (raw == null) return; // cancelled
       const n = parseInt(raw.trim(), 10);
       if (!Number.isFinite(n) || n < 1 || n > LEVEL_COUNT) {
-        this.toast(`Enter a number from 1 to ${LEVEL_COUNT}`);
+        this.toast(trf("jumpRange", { n: LEVEL_COUNT }));
         return;
       }
       close();
       this.scene.start("game", { level: n });
     });
 
+    // ---- Language (user 2026-08-02): Tiếng Việt (default) | English ------
+    const langY = jumpY + jumpH + 18;
+    objs.push(
+      this.add
+        .text(x0 + 22, langY + 8, "Ngôn ngữ / Language", {
+          fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "16px", color: "#6a4a12",
+        })
+        .setOrigin(0, 0.5)
+        .setDepth(D + 2),
+    );
+    const lY = langY + 24;
+    const mkLang = (bx: number, label: string, on: boolean, pick: Lang) => {
+      const g = this.add.graphics().setDepth(D + 2);
+      g.fillStyle(on ? 0x35b04a : 0xe4d3a3, 1);
+      g.fillRoundedRect(bx, lY, segW, 40, 12);
+      g.lineStyle(3, on ? 0x1f7d33 : 0xb79a5a, 1);
+      g.strokeRoundedRect(bx, lY, segW, 40, 12);
+      const tx = this.add
+        .text(bx + segW / 2, lY + 20, label, {
+          fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "15px",
+          color: on ? "#ffffff" : "#6a4a12",
+        })
+        .setOrigin(0.5)
+        .setDepth(D + 3);
+      const hit = this.add
+        .rectangle(bx + segW / 2, lY + 20, segW, 40, 0xffffff, 0.001)
+        .setDepth(D + 4)
+        .setInteractive({ useHandCursor: true });
+      hit.on("pointerdown", () => {
+        if (getLang() === pick) return;
+        setLang(pick);
+        this.scene.restart(); // redraw the whole Home in the new language
+      });
+      objs.push(g, tx, hit);
+    };
+    mkLang(x0 + 22, "Tiếng Việt", getLang() === "vi", "vi");
+    mkLang(x0 + 22 + segW + 12, "English", getLang() === "en", "en");
+
     const closeBtn = this.add
-      .text(GAME_W / 2, y0 + ph - 26, "CLOSE", {
+      .text(GAME_W / 2, y0 + ph - 26, tr("closeCaps"), {
         fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "15px", color: "#ffffff",
         backgroundColor: "#8a5a12", padding: { x: 24, y: 8 },
       })
@@ -345,21 +385,28 @@ export class LevelSelectScene extends Phaser.Scene {
     iconTextColor = "#ffffff",
     rim = 0xffffff,
     iconR = 15,
+    centerVal = false, // căn GIỮA value trong khoảng phải của icon (dùng cho ô Tim)
   ) {
     const D = 60;
     const g = this.add.graphics().setDepth(D);
-    g.fillStyle(0x0e2f2b, 0.85);
-    g.fillRoundedRect(x - w / 2, y - 17, w, 34, 17);
-    g.lineStyle(2.5, 0xffe08a, 0.6);
-    g.strokeRoundedRect(x - w / 2, y - 17, w, 34, 17);
+    // Pill GỖ như trong game (user 2026-08-02): đáy tối → thân gỗ → đỉnh bắt sáng + viền sẫm.
+    const px = x - w / 2, py = y - 20, pph = 40; // pill cao hơn (user 2026-08-02)
+    g.fillStyle(0x5e3d1e, 1); g.fillRoundedRect(px, py, w, pph, 20); // đáy gỗ tối
+    g.fillStyle(0x9c6a3a, 1); g.fillRoundedRect(px + 2, py + 2, w - 4, pph - 5, 18); // thân gỗ chủ đạo
+    g.fillStyle(0xc79a6b, 0.85); g.fillRoundedRect(px + 3, py + 3, w - 6, 13, 9); // đỉnh bắt sáng
+    g.lineStyle(2.5, 0x4a2f16, 1); g.strokeRoundedRect(px, py, w, pph, 20); // viền gỗ sẫm
     // Pill VÀNG (icon rỗng) → dùng ảnh XU SAO thay đĩa vẽ tay (user 2026-08-01)
+    const heartImg = icon === "❤" && this.textures.exists("heart-icon");
     if (!icon && this.textures.exists("star-icon")) {
       const st = this.add.image(x - w / 2 + 17, y, "star-icon").setDepth(D + 1);
       st.setScale((iconR * 2.15) / Math.max(st.width, st.height));
+    } else if (heartImg) {
+      const ht = this.add.image(x - w / 2 + 17, y, "heart-icon").setDepth(D + 1);
+      ht.setScale((iconR * 1.95) / Math.max(ht.width, ht.height)); // real heart art (a touch smaller so it sits inside the pill)
     } else {
       this.add.circle(x - w / 2 + 17, y, iconR, color).setStrokeStyle(2, rim, 0.85).setDepth(D + 1);
     }
-    if (icon)
+    if (icon && !heartImg)
       this.add
         .text(x - w / 2 + 17, y - 1, icon, {
           fontFamily: "Arial, sans-serif",
@@ -369,14 +416,32 @@ export class LevelSelectScene extends Phaser.Scene {
         })
         .setOrigin(0.5)
         .setDepth(D + 2);
-    this.add
-      .text(x - w / 2 + 36, y, value, { fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "16px", color: "#ffffff" })
-      .setOrigin(0, 0.5)
-      .setDepth(D + 2);
-    this.add
-      .text(x + w / 2 - 14, y, tail, { fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "13px", color: "#ffe08a" })
-      .setOrigin(0.5)
-      .setDepth(D + 2);
+    if (centerVal) {
+      // căn GIỮA số trong vùng giữa icon và mép phải — né nút "+" nếu có tail
+      const rightB = tail === "＋" || tail === "+" ? x + w / 2 - 32 : x + w / 2 - 8;
+      const vx = (x - w / 2 + 17 + iconR + rightB) / 2;
+      this.add
+        .text(vx, y, value, { fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "18px", color: "#ffffff" })
+        .setOrigin(0.5, 0.5)
+        .setDepth(D + 2);
+    } else {
+      this.add
+        .text(x - w / 2 + 36, y, value, { fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "18px", color: "#ffffff" })
+        .setOrigin(0, 0.5)
+        .setDepth(D + 2);
+    }
+    if (tail === "＋" || tail === "+") {
+      // Nút "+" XANH bóng như trong game (thay chữ ＋)
+      const tx = x + w / 2 - 15;
+      this.add.circle(tx, y + 1, 12, 0x3f9b45).setDepth(D + 1); // đế xanh đậm
+      this.add.circle(tx, y, 12, 0x5cb85c).setStrokeStyle(2, 0xffffff, 0.95).setDepth(D + 1);
+      this.add.text(tx, y - 1, "+", { fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "18px", color: "#ffffff" }).setOrigin(0.5).setDepth(D + 2);
+    } else {
+      this.add
+        .text(x + w / 2 - 14, y, tail, { fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "13px", color: "#ffffff" })
+        .setOrigin(0.5)
+        .setDepth(D + 2);
+    }
   }
 
   // ---- Bottom nav -----------------------------------------------------
@@ -392,10 +457,11 @@ export class LevelSelectScene extends Phaser.Scene {
 
     // Icon-only nav (labels removed). The centre "Start" mascot sits on a raised
     // chip. Swap the emoji for the real icon art (nav-shop / nav-trophy) when ready.
+    // Icon art thật (nút Shop/Cup đã cắt-viền tròn) thay emoji 🛒/🏆 (user 2026-08-02).
     const items: Array<[number, string, boolean]> = [
-      [GAME_W * 0.2, "🛒", false],
+      [GAME_W * 0.2, "nav-shop", false],
       [GAME_W * 0.5, "start-slime", true],
-      [GAME_W * 0.8, "🏆", false],
+      [GAME_W * 0.8, "nav-trophy", false],
     ];
     for (const [x, icon, active] of items) {
       if (active) {
@@ -406,7 +472,8 @@ export class LevelSelectScene extends Phaser.Scene {
         chip.strokeRoundedRect(x - 44, y - 40, 88, 70, 18);
         this.add.image(x, y - 2, "start-slime").setDisplaySize(58, 58).setDepth(D + 2);
       } else {
-        this.add.text(x, y, icon, { fontSize: "34px" }).setOrigin(0.5).setDepth(D + 2);
+        if (this.textures.exists(icon)) this.add.image(x, y, icon).setDisplaySize(50, 50).setDepth(D + 2);
+        else this.add.text(x, y, icon, { fontSize: "34px" }).setOrigin(0.5).setDepth(D + 2);
         this.add
           .rectangle(x, y, 88, h, 0xffffff, 0.001)
           .setDepth(D + 3)
@@ -473,7 +540,7 @@ export class LevelSelectScene extends Phaser.Scene {
 
     // Ribbon banner across the top edge (warm flower-yellow).
     const ribLabel = this.add
-      .text(GAME_W / 2, y0, `${CLOVER_ICON}  LUCKY CLOVER  ${CLOVER_ICON}`, {
+      .text(GAME_W / 2, y0, `${CLOVER_ICON}  ${tr("cloverTitle")}  ${CLOVER_ICON}`, {
         fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "13px", color: "#33280c",
       })
       .setOrigin(0.5)
@@ -500,7 +567,7 @@ export class LevelSelectScene extends Phaser.Scene {
     const chipLeft = chipCx - 28;
 
     const big = this.add
-      .text(textX, y0 + 28, p.done ? "DONE" : `${p.total}`, {
+      .text(textX, y0 + 28, p.done ? tr("done") : `${p.total}`, {
         fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "22px", color: "#fbfae8",
       })
       .setOrigin(0, 0.5)
@@ -533,7 +600,7 @@ export class LevelSelectScene extends Phaser.Scene {
 
     // Next-reward line.
     this.add
-      .text(textX, y0 + 61, p.done ? "All rewards claimed!" : `Next: ${rewardLabel(p.next!.reward)}`, {
+      .text(textX, y0 + 61, p.done ? tr("allClaimed") : trf("nextReward", { r: rewardLabel(p.next!.reward) }), {
         fontFamily: "Arial, sans-serif", fontSize: "12px", color: "#e9f4d6",
       })
       .setOrigin(0, 0.5)
@@ -633,14 +700,14 @@ export class LevelSelectScene extends Phaser.Scene {
         this.add.text(nodeX + 32, ny - 8, rewardLabel(m.reward), {
           fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "14px", color: labelColor,
         }).setOrigin(0, 0.5).setDepth(D + 3),
-        this.add.text(nodeX + 32, ny + 9, claimed ? "Claimed" : `${m.threshold} ${CLOVER_ICON}`, {
+        this.add.text(nodeX + 32, ny + 9, claimed ? tr("claimed") : `${m.threshold} ${CLOVER_ICON}`, {
           fontFamily: "Arial, sans-serif", fontSize: "11px", color: claimed ? "#7ab585" : "#92b498",
         }).setOrigin(0, 0.5).setDepth(D + 3),
       );
     });
 
     const close = this.add
-      .text(GAME_W / 2, y0 + ph - 28, "CLOSE", {
+      .text(GAME_W / 2, y0 + ph - 28, tr("closeCaps"), {
         fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "15px", color: "#33280c",
         backgroundColor: "#efd98a", padding: { x: 26, y: 9 },
       })
