@@ -101,10 +101,16 @@ interface Runner {
 }
 
 const SLOT_COUNT = 5;
-const SLOT_SIZE = 54; // waiting bay size (bumped up so the parked car sits comfortably)
+const SLOT_SIZE = 49; // waiting bay size — giảm 10% (54→49) để queue nhích lên (user 2026-08-02)
 // Fixed car size — the SAME on every level (independent of the grid's cell size,
 // which changes with the level's rows/cols). ~30% bigger than the old sizing.
 const CAR_SIZE = 55;
+// Slime (board-tile) shrink factor — áp cho MỌI loại board & mọi kích thước, để grid nhỏ lại
+// một chút → khoảng hở giữa grid và đường ray rộng hơn (user 2026-08-02: giảm slime 3%).
+const SLIME_SCALE = 0.94; // giảm slime thêm 3% (0.97→0.94) → board nhỏ hơn, mọi kích thước (user 2026-08-02)
+// Xe TRÊN RAY nhỏ 10% (user 2026-08-02). Dùng chung cho lúc lên ray VÀ lúc pop khi ăn slime,
+// để cú pop luôn quay về đúng kích thước ray (tránh "lúc lớn lúc bé").
+const RAY_CAR_SCALE = 0.9;
 const TRACK_STEP = 16; // px between adjacent track nodes (uniform spacing)
 const MAX_ON_TRACK = 5; // hard cap on cars travelling the ray at the same time
 // AUTO-DRIVE (user 2026-07-24): cars self-manage so the player taps far less.
@@ -380,7 +386,7 @@ export class GameScene extends Phaser.Scene {
     // Obstacle tiles + the special cars. Any of these with no PNG yet falls back to
     // a procedurally-drawn placeholder (detected in create(), see makePlaceholderTexture),
     // so obstacle levels are fully playable before the real art is dropped in.
-    for (const k of OBSTACLE_ART_KEYS) this.load.image(k, `art/${k}.png`);
+    for (const k of OBSTACLE_ART_KEYS) this.load.image(k, `art/${k}.png?v=2`); // ?v= cache-buster: bump when obstacle art (rock-hard, …) changes
     // A colour whose slime-*.png doesn't exist yet (e.g. the expanded palette 11-18)
     // is drawn procedurally in create() so its tiles still render.
     this.load.on("loaderror", (file: Phaser.Loader.File) => {
@@ -392,7 +398,8 @@ export class GameScene extends Phaser.Scene {
       this.load.image(`car-${i}`, `art/car-${i}.png`); // one pre-coloured car per color id
       // Glossy keycap board-tile art (public/art/slime/tile-<id>.png). If present it
       // REPLACES the procedural flat tile in create(); missing ones fall back to it.
-      this.load.image(`tile-${i}`, `art/slime/tile-${i}.png`);
+      // ?v= cache-buster: bump when the tile PNGs change so browsers refetch (they cache by URL).
+      this.load.image(`tile-${i}`, `art/slime/tile-${i}.png?v=6`);
     }
     // XU VÀNG màn thắng (video mẫu IMG_6489). Art thật user sẽ gửi vào public/art/coin.png;
     // thiếu/hỏng → create() vẽ placeholder (makeCoinTexture).
@@ -574,7 +581,9 @@ export class GameScene extends Phaser.Scene {
     this.invPeek = peek; // mask uses the same value so the clip matches the reserved space
     const regionH = (rows: number) => (rows - 1) * rowStep + chest + peek + 8;
     const bottomFixed = SLOT_SIZE + gSlots + gInv + boostH;
-    const bottomMax = Math.round(GAME_H * 0.35); // 40%→35%: đẩy cụm dưới xuống + board sát mép to hơn (user 2026-08-02)
+    // Đảm bảo đủ chỗ cho 2 HÀNG ĐẦY + lấp ló hàng thứ 3 (user 2026-08-02): bottomMax không nhỏ
+    // hơn (bottomFixed + regionH(2)); nếu màn hình cao thì lấy 35% để cân đối.
+    const bottomMax = Math.max(Math.round(GAME_H * 0.35), bottomFixed + regionH(2));
     // GROW the inventory to fill the 40% budget (up to 3 rows) so the bottom cluster
     // sits near 40% and the board lands around the real game's ~53% — instead of the
     // board ballooning and leaving an empty gap.
@@ -597,9 +606,10 @@ export class GameScene extends Phaser.Scene {
     const boardTop = hudH + gTop;
     this.buildBoard(boardTop, m); // zone 1
 
-    // Bottom cluster ANCHORED ngay dưới board (không ghim đáy màn hình nữa) nên hàng chờ luôn
-    // GẦN SÁT board và dời lên theo khi board lên (user 2026-08-02). Dư ra thì rơi xuống đáy.
-    let by = boardTop + m.frameH + gBoard;
+    // Bottom cluster GHIM SÁT ĐÁY màn hình (user 2026-08-02: "đẩy booster xuống dưới") — cả cụm
+    // ô chờ→queue→booster dồn xuống, booster chạm đáy, queue lộ lấp ló hàng thứ 3. Trên màn hình
+    // thấp thì rơi về ngay dưới board (max) để không đè lên board.
+    let by = Math.max(boardTop + m.frameH + gBoard, GAME_H - margin - bottomH);
     this.buildSlots(by); // zone 2 (waiting slots)
     by += SLOT_SIZE + gSlots;
 
@@ -954,7 +964,7 @@ export class GameScene extends Phaser.Scene {
     // left/right edges (user 2026-08-02 "chưa sát 2 bên"). Was min(boardBudget, GAME_W) which
     // let a short viewport shrink the square → side gaps. Now the board always spans GAME_W;
     // the bottom cluster yields the vertical room (pushed down / compressed).
-    const frameH = isRing ? GAME_W : boardBudget;
+    const frameH = isRing ? Math.round(GAME_W * 0.95) : boardBudget; // board thu nhỏ ~5% (user 2026-08-02)
     this.chestSize = CAR_SIZE; // fixed — consistent car size on every level
     return { frameW, frameH, ringW: frameW, ringH: frameH };
   }
@@ -964,12 +974,12 @@ export class GameScene extends Phaser.Scene {
   // dark navy board panel reads as a tray on a picnic cloth. Two tones only, kept low
   // in contrast so the bright board tiles stay the star.
   private buildBackground() {
-    const beige = 0xceba8e; // caro tan ẤM VÀNG (golden) — gần ảnh hơn (user 2026-08-02)
-    const sage = 0xe3d6b0; //  2nd tone: kem ấm → caro tan 2 tông
+    const beige = 0xe5d2bc; // ô caro TỐI — be trầm (user 2026-08-02, mã #E5D2BC)
+    const sage = 0xf2e6d8; //  ô caro SÁNG — kem sáng (#F2E6D8)
     const g = this.add.graphics().setDepth(DEPTH_BG);
     g.fillStyle(beige, 1);
     g.fillRect(0, 0, GAME_W, GAME_H);
-    const cs = Math.round(GAME_W / 16); // ~16 squares wide → tablecloth scale
+    const cs = Math.round(GAME_W / 20); // ô caro NHỎ hơn 1 chút (user 2026-08-02: 16→20 ô ngang)
     const cols = Math.ceil(GAME_W / cs) + 1;
     const rows = Math.ceil(GAME_H / cs) + 1;
     g.fillStyle(sage, 1);
@@ -1018,7 +1028,7 @@ export class GameScene extends Phaser.Scene {
       const gridTop = cy - m.frameH / 2 + 6;
       const minRunGap = 44; // min clearance grid→road
       const bandH = lineY - roadW / 2 - minRunGap - gridTop;
-      this.cell = fitCell(GAME_W - 28, bandH);
+      this.cell = fitCell(GAME_W - 28, bandH) * SLIME_SCALE;
       gridW = cols * this.cell;
       gridH = rows * this.cell;
       this.gridX = cx - gridW / 2;
@@ -1051,9 +1061,9 @@ export class GameScene extends Phaser.Scene {
       const availW = this.beltRight - this.beltLeft - roadW - 2 * corner;
       const availH = this.beltBottom - this.beltTop - roadW - 2 * corner;
       const fillBox = Math.min(availW, availH);
-      this.cell = Math.max(6, fillBox / STD);
+      this.cell = Math.max(6, fillBox / STD) * SLIME_SCALE;
       // The cell a 25×25 would use here → keeps runner critters a constant size on big boards.
-      this.stdCell = Math.max(6, fillBox / 25);
+      this.stdCell = Math.max(6, fillBox / 25) * SLIME_SCALE;
       gridW = cols * this.cell;
       gridH = rows * this.cell;
       this.gridX = cx - gridW / 2;
@@ -1075,7 +1085,7 @@ export class GameScene extends Phaser.Scene {
       // corners (offset r) and runs toward the open side.
       const availW = this.beltRight - this.beltLeft - roadW - 2 * gap;
       const availH = this.beltBottom - this.beltTop - roadW / 2 - gap - r - 4;
-      this.cell = fitCell(availW, availH);
+      this.cell = fitCell(availW, availH) * SLIME_SCALE;
       gridW = cols * this.cell;
       gridH = rows * this.cell;
       this.gridX = cx - gridW / 2;
@@ -1198,14 +1208,15 @@ export class GameScene extends Phaser.Scene {
     const g = this.add.graphics().setDepth(-60); // above the forest bg, below the ROAD & tiles
     // TẠM THỜI (user 2026-08-01): nền trong đường ray = màu LÒNG ĐƯỜNG RAY (tan) cho liền mạch,
     // bỏ mat navy + caro. (buildRoadLoop center highlight = 0xe8cf9c.)
-    const base = 0xe8cf9c;      // road-bed tan (be — giữ nguyên)
-    const gridLine = 0xa2814f;  // cell-boundary line — TỐI hơn 1 chút (user 2026-08-01)
-    g.fillStyle(base, 1); g.fillRoundedRect(x, y, w, h, rad); // base board tone
+    // Lưới trong board = KIỂU KẺ Ô (user 2026-08-02, theo ảnh): nền ô đồng màu tan sáng +
+    // đường kẻ mảnh soft-brown tạo caro (KHÔNG phải checker 2 tông). Ô trống lộ lưới, ô có slime tile phủ lên.
+    const base = 0xdccfb4;      // nền ô lưới — tan, TỐI hơn 1 tý tẹo (user 2026-08-02)
+    const gridLine = 0xb59a6a;  // đường kẻ lưới — nâu dịu, mảnh (tối theo nền)
+    g.fillStyle(base, 1); g.fillRoundedRect(x, y, w, h, rad); // nền lưới đồng màu
     const cell = this.cell;
     const c0 = Math.floor((x - this.gridX) / cell), r0 = Math.floor((y - this.gridY) / cell);
     const c1 = Math.ceil((x + w - this.gridX) / cell), r1 = Math.ceil((y + h - this.gridY) / cell);
-    // A faint lattice keeps every cell boundary crisp on the tan bed.
-    g.lineStyle(1, gridLine, 0.35);
+    g.lineStyle(1, gridLine, 0.12); // đường kẻ SIÊU NHẠT (user 2026-08-02) — trước 0.6
     for (let c = c0; c <= c1; c++) { const gx = this.gridX + c * cell; g.beginPath(); g.moveTo(gx, y); g.lineTo(gx, y + h); g.strokePath(); }
     for (let r = r0; r <= r1; r++) { const gy = this.gridY + r * cell; g.beginPath(); g.moveTo(x, gy); g.lineTo(x + w, gy); g.strokePath(); }
     // Clip everything (checker + lattice overflow) to the rounded-rect mat shape.
@@ -1235,10 +1246,23 @@ export class GameScene extends Phaser.Scene {
     };
     // Khung GỖ BLONDE có gờ nổi bevel như ảnh mẫu (user 2026-08-02): viền ngoài dịu (không đen),
     // thân gỗ sáng, dải sáng bevel nổi ở giữa, dịu lại sát mép trong — trông như khung gỗ bo tròn.
-    ring(roadW + 4, 0xa87f47); // rim ngoài mảnh, nâu vàng ấm
-    ring(roadW, 0xc9a86e); // thân gỗ honey (ấm/vàng hơn)
-    ring(roadW - 8, 0xddc48d); // dải sáng bevel (bắt sáng, nổi khối)
-    ring(roadW - 20, 0xbd9c63, 0.85); // dịu lại ở giữa, tránh chói
+    // Mã màu user 2026-08-02: mặt chính #CFA67D, bắt sáng #E8C7A5, bóng tối/viền trong #A1734A.
+    ring(roadW + 4, 0xa1734a); // rim ngoài = BÓNG TỐI / viền trong tạo chiều sâu (#A1734A)
+    ring(roadW, 0xcfa67d); // mặt phẳng gỗ chủ đạo (#CFA67D)
+    ring(roadW - 8, 0xe8c7a5); // dải BẮT SÁNG nơi ánh sáng chiếu (#E8C7A5)
+    ring(roadW - 20, 0xcfa67d); // tâm về lại mặt gỗ chủ đạo
+
+    // Ánh sáng TỪ TRÊN (user 2026-08-02: "dưới tối đậm, trên hơi sáng như ảnh"): phủ 1 gradient
+    // dọc (đỉnh trắng = giữ nguyên → đáy nâu tối) LÊN RIÊNG dải đường ray, blend MULTIPLY →
+    // nửa dưới ray tối đậm, nửa trên sáng như khung gỗ bắt sáng. Mask = chính hình vành ray.
+    const maskG = this.make.graphics({ x: 0, y: 0 }, false);
+    maskG.lineStyle(roadW + 4, 0xffffff, 1);
+    maskG.strokeRoundedRect(L, T, bw, bh, rad); // vệt trắng phủ đúng dải ray
+    const shade = this.add.graphics().setDepth(DEPTH_ROAD + 1);
+    shade.fillGradientStyle(0xffffff, 0xffffff, 0xa1734a, 0xa1734a, 1); // trên trắng → dưới bóng tối #A1734A
+    shade.fillRect(L - roadW, T - roadW, bw + 2 * roadW, bh + 2 * roadW);
+    shade.setBlendMode(Phaser.BlendModes.MULTIPLY);
+    shade.setMask(maskG.createBitmapMask());
   }
 
   // A single horizontal road band (pill-shaped, rounded ends), same wooden look.
@@ -1254,10 +1278,10 @@ export class GameScene extends Phaser.Scene {
       g.fillStyle(color, alpha);
       g.fillRect(left, y - hh / 2, w, hh);
     };
-    band(-2, 0xa87f47); // rim ngoài mảnh, ấm (khớp buildRoadLoop)
-    band(0, 0xc9a86e); // thân gỗ honey (ấm/vàng hơn)
-    band(6, 0xddc48d); // dải sáng bevel
-    band(13, 0xbd9c63, 0.85); // dịu lại ở giữa
+    band(-2, 0xa1734a); // rim = bóng tối (#A1734A)
+    band(0, 0xcfa67d); // mặt gỗ chủ đạo (#CFA67D)
+    band(6, 0xe8c7a5); // dải bắt sáng (#E8C7A5)
+    band(13, 0xcfa67d); // tâm về lại mặt gỗ chủ đạo
   }
 
   // An INVERTED-U (⊓) road, open at the bottom: left leg → rounded top-left bend →
@@ -1335,7 +1359,7 @@ export class GameScene extends Phaser.Scene {
   // A grid tile = a cute critter sprite (slime) in the tile's color.
   private makeKey(colorId: number, x: number, y: number, s: number) {
     const img = this.add.image(0, 0, `tile-${colorId}`).setDisplaySize(s * 1.3, s * 1.3); // keycap art has ~23% transparent margin → ×1.3 makes the cap ≈ fill the cell (flush; shadow bleeds onto the next tile)
-    const c = this.add.container(x, y, [img]);
+    const c = this.add.container(x, y, [img]); // tiles keep their OWN baked highlight — extra gloss overlay removed (it added a dark-cap artifact)
     c.setSize(s, s);
     c.setData("body", img); // kept so the collect animation can bob the body alone
     return c;
@@ -2865,7 +2889,7 @@ export class GameScene extends Phaser.Scene {
     // a test convenience sitting in the free strip between the gear and the level pill.
     const winX = 105;
     const winPill = this.add.graphics().setDepth(D);
-    winPill.fillStyle(0x4caf50, 1);
+    winPill.fillStyle(0x5cb85c, 1); // xanh tươi đồng bộ với nút "+" (user 2026-08-02)
     winPill.fillRoundedRect(winX - 30, y - 14, 60, 28, 14);
     winPill.lineStyle(2, 0xffffff, 0.9);
     winPill.strokeRoundedRect(winX - 30, y - 14, 60, 28, 14);
@@ -2895,23 +2919,31 @@ export class GameScene extends Phaser.Scene {
       .setDepth(D + 2);
     const lpw = lvlText.width + 40;
     const lph = 34;
+    const lx0 = GAME_W / 2 - lpw / 2, ly0 = y - lph / 2;
     const lpill = this.add.graphics().setDepth(D + 1);
-    lpill.fillStyle(0xe23b3b, 1);
-    lpill.fillRoundedRect(GAME_W / 2 - lpw / 2, y - lph / 2, lpw, lph, lph / 2);
-    lpill.lineStyle(3, 0xffffff, 0.95);
-    lpill.strokeRoundedRect(GAME_W / 2 - lpw / 2, y - lph / 2, lpw, lph, lph / 2);
+    lpill.fillStyle(0xdb524d, 1); // đỏ coral như ảnh (user 2026-08-02)
+    lpill.fillRoundedRect(lx0, ly0, lpw, lph, lph / 2);
+    lpill.lineStyle(3, 0xffffff, 1); // viền TRẮNG ngoài
+    lpill.strokeRoundedRect(lx0, ly0, lpw, lph, lph / 2);
+    lpill.lineStyle(1.5, 0xffc9c2, 0.9); // viền HỒNG nhạt bên trong (tạo khối mềm)
+    lpill.strokeRoundedRect(lx0 + 3, ly0 + 3, lpw - 6, lph - 6, (lph - 6) / 2);
 
-    // Gold cluster (right): [coin  amount]  (+)
-    const plusR = 13;
-    const plusX = GAME_W - 16 - plusR;
-    // rounded pill behind the coin + amount
-    const pillRight = plusX - plusR - 6;
-    const pillLeft = pillRight - 96;
+    // Gold cluster (right): [coin  amount  (+)] — nút "+" nằm TRONG pill gỗ luôn (user 2026-08-02)
+    const plusR = 12;
+    const pillRight = GAME_W - 14;
+    const pillLeft = pillRight - 124; // rộng thêm để chứa cả nút "+" bên trong
+    const pw = pillRight - pillLeft;
+    const plusX = pillRight - plusR - 5; // "+" ở sát mép phải BÊN TRONG pill
     const pill = this.add.graphics().setDepth(D);
-    pill.fillStyle(0x3a2a14, 0.85);
-    pill.fillRoundedRect(pillLeft, y - 15, pillRight - pillLeft, 30, 15);
-    pill.lineStyle(2, 0xffe9b0, 0.7);
-    pill.strokeRoundedRect(pillLeft, y - 15, pillRight - pillLeft, 30, 15);
+    // Pill GỖ như ảnh (user 2026-08-02): đáy tối #A1734A → thân #CFA67D → đỉnh bắt sáng #E8C7A5.
+    pill.fillStyle(0x5e3d1e, 1); // nền gỗ tối (lộ ra ở đáy → chiều sâu)
+    pill.fillRoundedRect(pillLeft, y - 15, pw, 30, 15);
+    pill.fillStyle(0x9c6a3a, 1); // mặt gỗ chủ đạo (trầm để số cream nổi), chừa mép tối ở đáy
+    pill.fillRoundedRect(pillLeft + 2, y - 15 + 2, pw - 4, 30 - 5, 13);
+    pill.fillStyle(0xc79a6b, 0.85); // dải bắt sáng ở đỉnh
+    pill.fillRoundedRect(pillLeft + 3, y - 13, pw - 6, 9, 8);
+    pill.lineStyle(2.5, 0x4a2f16, 1); // viền gỗ sẫm
+    pill.strokeRoundedRect(pillLeft, y - 15, pw, 30, 15);
 
     // coin — XU SAO (star.png) thống nhất với Home/màn thắng; thiếu art → đĩa vẽ tay cũ
     const coinX = pillLeft + 16;
@@ -2932,12 +2964,16 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0, 0.5)
       .setDepth(D + 2);
 
-    // buy "+" button
+    // buy "+" button — nút xanh BÓNG như ảnh (user 2026-08-02): đế xanh đậm + thân + đốm gloss + viền trắng
+    const plusBase = this.add.circle(plusX, y + 1, plusR, 0x3f9b45).setDepth(D + 1); // đế đậm lộ ở đáy → khối
     const plus = this.add
-      .circle(plusX, y, plusR, 0x4caf50)
-      .setStrokeStyle(2, 0xffffff, 0.85)
+      .circle(plusX, y, plusR, 0x5cb85c)
+      .setStrokeStyle(2, 0xffffff, 0.95)
       .setDepth(D + 1)
       .setInteractive({ useHandCursor: true });
+    const plusGloss = this.add
+      .ellipse(plusX, y - plusR * 0.4, plusR * 1.15, plusR * 0.72, 0x9be08f, 0.5)
+      .setDepth(D + 1); // đốm gloss đỉnh
     this.add
       .text(plusX, y - 1, "+", {
         fontFamily: "Arial, sans-serif",
@@ -2948,7 +2984,7 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(D + 2);
     plus.on("pointerdown", () => {
-      this.tweens.add({ targets: plus, scale: 0.85, duration: 80, yoyo: true });
+      this.tweens.add({ targets: [plus, plusBase, plusGloss], scale: 0.85, duration: 80, yoyo: true });
       this.buyGold();
     });
   }
@@ -3014,7 +3050,7 @@ export class GameScene extends Phaser.Scene {
   private openSettings() {
     const D = 200;
     const pw = 300;
-    const ph = 348;
+    const ph = 392;
     const x0 = GAME_W / 2 - pw / 2;
     const y0 = GAME_H / 2 - ph / 2;
     const dim = this.add
@@ -3797,7 +3833,7 @@ export class GameScene extends Phaser.Scene {
       targets: view.container,
       x: tx,
       y: ty,
-      scale: 1,
+      scale: RAY_CAR_SCALE, // xe TRÊN RAY nhỏ 10%; xe ở queue/bay giữ nguyên kích thước
       alpha: 1, // back-row lineup cars are dimmed — fade back to full on the way in
       duration: dur ?? Phaser.Math.Clamp(dist * 0.8, 120, 220), // ~35% faster (user 2026-07-25: lên ray hơi chậm)
       ease: "Cubic.out", // springs out fast from the bay, then eases in — feels instant
@@ -5127,6 +5163,14 @@ export class GameScene extends Phaser.Scene {
     }
     key.addAt(legL, 0); // behind the body so only the part below the square shows
     key.addAt(legR, 0);
+    // The moment a tile becomes a runner, swap its faceless keycap for the CUTE FACED slime
+    // sprite (slime-<id>.png) — board tiles stay faceless per §20; faces live only on running
+    // slimes + tray cars. (slime-<id> always exists: PNG, or a procedural faced fallback.)
+    if (boardCode >= 0 && boardCode < COLORS.length) {
+      const body = key.getData("body") as Phaser.GameObjects.Image;
+      body.setTexture(`slime-${boardCode}`);
+      body.setDisplaySize(s * 1.25, s * 1.25);
+    }
     key.setScale(1.08); // pop out of the grid a touch (updateRunners drives size from here)
     key.setDepth(DEPTH_RUNNER); // run above the grid tiles (still below foliage)
 
@@ -5316,7 +5360,15 @@ export class GameScene extends Phaser.Scene {
   }
 
   private pulse(c: Phaser.GameObjects.Container) {
-    this.tweens.add({ targets: c, scale: 1.14, duration: 80, yoyo: true });
+    // Pop TƯƠNG ĐỐI quanh kích thước xe trên ray, rồi snap về đúng RAY_CAR_SCALE khi xong —
+    // trước đây tween tới scale 1.14 tuyệt đối nên xe 0.9 bị phình to lúc ăn (user 2026-08-02).
+    this.tweens.add({
+      targets: c,
+      scale: RAY_CAR_SCALE * 1.12,
+      duration: 80,
+      yoyo: true,
+      onComplete: () => { if (c.scene) c.setScale(RAY_CAR_SCALE); },
+    });
   }
 
   // Draw the "holding hands" rope between consecutive members of each live linked
