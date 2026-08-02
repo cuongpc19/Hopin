@@ -2453,6 +2453,29 @@ if (process.argv.includes("--slamgrade")) {
 // fast; ceil is knob-independent so we measure it ONCE per level and reuse. Run this the moment the
 // remapped maps land: `IDEAB=1 node scripts/build-levels.mjs --ideacal`. Targets come from
 // Manythings/Design winrate/slam-targets.csv (rows "level,target") if present, else the built-ins.
+// ---- --ideab-json: chấm idea-B cho một dải level và in JSON (để so 3 mô hình) -------
+// LEVELS=5-30 (hoặc 5,7,9) SKILL=0.75 node scripts/build-levels.mjs --ideab-json
+if (process.argv.includes("--ideab-json")) {
+  const data = JSON.parse(fs.readFileSync(OUT, "utf8"));
+  const SK = process.env.SKILL != null ? Number(process.env.SKILL) : 0.75;
+  const spec = process.env.LEVELS || "5-30";
+  const nums = spec.includes("-")
+    ? (() => { const [a, b] = spec.split("-").map(Number); const r = []; for (let i = a; i <= b; i++) r.push(i); return r; })()
+    : spec.split(",").map(Number);
+  const out = {};
+  for (const k of nums) {
+    const L = data[k];
+    if (!L || !Array.isArray(L.board)) continue;
+    LANES = L.lanes || DEFAULT_LANES;
+    try {
+      const r = ideaBWinrate(L, SK);
+      out[k] = { win: r.win, ceil: r.ceil, hard: r.hard, sig: r.sig, nsig: r.nsig, peakBays: r.peakBays, tightTurns: r.tightTurns };
+    } catch (e) { out[k] = { err: String(e && e.message || e) }; }
+  }
+  console.log("IDEAB_JSON " + JSON.stringify(out));
+  process.exit(0);
+}
+
 if (process.argv.includes("--ideacal")) {
   const data = JSON.parse(fs.readFileSync(OUT, "utf8"));
   const SKILL = process.env.SKILL != null ? Number(process.env.SKILL) : 0.75;

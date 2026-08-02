@@ -31,7 +31,7 @@ export function makeState(L) {
 export function cloneState(s) {
   return { cols: s.cols, rows: s.rows, occ: s.occ.slice(), lay: s.lay ? s.lay.slice() : null, hid: new Set(s.hid), queue: s.queue.map((c) => c.map((m) => ({ ...m }))), slots: s.slots.map((p) => (p ? { ...p } : null)) };
 }
-const clearCell = (s, i) => {
+export const clearCell = (s, i) => {
   if (s.lay && s.lay[i] >= 0) { s.occ[i] = s.lay[i]; s.lay[i] = -1; } else s.occ[i] = -1;
   if (s.hid.size) { // ô vừa ăn → lộ "?" ở 4 ô kề (revealHiddenAround)
     const r = (i / s.cols) | 0, c = i % s.cols;
@@ -78,7 +78,7 @@ function lanRays(s, e, l) {
   return [[l, cols - 1, 0, -1], [l - 1, cols - 1, -1, -1], [l + 1, cols - 1, 1, -1]];
 }
 // target khớp màu gần nhất từ (edge,lane)
-function nearestTarget(s, e, l, color) {
+export function nearestTarget(s, e, l, color) {
   let best = null;
   for (const [r0, c0, dr, dc] of lanRays(s, e, l)) {
     const h = rayHit(s, r0, c0, dr, dc);
