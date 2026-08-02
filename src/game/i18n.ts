@@ -149,6 +149,9 @@ const S: Record<string, { vi: string; en: string }> = {
   quitBody: { vi: "Bỏ dở level này sẽ mất 1", en: "Quitting this level costs 1" },
   quitStay: { vi: "Ở LẠI", en: "STAY" },
   quitLeave: { vi: "Về Home", en: "Leave" },
+  retryTitle: { vi: "Chơi lại?", en: "Play again?" },
+  // Shown on the lose screen, where the heart pays for the attempt just failed.
+  attemptCostBody: { vi: "Ván thua này sẽ tính 1", en: "This failed attempt costs 1" },
 
   // ---- hearts (lives) ----
   heartsTitle: { vi: 'Tim của bạn', en: 'Your Hearts' },

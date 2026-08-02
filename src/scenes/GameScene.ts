@@ -3076,12 +3076,18 @@ export class GameScene extends Phaser.Scene {
   }
 
   // Minimal settings overlay (placeholder — sound/music toggles come later).
-  // "Go Home?" — quitting a level that's still live costs one heart, so name the price
-  // before charging it (user 2026-08-02: the deduction was silent and felt like it never
-  // happened). Staying just closes this box; leaving spends the heart and exits.
-  // `killSettings` tears down the settings panel underneath once the player commits.
-  private confirmQuitToHome(killSettings: () => void) {
-    const C = 260; // above the settings overlay (200)
+  // Confirm any action that SPENDS A HEART, naming the price first (user 2026-08-02: the
+  // charge used to be silent, so it felt like hearts were never deducted). Used by all
+  // three exits that cost one: Settings → Home mid-level, and Replay / Home on the lose
+  // screen. Cancelling closes only this box and leaves whatever is underneath intact.
+  private confirmHeartCost(opts: {
+    title: string;
+    body: string;
+    cancelLabel: string;
+    confirmLabel: string;
+    onConfirm: () => void;
+  }) {
+    const C = 600; // above BOTH the settings overlay (200) and the lose screen (~404)
     const pw = 306;
     const ph = 210;
     const x0 = GAME_W / 2 - pw / 2;
@@ -3100,7 +3106,7 @@ export class GameScene extends Phaser.Scene {
     objs.push(panel);
     objs.push(
       this.add
-        .text(GAME_W / 2, y0 + 38, tr("quitTitle"), {
+        .text(GAME_W / 2, y0 + 38, opts.title, {
           fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "21px", color: "#6a4a12",
         })
         .setOrigin(0.5)
@@ -3108,7 +3114,7 @@ export class GameScene extends Phaser.Scene {
     );
     // Price line: the sentence plus the real heart sprite, so the cost is unmistakable.
     const msg = this.add
-      .text(GAME_W / 2 - 15, y0 + 88, tr("quitBody"), {
+      .text(GAME_W / 2 - 15, y0 + 88, opts.body, {
         fontFamily: "Arial, sans-serif", fontSize: "15px", color: "#6a4a12",
       })
       .setOrigin(0.5)
@@ -3122,29 +3128,27 @@ export class GameScene extends Phaser.Scene {
 
     const closeConfirm = () => objs.forEach((o) => o.destroy());
     const stay = this.add
-      .text(GAME_W / 2 - 70, y0 + ph - 44, tr("quitStay"), {
+      .text(GAME_W / 2 - 70, y0 + ph - 44, opts.cancelLabel, {
         fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "16px", color: "#ffffff",
         backgroundColor: "#3a8a3a", padding: { x: 24, y: 9 },
       })
       .setOrigin(0.5)
       .setDepth(C + 2)
       .setInteractive({ useHandCursor: true });
-    const leave = this.add
-      .text(GAME_W / 2 + 66, y0 + ph - 44, tr("quitLeave"), {
+    const go = this.add
+      .text(GAME_W / 2 + 66, y0 + ph - 44, opts.confirmLabel, {
         fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "15px", color: "#ffffff",
         backgroundColor: "#c8392e", padding: { x: 18, y: 9 },
       })
       .setOrigin(0.5)
       .setDepth(C + 2)
       .setInteractive({ useHandCursor: true });
-    objs.push(stay, leave);
+    objs.push(stay, go);
     stay.on("pointerdown", closeConfirm);
     dim.on("pointerdown", closeConfirm);
-    leave.on("pointerdown", () => {
+    go.on("pointerdown", () => {
       closeConfirm();
-      killSettings();
-      spendLife();
-      this.scene.start("select");
+      opts.onConfirm();
     });
   }
 
@@ -3252,7 +3256,17 @@ export class GameScene extends Phaser.Scene {
       // silent, which read as "no heart was taken at all", so ask first and name the price.
       // Once the level is already won/lost there is nothing to charge — leave straight away.
       if (this.won || this.lost) { this.scene.start("select"); return; }
-      this.confirmQuitToHome(kill);
+      this.confirmHeartCost({
+        title: tr("quitTitle"),
+        body: tr("quitBody"),
+        cancelLabel: tr("quitStay"),
+        confirmLabel: tr("quitLeave"),
+        onConfirm: () => {
+          kill(); // drop the settings panel underneath
+          spendLife();
+          this.scene.start("select");
+        },
+      });
     });
     mkRow(y0 + ph - 30, tr("close"), () => kill());
 
@@ -6103,17 +6117,35 @@ export class GameScene extends Phaser.Scene {
     const by = reviveY + 60;
     // A failed attempt costs ONE heart the moment the player gives up on it — retry or
     // walk away, same price (user 2026-08-02). Revive is the paid escape and is free of
-    // hearts, so the deduction lives here on the two "attempt over" buttons.
+    // hearts, so the deduction lives here on the two "attempt over" buttons. Both confirm
+    // first and name the price, so the charge is never a surprise (user 2026-08-02) — and
+    // cancelling drops the player back on this screen with Revive still on offer.
     mkBtn(cx - gap / 2 - bw / 2, by, bw, 46, tr("replay"), 0xd98a2b, 0xa5610f, () => {
-      const left = spendLife();
-      closeAll();
-      if (left <= 0) { this.showOutOfHearts(); return; } // that was the last heart — can't start again
-      this.startLevel(this.levelNum);
+      this.confirmHeartCost({
+        title: tr("retryTitle"),
+        body: tr("attemptCostBody"),
+        cancelLabel: tr("cancel"),
+        confirmLabel: tr("replay"),
+        onConfirm: () => {
+          const left = spendLife();
+          closeAll();
+          if (left <= 0) { this.showOutOfHearts(); return; } // last heart — can't start again
+          this.startLevel(this.levelNum);
+        },
+      });
     });
     mkBtn(cx + gap / 2 + bw / 2, by, bw, 46, tr("home"), 0x6d7b8a, 0x49525d, () => {
-      spendLife();
-      closeAll();
-      this.scene.start("select");
+      this.confirmHeartCost({
+        title: tr("quitTitle"),
+        body: tr("attemptCostBody"),
+        cancelLabel: tr("cancel"),
+        confirmLabel: tr("quitLeave"),
+        onConfirm: () => {
+          spendLife();
+          closeAll();
+          this.scene.start("select");
+        },
+      });
     });
   }
 

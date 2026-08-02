@@ -1018,10 +1018,15 @@ GỘP BẢN (user: "chỉ còn bản Hop-In"):
   - Thế kẹt thật (cả 5 ô đều đã chứng minh vô ích) vẫn thua theo đường cũ.
 • optimize-art: thêm "tmp" vào danh sách thư mục bỏ khỏi dist (art/tmp ~18MB là
   thư mục nháp, gitignore nhưng vite vẫn copy cả public/).
-• XÁC NHẬN TRƯỚC KHI VỀ HOME GIỮA VÁN (user 2026-08-02): Settings → 🏠 Home khi
-  level ĐANG CHƠI giờ hiện hộp confirmQuitToHome ("Về Home? Bỏ dở level này sẽ
-  mất 1 ❤" + art tim thật) — Ở LẠI / Về Home. Chỉ bấm "Về Home" mới spendLife().
-  Level đã thắng/thua rồi thì đi thẳng, không hỏi (không còn gì để trừ).
+• XÁC NHẬN MỌI HÀNH ĐỘNG TỐN TIM (user 2026-08-02): hàm dùng chung
+  confirmHeartCost({title, body, cancelLabel, confirmLabel, onConfirm}) — panel
+  giấy + art tim thật, depth 600 (nằm trên CẢ settings 200 lẫn màn thua ~404).
+  Gắn vào ĐỦ 3 chỗ trừ tim:
+    - Settings → 🏠 Home khi level ĐANG CHƠI: "Về Home? Bỏ dở level này sẽ mất
+      1 ❤" — Ở LẠI / Về Home. Level đã thắng/thua thì đi thẳng, không hỏi.
+    - Màn thua → Replay: "Chơi lại? Ván thua này sẽ tính 1 ❤" — HUỶ / Chơi lại.
+    - Màn thua → Home:   "Về Home? Ván thua này sẽ tính 1 ❤" — HUỶ / Về Home.
+  Bấm HUỶ quay lại đúng màn thua, Revive vẫn còn đó. Revive KHÔNG tốn tim.
   ⚠ LÝ DO: tim VẪN LUÔN bị trừ đúng (thua→Replay, thua→Home, Settings→Home) —
   nhưng trừ ÂM THẦM, trong game lại KHÔNG hiển thị số tim ở đâu, cộng thêm hồi
   tim chỉ 5 phút/quả (REGEN_MS) → user tưởng tính năng chưa có. Đây là vấn đề
