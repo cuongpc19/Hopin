@@ -1069,6 +1069,34 @@ GỘP BẢN (user: "chỉ còn bản Hop-In"):
   pf_rock_intro; đặt pf_progress/pf_current = 1.
   ⚠ CỐ Ý KHÔNG xoá pf_lives: cho reset để hồi đầy tim = lách luật chờ tim.
 
+30) HIỆU ỨNG ĂN SLIME "ĐÃ MẮT" HƠN MÀ KHÔNG TỐN MÁY (2026-08-02)
+────────────────────────────────────────────────────────────────────────────
+Bối cảnh: user hỏi làm slime bay chậm lại có ảnh hưởng performance không. Trả
+lời: KHÔNG — RUNNER_CAP=9 chặn cứng số runner chạy cùng lúc, nên tải mỗi khung
+hình không đổi. NHƯNG chậm lại thì runner chiếm chỗ lâu hơn → chạm cap thường
+xuyên hơn → CÀNG NHIỀU slime bị "ăn tắt" không animation. Vì vậy KHÔNG đụng tốc
+độ, mà làm 5 việc sau:
+• BAY VÈO CHO SLIME VƯỢT CAP (zipToCar) — thay đổi lớn nhất. Trước: quá 9 runner
+  thì slime bị key.destroy() ngay, chỉ còn sparkle → lúc ăn dồn (SHOT_COOLDOWN
+  =10ms, gần như mỗi khung 1 slime) màn hình trông hụt nhất. Giờ: tile BAY theo
+  cung cong về xe (bám vị trí xe LIVE vì xe vẫn đang chạy), phồng nhẹ giữa
+  đường rồi thu nhỏ, tới nơi mới pulse xe + sparkle.
+  ⚠ THUẦN TRANG TRÍ: seat/count/win đã chốt xong TRƯỚC khi gọi, tween không đụng
+  state — huỷ giữa chừng lúc nào cũng an toàn (guard tile.scene / container.scene).
+  Rẻ hơn runner nhiều: không chân, không bụi, không vòng lặp updateRunners.
+• BỤI CHÂN DÙNG EMITTER POOL (getDustEmitter): trước mỗi bước chân tạo MỚI 1
+  Circle + 1 tween (~25 lần cấp phát/giây khi đủ 9 runner) → nay 1 emitter tái
+  dùng hạt. Lãi thuần.
+• CHÂN = TEXTURE DÙNG CHUNG (getLegTexture): trước mỗi runner 2 object Graphics
+  (tối đa 18 object cắt batch) → nay Image cùng 1 texture "leg", tô màu bằng
+  setTintFill (tint là vertex attribute nên KHÔNG phá batch). Lãi thuần.
+• ĐƯỜNG CHẠY CONG + NHÚN LẤY ĐÀ: runner cong sang bên (Runner.side, so le
+  trái/phải mỗi lần sinh) rồi thẳng dần khi tới gần xe; 110ms đầu chạy chậm hơn
+  (Runner.born) cho ra động tác đạp lấy đà. Tốn thêm ~4 phép nhân/khung.
+• SỐ GHẾ NẢY khi slime lên xe + pulse() có CỜ CHỐNG CHỒNG (c.getData("pulsing")):
+  giờ pulse bị gọi dày hơn, tween yoyo chồng nhau sẽ để scale xe kẹt lơ lửng.
+  ⚠ Dùng cờ chứ KHÔNG killTweensOf(container) — sẽ giết luôn tween đỗ xe/đổi ô.
+
 ────────────────────────────────────────────────────────────────────────────
 GHI CHÚ CHUNG
 ────────────────────────────────────────────────────────────────────────────

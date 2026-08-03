@@ -109,9 +109,13 @@ interface Runner {
   body: Phaser.GameObjects.Image; // the critter body sprite (bobbed independently of legs)
   car: ChestView; // the car it is boarding (view persists across park/relaunch)
   spd: number;
-  legL: Phaser.GameObjects.Graphics;
-  legR: Phaser.GameObjects.Graphics;
+  // Legs are Images off ONE shared texture (not per-runner Graphics): same texture =
+  // one batch, where a Graphics each would break the batch twice per runner.
+  legL: Phaser.GameObjects.Image;
+  legR: Phaser.GameObjects.Image;
   phase: number;
+  born: number; // this.time.now at spawn — drives the little launch crouch
+  side: number; // -1..1: which way this one bows out of the straight line to the car
   lastSwing?: number; // sign of the last leg swing (for footfall dust)
   tx: number; // last known car position (car keeps moving / may leave)
   ty: number;
@@ -346,6 +350,7 @@ export class GameScene extends Phaser.Scene {
   // ONE pooled GPU particle emitter for all collect sparkles (replaces N tweened circles/stars
   // per pickup — far lighter when eating fast). Colour set per burst via the tint callback.
   private sparkEmitter?: Phaser.GameObjects.Particles.ParticleEmitter;
+  private dustEmitter?: Phaser.GameObjects.Particles.ParticleEmitter; // pooled footfall puffs
   private sparkColor = 0xffffff;
 
   // Level-1 tutorial: step 1 = tap a queued car; step 2 = tap the car that parked.
@@ -5409,11 +5414,15 @@ export class GameScene extends Phaser.Scene {
     if (this.runners.length >= RUNNER_CAP) {
       view.inFlight -= 1; // undo the seat reservation — boards immediately, nothing in flight
       this.sparkle(key.x, key.y, color); // one cheap pooled burst for feedback
-      key.destroy();
       view.chest.count = Math.max(0, view.chest.count - 1);
       view.countText.setText(String(view.chest.count));
-      if (view.container.scene) this.pulse(view.container);
       Audio.pop();
+      // The seat and the count are already settled above, so the tile itself is now pure
+      // decoration: fly it to the car instead of deleting it on the spot. This is the
+      // moment the board is busiest, and slimes blinking out of existence was exactly
+      // what made a big burst feel flat (user 2026-08-02). No legs, no dust, no per-frame
+      // work in updateRunners — just one tween — so it stays far cheaper than a runner.
+      this.zipToCar(key, view, color);
       if (view.chest.count <= 0) {
         Audio.finish();
         this.finishCar(view);
@@ -5432,11 +5441,13 @@ export class GameScene extends Phaser.Scene {
     // give the tile two legs and turn it into a runner chasing the car.
     // Legs are drawn growing DOWNWARD from y=0 and placed near the bottom edge so
     // they clearly poke out below the square (otherwise they hide inside it).
-    const legL = this.add.graphics();
-    const legR = this.add.graphics();
+    // One shared white leg texture, tinted per slime. Tint is a vertex attribute, so all
+    // the legs on screen still draw in a single batch.
+    const legL = this.add.image(0, 0, this.getLegTexture()).setOrigin(0.5, 0);
+    const legR = this.add.image(0, 0, this.getLegTexture()).setOrigin(0.5, 0);
     for (const leg of [legL, legR]) {
-      leg.fillStyle(legCol, 1);
-      leg.fillRoundedRect(-s * 0.08, 0, s * 0.16, s * 0.3, s * 0.07);
+      leg.setDisplaySize(s * 0.16, s * 0.3);
+      leg.setTintFill(legCol);
     }
     key.addAt(legL, 0); // behind the body so only the part below the square shows
     key.addAt(legR, 0);
@@ -5459,6 +5470,10 @@ export class GameScene extends Phaser.Scene {
       legL,
       legR,
       phase: 0,
+      born: this.time.now,
+      // Alternate the bow left/right per spawn (with a little jitter) so a burst fans out
+      // into separate arcs instead of every slime tracing the same line.
+      side: (this.runners.length % 2 ? 1 : -1) * (0.6 + Math.random() * 0.4),
       tx: view.container.x,
       ty: view.container.y,
       nice,
@@ -5496,7 +5511,10 @@ export class GameScene extends Phaser.Scene {
       // runners RUSH in (much faster) so the car doesn't sit there waiting.
       const rush = car.waiting ? 3 : 1;
       r.spd = Math.min(RUN_MAX * rush, r.spd + RUN_ACCEL * rush * dt);
-      const step = r.spd * dt;
+      // Launch crouch: ease into the sprint over the first moments instead of snapping to
+      // full speed, so the slime reads as pushing off rather than being fired.
+      const launch = Phaser.Math.Clamp((this.time.now - r.born) / 110, 0, 1);
+      const step = r.spd * dt * (0.35 + 0.65 * launch);
       const speedFrac = Phaser.Math.Clamp(r.spd / RUN_MAX, 0, 1); // 0..1, how fast it is going
       const closing = Phaser.Math.Clamp(1 - dist / (s * 3.2), 0, 1); // 0..1 as it nears the car
 
@@ -5554,6 +5572,10 @@ export class GameScene extends Phaser.Scene {
         car.inFlight = Math.max(0, car.inFlight - 1);
         car.chest.count = Math.max(0, car.chest.count - 1);
         car.countText.setText(String(car.chest.count));
+        // The seat number kicks as it ticks down — the clearest read that the slime
+        // actually landed. Reset to 1 first so back-to-back arrivals can't stack it.
+        car.countText.setScale(1);
+        this.tweens.add({ targets: car.countText, scale: 1.45, duration: 90, yoyo: true, ease: "Quad.out" });
         Audio.pop(); // soft light "munch" pop as the slime hops aboard (gentler than board())
         if (r.nice) this.niceEffect(car.container.x, car.container.y); // rare treat!
         if (car.container.scene) this.pulse(car.container);
@@ -5563,8 +5585,12 @@ export class GameScene extends Phaser.Scene {
         }
         if (this.keysRemaining <= 0 && this.runners.length === 0) this.win();
       } else {
-        r.node.x += vx * step;
-        r.node.y += vy * step;
+        // Curve out of the straight line and settle back onto it near the car: the sideways
+        // push is strongest early and fades to nothing as `closing` goes to 1. Costs four
+        // extra multiplies — the perpendicular is just the travel vector turned 90°.
+        const bow = r.side * (1 - closing) * (1 - closing) * 210 * dt;
+        r.node.x += vx * step - vy * bow;
+        r.node.y += vy * step + vx * bow;
       }
     }
   }
@@ -5592,15 +5618,45 @@ export class GameScene extends Phaser.Scene {
 
   // A small dust puff kicked up at a running critter's feet.
   private footDust(x: number, y: number) {
-    const p = this.add.circle(x, y, 2.4, 0xffffff, 0.5).setDepth(DEPTH_RUNNER - 1);
-    this.tweens.add({
-      targets: p,
-      y: y - 5,
-      alpha: 0,
-      scale: 0.3,
-      duration: 260,
-      ease: "Quad.out",
-      onComplete: () => p.destroy(),
+    this.getDustEmitter().explode(1, x, y);
+  }
+
+  // Purely cosmetic flight for a slime collected while the field is already full of
+  // runners. The game state was settled by the caller — nothing here touches counts,
+  // seats or the win check — so it is safe to interrupt at any point. The path bows to
+  // one side and homes on the car's LIVE position, since the car keeps driving.
+  private zipToCar(tile: Phaser.GameObjects.Container, view: ChestView, color: number) {
+    const sx = tile.x;
+    const sy = tile.y;
+    const bow = (Math.random() < 0.5 ? -1 : 1) * (18 + Math.random() * 26);
+    const startScale = tile.scaleX;
+    tile.setDepth(DEPTH_RUNNER + 1);
+    this.tweens.addCounter({
+      from: 0,
+      to: 1,
+      duration: 230,
+      ease: "Cubic.in", // slow release, then whipped into the car
+      onUpdate: (tw) => {
+        if (!tile.scene) return;
+        const p = tw.getValue() ?? 0;
+        const tx = view.container.scene ? view.container.x : sx;
+        const ty = view.container.scene ? view.container.y : sy;
+        const dx = tx - sx;
+        const dy = ty - sy;
+        const d = Math.hypot(dx, dy) || 1;
+        const arc = Math.sin(p * Math.PI) * bow; // 0 at both ends, widest mid-flight
+        tile.x = sx + dx * p - (dy / d) * arc;
+        tile.y = sy + dy * p + (dx / d) * arc;
+        tile.setScale(startScale * (1 + 0.25 * Math.sin(p * Math.PI)) * (1 - 0.45 * p));
+        tile.rotation = arc * 0.02;
+      },
+      onComplete: () => {
+        if (tile.scene) tile.destroy();
+        if (view.container.scene) {
+          this.pulse(view.container); // the car reacts as the slime lands, not 200ms early
+          this.sparkle(view.container.x, view.container.y, color);
+        }
+      },
     });
   }
 
@@ -5632,7 +5688,46 @@ export class GameScene extends Phaser.Scene {
     this.getSparkEmitter().explode(6, x, y); // one GPU burst instead of 6 tweened circles
   }
 
+  // White rounded-capsule used for every runner's legs. Generated once per scene and
+  // scaled/tinted per slime, so all legs share one texture and batch together.
+  private getLegTexture(): string {
+    if (!this.textures.exists("leg")) {
+      const g = this.make.graphics({ x: 0, y: 0 }, false);
+      g.fillStyle(0xffffff, 1);
+      g.fillRoundedRect(0, 0, 16, 30, 7);
+      g.generateTexture("leg", 16, 30);
+      g.destroy();
+    }
+    return "leg";
+  }
+
+  // Pooled puff of dust kicked up on each footfall. Was a fresh Circle + tween EVERY
+  // footfall — around 25 allocations a second with a full field of runners, all of it
+  // garbage. One emitter reuses its particles instead.
+  private getDustEmitter(): Phaser.GameObjects.Particles.ParticleEmitter {
+    if (this.dustEmitter && this.dustEmitter.scene) return this.dustEmitter;
+    this.getSparkEmitter(); // makes sure the shared "spark" dot texture exists
+    this.dustEmitter = this.add
+      .particles(0, 0, "spark", {
+        lifespan: 260,
+        speedX: { min: -18, max: 18 },
+        speedY: { min: -34, max: -14 }, // drifts up off the ground
+        scale: { start: 0.2, end: 0.02 },
+        alpha: { start: 0.5, end: 0 },
+        tint: 0xffffff,
+        emitting: false,
+      })
+      .setDepth(DEPTH_RUNNER - 1);
+    return this.dustEmitter;
+  }
+
   private pulse(c: Phaser.GameObjects.Container) {
+    // Arrivals come thick and fast now that over-cap slimes fly in too, and stacking
+    // yoyo tweens on one container leaves its scale stranded between beats. Let a pulse
+    // finish before starting another. (A flag, not killTweensOf — that would also cancel
+    // the park/relaunch tweens that move the very same container.)
+    if (c.getData("pulsing")) return;
+    c.setData("pulsing", true);
     // Pop TƯƠNG ĐỐI quanh kích thước xe trên ray, rồi snap về đúng RAY_CAR_SCALE khi xong —
     // trước đây tween tới scale 1.14 tuyệt đối nên xe 0.9 bị phình to lúc ăn (user 2026-08-02).
     this.tweens.add({
@@ -5640,7 +5735,9 @@ export class GameScene extends Phaser.Scene {
       scale: RAY_CAR_SCALE * 1.12,
       duration: 80,
       yoyo: true,
-      onComplete: () => { if (c.scene) c.setScale(RAY_CAR_SCALE); },
+      onComplete: () => {
+        if (c.scene) { c.setScale(RAY_CAR_SCALE); c.setData("pulsing", false); }
+      },
     });
   }
 
