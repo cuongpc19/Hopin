@@ -2455,6 +2455,33 @@ if (process.argv.includes("--slamgrade")) {
 // Manythings/Design winrate/slam-targets.csv (rows "level,target") if present, else the built-ins.
 // ---- --ideab-json: chấm idea-B cho một dải level và in JSON (để so 3 mô hình) -------
 // LEVELS=5-30 (hoặc 5,7,9) SKILL=0.75 node scripts/build-levels.mjs --ideab-json
+// ---- --mech-json: chấm mô hình D (Monte-Carlo playAverage, skill-slip) cho dải level ----
+// LEVELS=15-46 SKILL=0.75 TRIALS=60 node scripts/build-levels.mjs --mech-json
+// LƯU Ý khi đọc: mô hình này KHÔNG đơn điệu theo skill (lý do nó từng bị bỏ) — luôn ghi kèm
+// mức skill đã dùng. Chạy chế độ slam bay-lock, không juggle (NOJUGGLE).
+if (process.argv.includes("--mech-json")) {
+  if (process.env.NOJUGGLE == null) process.env.NOJUGGLE = "1";
+  const data = JSON.parse(fs.readFileSync(OUT, "utf8"));
+  const SK = process.env.SKILL != null ? Number(process.env.SKILL) : 0.75;
+  const TRIALS = Number(process.env.TRIALS) || 60;
+  const spec = process.env.LEVELS || "15-46";
+  const nums = spec.includes("-")
+    ? (() => { const [a, b] = spec.split("-").map(Number); const r = []; for (let i = a; i <= b; i++) r.push(i); return r; })()
+    : spec.split(",").map(Number);
+  const out = { skill: SK };
+  for (const k of nums) {
+    const L = data[k];
+    if (!L || !Array.isArray(L.board)) continue;
+    LANES = L.lanes || DEFAULT_LANES;
+    try {
+      const r = testerReport(L.board, L.cols, L.rows, L.chests, L.track || "square", { skill: SK, trials: TRIALS, seed: k * 101 + 1, layer2: L.layer2 || null, tray: false, autoDrive: true, slam: true, choiceModel: false, bays: 5 });
+      out[k] = { win: Math.round(r.winRate * 100) };
+    } catch (e) { out[k] = { err: String(e && e.message || e) }; }
+  }
+  console.log("MECH_JSON " + JSON.stringify(out));
+  process.exit(0);
+}
+
 if (process.argv.includes("--ideab-json")) {
   const data = JSON.parse(fs.readFileSync(OUT, "utf8"));
   const SK = process.env.SKILL != null ? Number(process.env.SKILL) : 0.75;
