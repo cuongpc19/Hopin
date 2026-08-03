@@ -6206,6 +6206,9 @@ export class GameScene extends Phaser.Scene {
     // "+40" lên pill ví rồi mới cộng (showWinModal.applyReward; user 2026-08-01).
     const reward = WIN_GOLD;
     this.unlockProgress(next); // record on the picker that this level is beaten
+    // Ô LEVEL ở Home đọc pf_current — thắng xong phải trỏ NGAY sang level kế, kẻo về Home
+    // vẫn thấy level vừa thắng (pf_current xưa nay chỉ được ghi lúc BẮT ĐẦU chơi; user 2026-08-03).
+    try { localStorage.setItem("pf_current", String(next)); } catch { /* storage unavailable */ }
 
     // Lucky Clover event: award clovers + auto-grant any milestone rewards reached.
     // Unlocks after Level 10; every win from then on collects clovers (2 for a clean
