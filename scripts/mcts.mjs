@@ -57,10 +57,12 @@ const isOut = (w, m) => w.flying.some((u) => u.members.includes(m));
 // TRỌNG: nhiều thế chỉ thắng nếu chịu chờ xe trên ray ăn xong thay vì nhồi thêm xe.
 function legalMoves(w) {
   const moves = [];
-  const S = reachableColors(w.s);
+  // Game THẬT (relaunchFromSlot) cho bấm BẤT KỲ xe nào đang đỗ — không hề đòi màu của nó
+  // phải với tới được ngay lúc bấm. Bản đầu tôi lọc theo reachableColors nên đã CẤM OAN
+  // đúng loại nước quan trọng: phóng xe ra trước để nó có mặt đúng lúc xe khác mở đường.
   for (let i = 0; i < w.s.slots.length; i++) {
     const p = w.s.slots[i];
-    if (p && !isOut(w, p) && p.cap > 0 && S.has(p.color)) moves.push("bay" + i);
+    if (p && !isOut(w, p) && p.cap > 0) moves.push("bay" + i);
   }
   const fs2 = freeSlots(w.s);
   const seenPid = new Set();
@@ -101,30 +103,37 @@ function advance(w, maxTicks = 220) {
   return true;
 }
 
-// ---- rollout nhanh: chính sách tham lam rẻ (không estimate) để chấm lá cây ----
-function quickPlayout(w, rng, maxDecisions = 45) {
+// ---- rollout NẶNG: chơi tham lam có tri thức, không đi bừa -------------------
+// Bản đầu rollout bốc nước gần như ngẫu nhiên. Trên level dài 60-75 chuyến, lối chơi ẩu
+// đó KHÔNG BAO GIỜ thắng → mọi nhánh đều bị chấm ~0 → cây mất hết tín hiệu để leo, nên
+// E chấm L28/L30 = 0% dù người thật thắng ngay ván đầu, và tăng ngân sách gấp 6 lần cũng
+// không cứu được (đo 2026-08-03). Đây là điểm yếu kinh điển của MCTS với light playout.
+// Thay bằng chính sách THAM LAM giống mô hình B: ưu tiên bấm xe ô chờ còn ăn được (giải
+// phóng ô), rồi mới phóng xe mới từ hàng; chỉ giữ một chút ngẫu nhiên để các nhánh không
+// bị chấm giống hệt nhau.
+const PLAYOUT = Number(process.env.PLAYOUT || 60); // ngân sách rollout (số quyết định)
+function quickPlayout(w, rng, maxDecisions = PLAYOUT) {
   let lastRem = remaining(w.s), flat = 0;
   for (let d = 0; d < maxDecisions; d++) {
     const rem = remaining(w.s);
     if (rem === 0) return 1;
-    if (rem >= lastRem) { if (++flat > 6) break; } else { flat = 0; lastRem = rem; }
+    if (rem >= lastRem) { if (++flat > 8) break; } else { flat = 0; lastRem = rem; }
     const mvs = legalMoves(w);
     if (!mvs.length) return 0;
-    // ưu tiên bấm xe ô chờ (giải phóng ô), rồi phóng hàng, thi thoảng wait
     const bays = mvs.filter((m) => m.startsWith("bay"));
     const qs = mvs.filter((m) => m.startsWith("q"));
     let mv;
-    if (bays.length && rng() < 0.7) mv = bays[Math.floor(rng() * bays.length)];
+    // THAM LAM: xe đỗ mà còn ăn được thì luôn cho chạy — đây là nước gần như không bao giờ
+    // sai trong game này (ô chờ được giải phóng, bàn cờ tiến triển).
+    if (bays.length) mv = bays[Math.floor(rng() * bays.length)];
     else if (qs.length) mv = qs[Math.floor(rng() * qs.length)];
     else mv = mvs[Math.floor(rng() * mvs.length)];
     applyMove(w, mv);
     if (!advance(w)) return remaining(w.s) === 0 ? 1 : 0;
   }
-  // hết ngân sách: chấm phần đã dọn được (tín hiệu mềm thay vì 0/1 khắc nghiệt)
   const total = w.s.occ.length;
   return Math.max(0, 1 - remaining(w.s) / total) * 0.5;
 }
-
 // ---- một quyết định bằng cây UCT sâu HORIZON --------------------------------
 function decide(w, rng) {
   const rootMoves = legalMoves(w);
