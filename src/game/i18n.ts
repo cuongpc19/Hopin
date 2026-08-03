@@ -154,6 +154,21 @@ const S: Record<string, { vi: string; en: string }> = {
   heartsBuy1: { vi: 'Mua 1 tim — {n} Coin', en: 'Buy 1 heart — {n} Coin' },
   heartsBuyFull: { vi: 'Đầy 5 tim — {n} Coin', en: 'Refill 5 hearts — {n} Coin' },
 
+  // ---- nhật ký chơi (chép log) ----
+  logBtn: { vi: '📋 Nhật ký chơi', en: '📋 Play log' },
+  logTitle: { vi: 'NHẬT KÝ CHƠI', en: 'PLAY LOG' },
+  logDevice: { vi: 'Thiết bị này: {d}', en: 'This device: {d}' },
+  logRuns: { vi: '{n} ván · thắng {w}', en: '{n} games · {w} won' },
+  logNone: { vi: 'Chưa có ván nào được ghi.', en: 'No games recorded yet.' },
+  logCopyAll: { vi: 'Chép tất cả', en: 'Copy all' },
+  logAll: { vi: 'tất cả', en: 'all' },
+  logClear: { vi: 'Xoá log', en: 'Clear log' },
+  logClearConfirm: { vi: 'Bấm lần nữa để xoá hết', en: 'Tap again to erase' },
+  logCleared: { vi: 'Đã xoá nhật ký.', en: 'Log cleared.' },
+  logCopied: { vi: 'Đã chép {n} dòng ({what})', en: 'Copied {n} lines ({what})' },
+  logCopyFail: { vi: 'Không chép được — thử trình duyệt khác', en: 'Copy failed — try another browser' },
+  logEmpty: { vi: 'Không có dữ liệu để chép', en: 'Nothing to copy' },
+
   // ---- in-game settings ----
   settings: { vi: "CÀI ĐẶT", en: "SETTINGS" },
   sfx: { vi: "🔊 Âm thanh", en: "🔊 Sound FX" },

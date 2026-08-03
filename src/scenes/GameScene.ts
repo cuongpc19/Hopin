@@ -16,6 +16,7 @@ import {
 import { Audio } from "../game/audio";
 import { t as tr, tf as trf, getLang, setLang } from "../game/i18n";
 import { getLives, spendLife, showHeartsModal } from "../game/lives";
+import { saveRun, groupRuns, exportJsonl, clearRuns, deviceId, copyToClipboard } from "../game/playlog";
 import {
   awardClovers,
   isEventUnlocked,
@@ -3177,7 +3178,7 @@ export class GameScene extends Phaser.Scene {
   private openSettings() {
     const D = 200;
     const pw = 300;
-    const ph = 392;
+    const ph = 438;
     const x0 = GAME_W / 2 - pw / 2;
     const y0 = GAME_H / 2 - ph / 2;
     const dim = this.add
@@ -3228,7 +3229,7 @@ export class GameScene extends Phaser.Scene {
     };
 
     Audio.unlock(); // opening settings is a user gesture — safe to init audio
-    const rowYs = [84, 130, 176, 222, 268].map((dy) => y0 + dy);
+    const rowYs = [84, 130, 176, 222, 268, 314].map((dy) => y0 + dy);
 
     const mkToggle = (ty: number, label: string, get: () => boolean, set: (v: boolean) => void) => {
       const row = mkRow(ty, "", () => {
@@ -3271,8 +3272,11 @@ export class GameScene extends Phaser.Scene {
       this.resetProgress();
     });
 
+    // Nhật ký chơi — chép log ra clipboard (dùng được cả khi chơi trên GitHub).
+    mkRow(rowYs[4], tr("logBtn"), () => { kill(); this.openPlayLog(); });
+
     // Back to the Home screen + Close — same pill as everything above.
-    mkRow(rowYs[4], tr("levelsBtn"), () => {
+    mkRow(rowYs[5], tr("levelsBtn"), () => {
       // Walking out of a LIVE level is a failed attempt too — otherwise quitting when a
       // loss looks certain would dodge the heart (user 2026-08-02). That charge used to be
       // silent, which read as "no heart was taken at all", so ask first and name the price.
@@ -3298,6 +3302,91 @@ export class GameScene extends Phaser.Scene {
       title.destroy();
       for (const r of rows) { r.g.destroy(); r.tx.destroy(); r.hit.destroy(); }
     };
+    dim.on("pointerdown", kill);
+  }
+
+  // ---- Nhật ký chơi ---------------------------------------------------
+  // Bản trên GitHub Pages là web tĩnh nên không có server nhận log; mọi ván chơi ở đó
+  // trước nay bốc hơi sạch. Panel này liệt kê các ván đã lưu THEO NGÀY × THIẾT BỊ và cho
+  // chép ra clipboard đúng định dạng playlog.jsonl, dán thẳng vào máy dev là phát lại được.
+  private openPlayLog() {
+    const D = 500;
+    const groups = groupRuns();
+    const pw = 320;
+    const rowsN = Math.min(groups.length, 6);
+    const ph = 150 + rowsN * 44 + 96;
+    const x0 = GAME_W / 2 - pw / 2;
+    const y0 = GAME_H / 2 - ph / 2;
+    const objs: Phaser.GameObjects.GameObject[] = [];
+    const dim = this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0x000000, 0.6).setDepth(D).setInteractive();
+    const panel = this.add.graphics().setDepth(D + 1);
+    panel.fillStyle(0xf7edd0, 1);
+    panel.fillRoundedRect(x0, y0, pw, ph, 18);
+    panel.lineStyle(4, 0x8a5a12, 1);
+    panel.strokeRoundedRect(x0, y0, pw, ph, 18);
+    objs.push(dim, panel);
+    const txt = (x: number, y: number, t: string, size: number, color: string, origin = 0.5) =>
+      this.add.text(x, y, t, { fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: size + "px", color })
+        .setOrigin(origin, 0.5).setDepth(D + 2);
+    objs.push(txt(GAME_W / 2, y0 + 28, tr("logTitle"), 20, "#6a4a12"));
+    objs.push(txt(GAME_W / 2, y0 + 52, trf("logDevice", { d: deviceId() }), 13, "#8a6a2a"));
+
+    const status = txt(GAME_W / 2, y0 + ph - 62, "", 13, "#2a7a2a");
+    objs.push(status);
+
+    const copy = async (text: string, label: string) => {
+      if (!text) { status.setText(tr("logEmpty")); status.setColor("#b0392b"); return; }
+      const ok = await copyToClipboard(text);
+      status.setColor(ok ? "#2a7a2a" : "#b0392b");
+      status.setText(ok ? trf("logCopied", { n: text.split("\n").length, what: label }) : tr("logCopyFail"));
+    };
+
+    // mỗi dòng = một (ngày × thiết bị)
+    let y = y0 + 82;
+    if (!groups.length) objs.push(txt(GAME_W / 2, y + 14, tr("logNone"), 14, "#8a6a2a"));
+    for (const g of groups.slice(0, rowsN)) {
+      const bw = pw - 44, bh = 38, bx = GAME_W / 2;
+      const gg = this.add.graphics().setDepth(D + 2);
+      gg.fillStyle(0x3a8a3a, 1);
+      gg.fillRoundedRect(bx - bw / 2, y - bh / 2, bw, bh, 10);
+      gg.lineStyle(2.5, 0x1f6329, 1);
+      gg.strokeRoundedRect(bx - bw / 2, y - bh / 2, bw, bh, 10);
+      const label = `${g.day}  ·  ${g.dev}`;
+      const sub = trf("logRuns", { n: g.runs, w: g.wins });
+      objs.push(gg,
+        this.add.text(bx - bw / 2 + 12, y - 8, label, { fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "13px", color: "#ffffff" }).setOrigin(0, 0.5).setDepth(D + 3),
+        this.add.text(bx - bw / 2 + 12, y + 8, sub, { fontFamily: "Arial, sans-serif", fontSize: "11px", color: "#eafff0" }).setOrigin(0, 0.5).setDepth(D + 3));
+      const hit = this.add.rectangle(bx, y, bw, bh, 0xffffff, 0.001).setDepth(D + 4).setInteractive({ useHandCursor: true });
+      hit.on("pointerdown", () => void copy(exportJsonl({ day: g.day, dev: g.dev }), g.day));
+      objs.push(hit);
+      y += 44;
+    }
+
+    // nút: chép tất cả · xoá · đóng
+    const mkBtn = (bx: number, by: number, bw: number, label: string, fill: number, edge: number, onTap: () => void) => {
+      const g2 = this.add.graphics().setDepth(D + 2);
+      g2.fillStyle(fill, 1); g2.fillRoundedRect(bx - bw / 2, by - 17, bw, 34, 10);
+      g2.lineStyle(2.5, edge, 1); g2.strokeRoundedRect(bx - bw / 2, by - 17, bw, 34, 10);
+      const t2 = this.add.text(bx, by, label, { fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "13px", color: "#ffffff" }).setOrigin(0.5).setDepth(D + 3);
+      const h2 = this.add.rectangle(bx, by, bw, 34, 0xffffff, 0.001).setDepth(D + 4).setInteractive({ useHandCursor: true });
+      h2.on("pointerdown", onTap);
+      objs.push(g2, t2, h2);
+    };
+    const by2 = y0 + ph - 34;
+    const half = (pw - 56) / 2;
+    mkBtn(GAME_W / 2 - half / 2 - 6, by2, half, tr("logCopyAll"), 0x2f6fd0, 0x1c4a94, () => void copy(exportJsonl(), tr("logAll")));
+    let armed = false;
+    mkBtn(GAME_W / 2 + half / 2 + 6, by2, half, tr("logClear"), 0xb23a2a, 0x7d2418, () => {
+      if (!armed) { armed = true; status.setColor("#b0392b"); status.setText(tr("logClearConfirm")); return; }
+      clearRuns(); status.setText(tr("logCleared"));
+    });
+
+    const kill = () => objs.forEach((o) => o.destroy());
+    const closeBtn = this.add.text(GAME_W / 2, y0 + ph - 6, tr("close"), {
+      fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "13px", color: "#8a5a12",
+    }).setOrigin(0.5).setDepth(D + 3).setInteractive({ useHandCursor: true });
+    objs.push(closeBtn);
+    closeBtn.on("pointerdown", kill);
     dim.on("pointerdown", kill);
   }
 
@@ -3710,8 +3799,7 @@ export class GameScene extends Phaser.Scene {
       this.idleSince = this.time.now; // player acted → restart the idle-nudge timer
       // TELEMETRY: a queue tap is the player's core DECISION — log it with context (streamed live).
       const _p0 = this.findInInventory(group[0]); const launchEv = { ev: "launch", col: _p0 ? this.invColumns.indexOf(_p0.col) : -1, t: Math.round((typeof performance !== "undefined" ? performance.now() : 0) - this.playStart), colors: group.map((v) => v.chest.color), counts: group.map((v) => v.chest.count), buried: group.some((v) => !!(v.chest as unknown as { buried?: boolean }).buried), freeSlotsBefore: freeSlots, onRay: this.active.length + this.pending.length, twin: group.length > 1 };
-      this.playLog.push(launchEv);
-      this.postLog(launchEv);
+      this.postLog(launchEv); // postLog tự gom vào playLog
       { const p0 = this.findInInventory(group[0]); if (p0) this.onGuideAction("q" + this.invColumns.indexOf(p0.col)); } // guide plan: player launched column j
       // A twin/triple must claim ADJACENT bays. If the free slots are scattered between
       // locked ones, shift the locked cars RIGHT first so a contiguous run opens on the left
@@ -5914,16 +6002,24 @@ export class GameScene extends Phaser.Scene {
   // happens — start/launch/bayTap — so an abandoned run still leaves its trail, not just win/lose).
   private postLog(obj: Record<string, unknown>) {
     if (!this.slamMode) return;
-    const line = JSON.stringify({ lvl: this.levelNum, t: Math.round((typeof performance !== "undefined" ? performance.now() : 0) - this.playStart), ...obj });
+    const t = Math.round((typeof performance !== "undefined" ? performance.now() : 0) - this.playStart);
+    // Gom vào nhật ký của ván để lưu được cả khi chơi trên GitHub (không có server nhận).
+    // Bỏ "plan"/"guide" — chỉ là vết chỉ dẫn, dài mà không dùng cho phát lại.
+    if (typeof obj.ev === "string" && obj.ev !== "plan" && obj.ev !== "guide") {
+      this.playLog.push({ ...obj, ev: obj.ev, t });
+    }
+    const line = JSON.stringify({ lvl: this.levelNum, t, ...obj });
     console.log("[HOPLOG] " + line);
     try { fetch("/api/hoplog", { method: "POST", headers: { "Content-Type": "application/json" }, body: line }).catch(() => { }); } catch { /* ignore */ }
   }
   private emitPlayLog(result: "win" | "lose") {
     if (!this.slamMode) return; // telemetry only for slam playtests
     this.notePeak();
-    const summary = { lvl: this.levelNum, result, ms: Math.round((typeof performance !== "undefined" ? performance.now() : 0) - this.playStart), launches: this.playLog.length, peakBays: this.peakUsed, bays: this.slots.length, log: this.playLog };
-    try { const arr = JSON.parse(localStorage.getItem("hopin_playlog") || "[]"); arr.push(summary); localStorage.setItem("hopin_playlog", JSON.stringify(arr)); } catch { /* ignore */ }
-    this.postLog({ ev: "result", ...summary }); // final recap line (streamed like every other event)
+    const ms = Math.round((typeof performance !== "undefined" ? performance.now() : 0) - this.playStart);
+    const launches = this.playLog.filter((e) => e.ev === "launch").length;
+    const summary = { lvl: this.levelNum, result, ms, launches, peakBays: this.peakUsed, bays: this.slots.length };
+    this.postLog({ ev: "result", ...summary }); // dòng tổng kết (postLog gom nốt vào playLog)
+    saveRun(this.levelNum, result, ms, this.playLog.slice() as never); // cất lại để chép ra sau
   }
 
   private lose(pending?: ActiveChest) {
