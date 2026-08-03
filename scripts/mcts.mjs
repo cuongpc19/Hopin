@@ -25,6 +25,13 @@ import { mkWorld, launchCol, tapSlot, tick, onRayCount } from "./simcore2.mjs";
 const ITER = Number(process.env.ITER || 60);     // lượt mô phỏng cho mỗi quyết định
 const HORIZON = Number(process.env.HORIZON || 3); // độ sâu cây (số quyết định nhìn trước)
 const N_GAMES = Number(process.env.N || 16);
+// TAY NGHỀ (user 2026-08-03: "sao đoán toàn 0 và 100 nhỉ"). Bản đầu luôn lấy nước TỐT NHẤT
+// theo cây → nó chơi y hệt mọi ván, phương sai bằng 0, nên winrate chỉ có thể là 0 hoặc 100.
+// Người thật thì thỉnh thoảng chọn nước hạng nhì. Ở đây nước ở gốc được BỐC theo softmax
+// trên giá trị cây với nhiệt độ T = (1-skill)·SPREAD: skill→1 thành lấy-tốt-nhất như cũ,
+// skill thấp thì hay lạc sang nước kém hơn → winrate trải ra khoảng giữa.
+const SKILL = Number(process.env.SKILL ?? 0.75);
+const SPREAD = Number(process.env.SPREAD ?? 1.2); // hệ số đổi tay-nghề → nhiệt độ τ
 
 const mkRng = (s) => { let x = (s >>> 0) || 1; return () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 0xffffffff; }; };
 
@@ -78,7 +85,7 @@ function applyMove(w, mv) {
 
 // Chạy thế giới tới điểm quyết định kế: có nước đi mới xuất hiện, hoặc ray lặng hẳn.
 // Trả false nếu thế giới chết cứng (kẹt).
-function advance(w, maxTicks = 400) {
+function advance(w, maxTicks = 220) {
   let stale = 0;
   for (let i = 0; i < maxTicks; i++) {
     if (remaining(w.s) === 0) return true;
@@ -95,9 +102,12 @@ function advance(w, maxTicks = 400) {
 }
 
 // ---- rollout nhanh: chính sách tham lam rẻ (không estimate) để chấm lá cây ----
-function quickPlayout(w, rng, maxDecisions = 200) {
+function quickPlayout(w, rng, maxDecisions = 45) {
+  let lastRem = remaining(w.s), flat = 0;
   for (let d = 0; d < maxDecisions; d++) {
-    if (remaining(w.s) === 0) return 1;
+    const rem = remaining(w.s);
+    if (rem === 0) return 1;
+    if (rem >= lastRem) { if (++flat > 6) break; } else { flat = 0; lastRem = rem; }
     const mvs = legalMoves(w);
     if (!mvs.length) return 0;
     // ưu tiên bấm xe ô chờ (giải phóng ô), rồi phóng hàng, thi thoảng wait
@@ -146,13 +156,28 @@ function decide(w, rng) {
     const st = stats.get(mv);
     st.n++; st.sum += r;
   }
-  let best = rootMoves[0], bestAvg = -1;
-  for (const m of rootMoves) {
-    const st = stats.get(m);
-    const avg = st.n ? st.sum / st.n : 0;
-    if (avg > bestAvg) { bestAvg = avg; best = m; }
+  // CHỌN NƯỚC Ở GỐC — theo chuẩn MCTS: dùng SỐ LƯỢT THĂM, không dùng giá trị trung bình.
+  // Bản đầu tôi softmax trên Q (giá trị TB) là SAI so với thông lệ: một nước mới thăm 1 lần
+  // mà rollout gặp may sẽ có Q=1.0, ngang nước đã thăm 15 lần với Q=0.7 — tức khuếch đại
+  // nhiễu. Số lượt thăm mới là thống kê vững, vì UCT đã tự dồn lượt vào nhánh tốt nên N gói
+  // cả giá trị lẫn độ tin cậy. Đây đúng công thức AlphaZero: π(a) ∝ N(a)^(1/τ); τ→0 thành
+  // "robust child" (lấy nước được thăm nhiều nhất) — lựa chọn chuẩn khi chơi ăn thua.
+  const tau = (1 - SKILL) * SPREAD;
+  const ns = rootMoves.map((m) => ({ m, n: stats.get(m).n }));
+  if (tau <= 1e-3) {
+    let best = ns[0];
+    for (const x of ns) if (x.n > best.n) best = x;
+    return best.m;
   }
-  return best;
+  // tính trong log-space để N^(1/τ) không tràn số khi τ nhỏ
+  const logs = ns.map((x) => (x.n > 0 ? Math.log(x.n) / tau : -Infinity));
+  const mx = Math.max(...logs);
+  const ws = logs.map((v) => (v === -Infinity ? 0 : Math.exp(v - mx)));
+  const sum = ws.reduce((acc, c) => acc + c, 0);
+  if (!(sum > 0)) return ns[0].m;
+  let pick = rng() * sum;
+  for (let i = 0; i < ns.length; i++) { pick -= ws[i]; if (pick <= 0) return ns[i].m; }
+  return ns[ns.length - 1].m;
 }
 
 // ---- một ván đầy đủ do MCTS cầm lái -----------------------------------------
