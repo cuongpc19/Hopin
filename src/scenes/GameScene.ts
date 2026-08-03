@@ -180,19 +180,31 @@ const SHOT_COOLDOWN = 10; // ms between pickups — slam: near frame-rate cap (~
 // CẤU HÌNH coin thưởng MỖI ván thắng (user 2026-08-01, theo video mẫu "+40" — mọi ván
 // thắng đều +40, không chỉ first-clear).
 const WIN_GOLD = 40;
-// Critter "run to the car" animation: sets off, accelerates to catch the moving
-// car. RUN_MAX must comfortably exceed car speed (SPEED * TRACK_STEP = ~250 px/s) or
-// slimes trail behind forever and the car sits waiting — keep it above ~450.
-// Eased off ~26% (user 2026-08-02: "cho slime chạy chậm lại hơn 1 chút") now that a
-// slime overflowing RUNNER_CAP flies in on its own arc instead of blinking out — the
-// longer flights push past that cap more often, which is no longer a problem.
-const RUN_START = 260;
-const RUN_ACCEL = 850;
-const RUN_MAX = 700;
+// Critter "run to the car" animation: sets off, accelerates to catch the moving car, then
+// EASES OFF over the last stretch. Slowing the whole run down flat (tried 2026-08-02) broke
+// the read: by the time a slime arrived the car had driven on, so the player could no longer
+// tell which car had grabbed what. Sprinting far and braking near keeps the grab instant AND
+// gives the landing a beat (user's call: "xe ở xa cho bay nhanh, gần thì chậm lại").
+// Any speed must comfortably exceed the car's own ~250 px/s or slimes trail behind forever
+// and the car sits waiting — keep even the NEAR figure above ~450.
+// ⚠ A typical trip is only ~200px, and at the old 1100 px/s² a slime never got anywhere
+// near its 950 cap — it spent the whole run accelerating and topped out around 740. The cap
+// was decorative, and raising it changed nothing. What actually governs the feel is how fast
+// it LEAVES: hence a high launch speed and a steep ramp, which is also what makes the brake
+// below have something to bite on.
+const RUN_START = 620;
+const RUN_ACCEL = 2600;
+const RUN_MAX_FAR = 950; // cruise, reached on longer trips across a big board
+const RUN_MAX_NEAR = 620; // eased-off approach speed right at the car
+// How close (px, screen space) the braking starts. ~5 slime-lengths as drawn: a running
+// slime renders ~25px, and runners are size-compensated to look the same on every board,
+// so this stays a plain pixel distance rather than a multiple of the cell.
+const RUN_BRAKE_RADIUS = 130;
+const RUN_BRAKE = 1800; // px/s² shed on approach
 // The gait was tuned against this speed, so leg churn, stride, bob and lean are measured
-// against it rather than against RUN_MAX. Dividing by RUN_MAX would keep the legs
-// pumping at full tilt however slow the body actually moves — a moonwalk. Leave this
-// where it is when tuning RUN_MAX: it's what makes a slower slime take calmer strides.
+// against it rather than against the current cap. Measuring against the cap would keep the
+// legs pumping at full tilt however slow the body actually moves — a moonwalk. Because the
+// gait reads r.spd, it eases off by itself as the slime brakes.
 const GAIT_REF = 950;
 // When this many running critters are already in flight (eating fast), further pickups collect
 // INSTANTLY (no runner, no beam) with a light pop — caps object churn so rapid eating stays cool.
@@ -5519,11 +5531,23 @@ export class GameScene extends Phaser.Scene {
       // If the car has finished its route and is holding for its last runners, those
       // runners RUSH in (much faster) so the car doesn't sit there waiting.
       const rush = car.waiting ? 3 : 1;
-      r.spd = Math.min(RUN_MAX * rush, r.spd + RUN_ACCEL * rush * dt);
-      // Launch crouch: ease into the sprint over the first moments instead of snapping to
-      // full speed, so the slime reads as pushing off rather than being fired.
+      // Ramp the speed limit down over the last RUN_BRAKE_RADIUS px so the slime arrives
+      // eased rather than slamming in. The brake acts on the REAL speed, not on the step
+      // length: the gait reads r.spd, so braking this way slows the legs to match instead
+      // of leaving them pumping over a body that's decelerating. `rush` (the car has parked
+      // and is holding for its last slimes) lifts the cap out of the way, so the endgame
+      // sprint is untouched.
+      const nearFrac = Phaser.Math.Clamp(1 - dist / RUN_BRAKE_RADIUS, 0, 1); // 0 far → 1 at the car
+      const cap = (RUN_MAX_FAR + (RUN_MAX_NEAR - RUN_MAX_FAR) * nearFrac) * rush;
+      r.spd = r.spd > cap
+        ? Math.max(cap, r.spd - RUN_BRAKE * dt)
+        : Math.min(cap, r.spd + RUN_ACCEL * rush * dt);
+      // Launch beat: a quick swell that settles, so the slime pops off the board instead of
+      // appearing mid-stride. It is SIZE only — an earlier version scaled the step instead,
+      // which both dulled the very moment the grab needs to read and left the gait (which
+      // follows r.spd) running ahead of a body that was moving slower than it claimed.
       const launch = Phaser.Math.Clamp((this.time.now - r.born) / 110, 0, 1);
-      const step = r.spd * dt * (0.35 + 0.65 * launch);
+      const step = r.spd * dt;
       const speedFrac = Phaser.Math.Clamp(r.spd / GAIT_REF, 0, 1); // 0..1 against the gait's reference speed
       const closing = Phaser.Math.Clamp(1 - dist / (s * 3.2), 0, 1); // 0..1 as it nears the car
 
@@ -5552,7 +5576,7 @@ export class GameScene extends Phaser.Scene {
       // picture board up to the 25×25 standard, so runners look the SAME size near the
       // cars on every level (on boards ≤25 stdCell==cell → sizeComp is 1, no change).
       const sizeComp = this.cell > 0 ? this.stdCell / this.cell : 1;
-      const base = 1.3 * (1 + closing * 0.72) * (r.nice ? 1.2 : 1) * sizeComp;
+      const base = 1.3 * (1 + closing * 0.72) * (r.nice ? 1.2 : 1) * sizeComp * (1 + 0.22 * (1 - launch));
       if (Math.abs(vx) >= Math.abs(vy)) r.node.setScale(base * (1 + st), base * (1 - st * 0.6));
       else r.node.setScale(base * (1 - st * 0.6), base * (1 + st));
 

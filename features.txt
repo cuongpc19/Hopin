@@ -1093,15 +1093,30 @@ xuyên hơn → CÀNG NHIỀU slime bị "ăn tắt" không animation. Vì vậy
 • ĐƯỜNG CHẠY CONG + NHÚN LẤY ĐÀ: runner cong sang bên (Runner.side, so le
   trái/phải mỗi lần sinh) rồi thẳng dần khi tới gần xe; 110ms đầu chạy chậm hơn
   (Runner.born) cho ra động tác đạp lấy đà. Tốn thêm ~4 phép nhân/khung.
-• (tiếp, user thử sau) CHẬM LẠI ~26%: RUN_MAX 950→700, RUN_ACCEL 1100→850,
-  RUN_START 320→260. Vẫn nhanh gấp 2.8 lần xe (250 px/s) nên đuổi kịp thoải mái
-  — ĐỪNG hạ dưới ~450 kẻo slime lẽo đẽo, xe phải đứng chờ.
-  ⚠ PHẢI kèm GAIT_REF: nhịp chân/sải/nhún/nghiêng tính theo speedFrac = spd /
-  GAIT_REF (=950, tốc độ mà animation được canh), KHÔNG phải / RUN_MAX. Nếu chia
-  cho RUN_MAX thì speedFrac vẫn về 1 → chân guồng hết cỡ trong khi thân đi chậm
-  = TRƯỢT BĂNG (moonwalk). Nhờ GAIT_REF: chân -19%, sải -18%, khớp với thân -26%.
-  Chạy chậm ⇒ chạm RUNNER_CAP nhiều hơn ⇒ nhiều slime đi đường "bay vèo" hơn —
-  chấp nhận được vì đường đó giờ đã đẹp.
+• TỐC ĐỘ CHẠY: XA THÌ NHANH, GẦN XE THÌ HÃM (chốt 2026-08-02).
+  ⚠ BÀI HỌC ĐO ĐƯỢC — ĐỌC TRƯỚC KHI CHỈNH: quãng bay điển hình chỉ ~200px, mà
+  gia tốc cũ 1100 px/s² thì slime CHƯA BAO GIỜ chạm trần 950 (đỉnh thực ~740).
+  Tức RUN_MAX cũ chỉ để làm cảnh, nâng/hạ nó gần như không đổi cảm giác. Thứ
+  quyết định là TỐC ĐỘ RỜI BOARD (RUN_START) và GIA TỐC.
+  - Thử "chậm đều" (700/850/260) → hỏng: 450ms/chuyến, xe trôi 112px trước khi
+    slime tới → user MẤT liên hệ nhân-quả "xe nào gắp viên nào".
+  - Chốt: RUN_START 620, RUN_ACCEL 2600, FAR 950, NEAR 620, hãm RUN_BRAKE 1800
+    trong bán kính RUN_BRAKE_RADIUS 130px (≈5 thân slime như mắt nhìn; slime vẽ
+    ~25px và đã size-compensate nên để ĐƠN VỊ PX, không theo cell).
+  - Kết quả 200px: 267ms (cũ 383ms), đỉnh 923, cập xe 653 → hãm 29%, xe chỉ trôi
+    67px ≈ 1.2 thân xe. Nhịp chân theo đó: 65% lúc bật ra → 97% giữa đường → 69%
+    lúc đáp. Chuyến dài (board to) mới chạm trần 950 rồi mới hãm.
+  - Hãm phải TÁC ĐỘNG VÀO r.spd (cho phép GIẢM), không phải nhân nhỏ step: gait
+    đọc r.spd nên hãm kiểu này chân tự chậm theo. `rush` (xe đã đỗ, chờ viên
+    cuối) nhân trần ×3 nên nước rút cuối KHÔNG bị hãm.
+  - Chạy nhanh hơn ⇒ ÍT chạm RUNNER_CAP hơn ⇒ nhiều slime chạy bộ thật hơn.
+  ⚠ GAIT_REF (=950) là mốc canh dáng chạy, KHÔNG phải trần tốc độ. Nhịp chân/
+    sải/nhún/nghiêng = spd / GAIT_REF. Nếu chia cho trần hiện hành thì speedFrac
+    luôn về 1 → chân guồng hết cỡ dù thân chậm = TRƯỢT BĂNG. Đừng đổi GAIT_REF
+    khi tinh chỉnh tốc độ.
+  ⚠ "Nhún lấy đà" chỉ được làm bằng KÍCH THƯỚC (base scale theo Runner.born).
+    Bản đầu nhân vào step → vừa làm chậm đúng khoảnh khắc cần thấy cú gắp, vừa
+    làm chân chạy nhanh hơn thân. Đã sửa.
 • SỐ GHẾ NẢY khi slime lên xe + pulse() có CỜ CHỐNG CHỒNG (c.getData("pulsing")):
   giờ pulse bị gọi dày hơn, tween yoyo chồng nhau sẽ để scale xe kẹt lơ lửng.
   ⚠ Dùng cờ chứ KHÔNG killTweensOf(container) — sẽ giết luôn tween đỗ xe/đổi ô.
