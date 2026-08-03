@@ -181,10 +181,19 @@ const SHOT_COOLDOWN = 10; // ms between pickups — slam: near frame-rate cap (~
 // thắng đều +40, không chỉ first-clear).
 const WIN_GOLD = 40;
 // Critter "run to the car" animation: sets off, accelerates to catch the moving
-// car. RUN_MAX must comfortably exceed car speed (SPEED * TRACK_STEP px/s).
-const RUN_START = 320;   // snappier: critters set off faster (user 2026-07-29 — quicker "see + grab")
-const RUN_ACCEL = 1100;
-const RUN_MAX = 950;
+// car. RUN_MAX must comfortably exceed car speed (SPEED * TRACK_STEP = ~250 px/s) or
+// slimes trail behind forever and the car sits waiting — keep it above ~450.
+// Eased off ~26% (user 2026-08-02: "cho slime chạy chậm lại hơn 1 chút") now that a
+// slime overflowing RUNNER_CAP flies in on its own arc instead of blinking out — the
+// longer flights push past that cap more often, which is no longer a problem.
+const RUN_START = 260;
+const RUN_ACCEL = 850;
+const RUN_MAX = 700;
+// The gait was tuned against this speed, so leg churn, stride, bob and lean are measured
+// against it rather than against RUN_MAX. Dividing by RUN_MAX would keep the legs
+// pumping at full tilt however slow the body actually moves — a moonwalk. Leave this
+// where it is when tuning RUN_MAX: it's what makes a slower slime take calmer strides.
+const GAIT_REF = 950;
 // When this many running critters are already in flight (eating fast), further pickups collect
 // INSTANTLY (no runner, no beam) with a light pop — caps object churn so rapid eating stays cool.
 const RUNNER_CAP = 9;
@@ -5515,7 +5524,7 @@ export class GameScene extends Phaser.Scene {
       // full speed, so the slime reads as pushing off rather than being fired.
       const launch = Phaser.Math.Clamp((this.time.now - r.born) / 110, 0, 1);
       const step = r.spd * dt * (0.35 + 0.65 * launch);
-      const speedFrac = Phaser.Math.Clamp(r.spd / RUN_MAX, 0, 1); // 0..1, how fast it is going
+      const speedFrac = Phaser.Math.Clamp(r.spd / GAIT_REF, 0, 1); // 0..1 against the gait's reference speed
       const closing = Phaser.Math.Clamp(1 - dist / (s * 3.2), 0, 1); // 0..1 as it nears the car
 
       // ---- running animation --------------------------------------------

@@ -1093,6 +1093,15 @@ xuyên hơn → CÀNG NHIỀU slime bị "ăn tắt" không animation. Vì vậy
 • ĐƯỜNG CHẠY CONG + NHÚN LẤY ĐÀ: runner cong sang bên (Runner.side, so le
   trái/phải mỗi lần sinh) rồi thẳng dần khi tới gần xe; 110ms đầu chạy chậm hơn
   (Runner.born) cho ra động tác đạp lấy đà. Tốn thêm ~4 phép nhân/khung.
+• (tiếp, user thử sau) CHẬM LẠI ~26%: RUN_MAX 950→700, RUN_ACCEL 1100→850,
+  RUN_START 320→260. Vẫn nhanh gấp 2.8 lần xe (250 px/s) nên đuổi kịp thoải mái
+  — ĐỪNG hạ dưới ~450 kẻo slime lẽo đẽo, xe phải đứng chờ.
+  ⚠ PHẢI kèm GAIT_REF: nhịp chân/sải/nhún/nghiêng tính theo speedFrac = spd /
+  GAIT_REF (=950, tốc độ mà animation được canh), KHÔNG phải / RUN_MAX. Nếu chia
+  cho RUN_MAX thì speedFrac vẫn về 1 → chân guồng hết cỡ trong khi thân đi chậm
+  = TRƯỢT BĂNG (moonwalk). Nhờ GAIT_REF: chân -19%, sải -18%, khớp với thân -26%.
+  Chạy chậm ⇒ chạm RUNNER_CAP nhiều hơn ⇒ nhiều slime đi đường "bay vèo" hơn —
+  chấp nhận được vì đường đó giờ đã đẹp.
 • SỐ GHẾ NẢY khi slime lên xe + pulse() có CỜ CHỐNG CHỒNG (c.getData("pulsing")):
   giờ pulse bị gọi dày hơn, tween yoyo chồng nhau sẽ để scale xe kẹt lơ lửng.
   ⚠ Dùng cờ chứ KHÔNG killTweensOf(container) — sẽ giết luôn tween đỗ xe/đổi ô.
