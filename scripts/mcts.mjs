@@ -87,17 +87,23 @@ function applyMove(w, mv) {
 
 // Chạy thế giới tới điểm quyết định kế: có nước đi mới xuất hiện, hoặc ray lặng hẳn.
 // Trả false nếu thế giới chết cứng (kẹt).
-function advance(w, maxTicks = 220) {
+function advance(w, maxTicks = 400) {
+  // Chạy thế giới tới ĐIỂM QUYẾT ĐỊNH THẬT: một xe vừa về ô/rời đi, hoặc ray đã trống.
+  // Bản trước dừng ngay khi "có nước hợp lệ", mà từ lúc cho bấm mọi xe đỗ thì điều đó luôn
+  // đúng → advance trả về sau ĐÚNG MỘT NHỊP, xe chỉ nhích một làn giữa hai quyết định trong
+  // khi một vòng cần ~100 làn. Hậu quả đo được: rollout đi 21 nước đã đứng im với 72% bàn còn
+  // nguyên, nên 0/24000 rollout thắng nổi và cây mù hoàn toàn (2026-08-04).
+  const n0 = w.flying.length;
+  const done0 = w.trips.length;
   let stale = 0;
   for (let i = 0; i < maxTicks; i++) {
     if (remaining(w.s) === 0) return true;
     const before = remaining(w.s);
     tick(w);
     if (remaining(w.s) < before) stale = 0; else stale++;
-    const mvs = legalMoves(w);
-    // dừng khi có lựa chọn thật sự (ngoài "wait") hoặc ray đã trống
-    if (mvs.some((m) => m !== "wait")) return true;
-    if (w.flying.length === 0) return mvs.length > 0;
+    if (w.trips.length > done0) return true;      // có xe vừa kết thúc chuyến
+    if (w.flying.length === 0) return legalMoves(w).length > 0;
+    if (w.flying.length < n0) return true;
     if (stale > w.seq.length * 2) return remaining(w.s) === 0;
   }
   return true;
@@ -111,13 +117,13 @@ function advance(w, maxTicks = 220) {
 // Thay bằng chính sách THAM LAM giống mô hình B: ưu tiên bấm xe ô chờ còn ăn được (giải
 // phóng ô), rồi mới phóng xe mới từ hàng; chỉ giữ một chút ngẫu nhiên để các nhánh không
 // bị chấm giống hệt nhau.
-const PLAYOUT = Number(process.env.PLAYOUT || 60); // ngân sách rollout (số quyết định)
+const PLAYOUT = Number(process.env.PLAYOUT || 150); // ngân sách rollout (số quyết định)
 function quickPlayout(w, rng, maxDecisions = PLAYOUT) {
   let lastRem = remaining(w.s), flat = 0;
   for (let d = 0; d < maxDecisions; d++) {
     const rem = remaining(w.s);
     if (rem === 0) return 1;
-    if (rem >= lastRem) { if (++flat > 8) break; } else { flat = 0; lastRem = rem; }
+    if (rem >= lastRem) { if (++flat > 20) break; } else { flat = 0; lastRem = rem; }
     const mvs = legalMoves(w);
     if (!mvs.length) return 0;
     const bays = mvs.filter((m) => m.startsWith("bay"));
