@@ -459,7 +459,7 @@ export class GameScene extends Phaser.Scene {
       // Glossy keycap board-tile art (public/art/slime/tile-<id>.png). If present it
       // REPLACES the procedural flat tile in create(); missing ones fall back to it.
       // ?v= cache-buster: bump when the tile PNGs change so browsers refetch (they cache by URL).
-      this.load.image(`tile-${i}`, `art/slime/tile-${i}.png?v=8`);
+      this.load.image(`tile-${i}`, `art/slime/tile-${i}.png?v=9`);
     }
     // XU VÀNG màn thắng (video mẫu IMG_6489). Art thật user sẽ gửi vào public/art/coin.png;
     // thiếu/hỏng → create() vẽ placeholder (makeCoinTexture).

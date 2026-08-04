@@ -1156,10 +1156,20 @@ xuyên hơn → CÀNG NHIỀU slime bị "ăn tắt" không animation. Vì vậy
   strip-tile-shadow.mjs không đụng tới. Hai ô kề nhau = hai viền chồng cạnh → vạch
   tối ở GIỮA cạnh chung, nhạt dần ở góc bo → nhìn ra "dấu gạch". Đo trên render
   thật (ô be): thân 187, ron tụt 122-131.
-• Sửa: scripts/soften-tile-outline.mjs đổi pixel viền sang MÀU THÂN × 0.72 (giữ
-  alpha) → ron còn 172-176 (thân 187): vẫn tách được ô kề nhau nhưng cùng tông, hết
-  vạch đen. ?v=7 → ?v=8. Điều kiện lọc phải là HAI vế (alpha < 250 VÀ max(rgb) < 40)
-  — chỉ lọc màu thì ăn thân ô tối, chỉ lọc alpha thì ăn mép khử răng cưa bình thường.
+• Sửa: scripts/soften-tile-outline.mjs đổi pixel viền sang MÀU THÂN × FACTOR (giữ
+  alpha). Thử 0.72 trước (ron 172 / thân 187) rồi user bảo "cho bé hẳn" → CHỐT
+  FACTOR=1.0: viền mang đúng màu thân, hết sạch vạch tối. ?v=7 → ?v=8 → ?v=9.
+  Điều kiện lọc phải là HAI vế (alpha < 250 VÀ max(rgb) < 40) — chỉ lọc màu thì ăn
+  thân ô tối, chỉ lọc alpha thì ăn mép khử răng cưa bình thường.
+• Script CỘNG DỒN (chạy lần 2 không còn pixel đen để sửa): muốn đổi FACTOR phải
+  `git checkout <commit trước> -- public/art/slime` rồi chạy lại MỘT lần.
+• Còn lại sau khi bỏ viền: một sợi SÁNG (không phải tối) giữa hai ô = tấm nền lọt
+  qua khe. Keycap trong ảnh chỉ chiếm 0.71 chiều ảnh, vẽ ở 1.3× ô lưới → phủ 0.925
+  ô, hở 0.075. Muốn hết hẳn thì nâng setDisplaySize 1.3 → 1.41 (ô chạm nhau, chỉ
+  còn chấm ở đúng 4 góc) — CHƯA làm, tranh sẽ liền mảng hơn.
+• ⚠ ĐỪNG sửa file .ts bằng PowerShell `Get-Content | -replace | Set-Content`: PS 5.1
+  đọc mặc định ANSI + ghi UTF-8 kèm BOM → toàn bộ chú thích tiếng Việt thành mojibake
+  (616 dòng hỏng, đã phải git checkout khôi phục). Dùng công cụ sửa file thường.
 
 ────────────────────────────────────────────────────────────────────────────
 32) L5: 60 XE → 18 XE (user 2026-08-03)
