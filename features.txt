@@ -1122,6 +1122,56 @@ xuyên hơn → CÀNG NHIỀU slime bị "ăn tắt" không animation. Vì vậy
   ⚠ Dùng cờ chứ KHÔNG killTweensOf(container) — sẽ giết luôn tween đỗ xe/đổi ô.
 
 ────────────────────────────────────────────────────────────────────────────
+31) BÓC BÓNG ĐỔ KHỎI Ô BÀN CỜ (user 2026-08-03)
+────────────────────────────────────────────────────────────────────────────
+• Hiện tượng user thấy: MỌI ô trên bàn có một nêm xám ở góc DƯỚI-PHẢI, trông như
+  marker cơ chế nhưng không phải. Nguồn: ảnh keycap public/art/slime/tile-*.png
+  có DROP-SHADOW đen nướng sẵn ở cạnh phải + cạnh dưới (alpha ~4 giữa cạnh, ~66
+  sát góc; cạnh trái/trên = 0). GameScene vẽ ô to 1.3× ô lưới nên ô vẽ sau che gần
+  hết vệt bóng — trừ KHE HÌNH THOI chỗ 4 góc bo tròn gặp nhau, bóng lọt qua đó.
+• Sửa: scripts/strip-tile-shadow.mjs xoá bóng khỏi cả 19 file (~2100 px/ảnh, thân ô
+  giữ nguyên từng pixel), + nâng cache-buster ?v=6 → ?v=7 ở GameScene.load.image
+  (trình duyệt cache theo URL, không bump thì vẫn thấy ảnh cũ).
+• ⚠ BẪY (đã sập một lần): lọc "pixel tối thì xoá" (max(r,g,b) < 70) ăn mất 7484 px
+  THÂN của tile-12 (ô navy #262630) và 483 px của tile-10. Phải bóc theo HÌNH:
+  mask = pixel đặc (alpha ≥ 250) → nở 2 px giữ viền khử răng cưa → xoá mọi thứ
+  ngoài mask. Bóng nằm hẳn ngoài hình keycap nên bay sạch, ô tối vẫn nguyên.
+• ⚠ NHƯNG bóng KHÔNG PHẢI thứ user chỉ. Cái dấu user thấy = MARKER Ô 2 LỚP
+  (markTwoLayer). Chẩn đoán sai vì đọc ảnh chụp: tam giác trắng-viền-đen ở góc
+  TRÊN-phải bị đọc thành nêm xám góc DƯỚI-phải. Cách xác minh đúng (dùng lại được):
+  chụp game thật bằng Chrome headless + CDP (Node 24 có sẵn WebSocket, không cần
+  thư viện) rồi phóng to; so một level CÓ layer2 (L35: 132/301 ô) với một level
+  KHÔNG có (L5: 0 ô) — ô L5 sạch trơn thì biết ngay dấu đến từ layer2, không từ ảnh.
+• CHỐT: BỎ HẲN marker 2 lớp (user: "k cần phải thể hiện 2 lớp đâu, cho ô vuông full
+  của nó đi"). markTwoLayer đã xoá; ô 2 lớp giờ vẽ y hệt ô thường, màu lớp dưới là
+  bất ngờ lúc ăn. Cơ chế 2 lớp KHÔNG đổi — chỉ bỏ phần hiển thị.
+• Vì sao nó xấu (ghi lại phòng khi cần vẽ lại): góc gấp cũ nằm ở 0.20s…0.50s, mà ô
+  vẽ to 1.3× ô lưới và ô BÊN PHẢI tạo sau nên đè lên mọi thứ quá ≈ +0.35s → NỬA PHẢI
+  của tam giác bị cắt, phần sót lại có viền đen cứng, ở cỡ ô ~15px đọc ra như VẾT
+  BẨN. QUY TẮC CHUNG: mọi thứ vẽ thêm lên ô phải nằm trong ±0.35s, ngoài khoảng đó
+  là ô hàng xóm đè mất.
+
+────────────────────────────────────────────────────────────────────────────
+32) L5: 60 XE → 18 XE (user 2026-08-03)
+────────────────────────────────────────────────────────────────────────────
+• Yêu cầu user: "ít xe nhất có thể, giữ nguyên winrate — nhiều xe số slime bé quá".
+  Cũ: 60 xe, ghế 2-19. Mới: 18 XE, ghế 2-109 (87/109/86/66/66/58/58/56/56/55×5/50/
+  29/10/8/2), 4 xe chôn "?" (index 6,10,14,17). BOARD/ẢNH/lanes=3 KHÔNG đổi.
+  Ghế 2 và 8 là bắt buộc: màu 7 chỉ có 2 ô, màu 9 có 8 ô trên tranh.
+• Winrate GIỮ NGUYÊN theo cả hai mô hình: A (trip-sim) 93→92, B (sim đồng thời)
+  97→97. Chốt trần ghế 110 (cỡ L1) theo user → tối thiểu 16 xe về mặt số học,
+  nhưng 16/17 xe không có cấu hình nào giữ được winrate; 18 là sàn thực tế.
+• BÀI HỌC (ngược trực giác): BỚT XE = KHÓ HƠN, không phải dễ hơn. Tổng ghế cố
+  định (= số ô), nên ít xe ⇒ xe to ⇒ mỗi xe chiếm Ô CHỜ lâu hơn ⇒ dễ kẹt 5 ô.
+  Ví dụ 12 xe (1 xe/màu, xe nền 276 ghế) rơi xuống ~70% (A) và 13% (B).
+• ⚠ Với xe cực to, hai mô hình LỆCH HẲN (A 70 vs B 13; hoặc A 90 vs B 26). Cách
+  chọn an toàn: chỉ nhận cấu hình mà A và B ĐỒNG Ý (|A-B| nhỏ) — bản chốt A92/B97
+  khớp đúng bản đang ship A93/B97.
+• ⚠ ĐO ĐƯỢC KHI RÀ: cả pack L1-25 đã TRÔI so target trong measure-final.mjs
+  (L5 target 70 nhưng thực đo 89-93; L22 19 vs 90; L17 53 vs 93...). User chọn
+  giữ độ khó ĐANG SHIP cho L5, KHÔNG kéo về 70. Cần một đợt re-calibrate riêng.
+
+────────────────────────────────────────────────────────────────────────────
 GHI CHÚ CHUNG
 ────────────────────────────────────────────────────────────────────────────
 • Stack: Phaser 3 + TypeScript + Vite. Web + đóng gói APK bằng Capacitor.

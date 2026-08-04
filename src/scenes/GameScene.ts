@@ -459,7 +459,7 @@ export class GameScene extends Phaser.Scene {
       // Glossy keycap board-tile art (public/art/slime/tile-<id>.png). If present it
       // REPLACES the procedural flat tile in create(); missing ones fall back to it.
       // ?v= cache-buster: bump when the tile PNGs change so browsers refetch (they cache by URL).
-      this.load.image(`tile-${i}`, `art/slime/tile-${i}.png?v=6`);
+      this.load.image(`tile-${i}`, `art/slime/tile-${i}.png?v=7`);
     }
     // XU VÀNG màn thắng (video mẫu IMG_6489). Art thật user sẽ gửi vào public/art/coin.png;
     // thiếu/hỏng → create() vẽ placeholder (makeCoinTexture).
@@ -1209,10 +1209,9 @@ export class GameScene extends Phaser.Scene {
           // hidden "?" slime — value-greyscale of the real colour (A+E), revealed on neighbour clear
           this.keys[idx] = this.makeHiddenKey(x, y, keySize, this.level.board[idx], idx);
         } else {
+          // NO 2-layer marker (user 2026-08-03: "cho ô vuông full của nó đi"). A 2-layer cell
+          // now looks exactly like a normal one — the second colour is a surprise on collect.
           this.keys[idx] = this.makeKey(id, x, y, keySize);
-          // 2-layer slime: mark it with a small corner fold so the player sees it hides
-          // a second colour underneath (revealed when the top is collected).
-          if (this.level.layer2 && this.level.layer2[idx] >= 0) this.markTwoLayer(this.keys[idx]!, keySize);
         }
       }
     }
@@ -1508,20 +1507,12 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  // A small white corner fold marking a 2-layer slime (a different colour hides under it).
-  private markTwoLayer(tile: Phaser.GameObjects.Container, s: number) {
-    const g = this.add.graphics();
-    g.fillStyle(0xffffff, 0.9);
-    g.beginPath();
-    g.moveTo(s * 0.5 - s * 0.3, -s * 0.5);
-    g.lineTo(s * 0.5, -s * 0.5);
-    g.lineTo(s * 0.5, -s * 0.5 + s * 0.3);
-    g.closePath();
-    g.fillPath();
-    g.lineStyle(Math.max(1, s * 0.035), 0x2a2a3a, 0.55);
-    g.strokePath();
-    tile.add(g);
-  }
+  // (markTwoLayer removed 2026-08-03 — the 2-layer corner fold is gone by user request; a
+  // 2-layer cell is drawn as a plain full tile. If it ever comes back: anything drawn on a
+  // tile must stay inside ±0.35s, because the keycap art is 1.3× the cell and the tile to the
+  // RIGHT is created later, so it paints over everything past that. The old fold reached
+  // 0.50s, lost its right half to the neighbour, and the surviving outlined shard read as
+  // dirt at a ~15px cell.)
 
   // An obstacle tile (hard/soft rock, or wood), `code` = BASE code. `tileSize` is its
   // footprint (cell for 1×1, cell*2 for a BIG 2×2). `cells` = every board index it
