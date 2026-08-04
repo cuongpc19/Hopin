@@ -1150,6 +1150,16 @@ xuyên hơn → CÀNG NHIỀU slime bị "ăn tắt" không animation. Vì vậy
   của tam giác bị cắt, phần sót lại có viền đen cứng, ở cỡ ô ~15px đọc ra như VẾT
   BẨN. QUY TẮC CHUNG: mọi thứ vẽ thêm lên ô phải nằm trong ±0.35s, ngoài khoảng đó
   là ô hàng xóm đè mất.
+• LỚP THỨ BA — VIỀN ĐEN (user thấy ở L30, rõ nhất trên ô BE id 14: "mấy ô màu be có
+  dấu gạch đen"). Ngoài bóng đổ, mỗi keycap còn một vòng pixel ĐEN TUYỀN bán trong
+  suốt (~340 px, alpha 50-126) chạy đúng trên MÉP hình — nên mask trong/ngoài của
+  strip-tile-shadow.mjs không đụng tới. Hai ô kề nhau = hai viền chồng cạnh → vạch
+  tối ở GIỮA cạnh chung, nhạt dần ở góc bo → nhìn ra "dấu gạch". Đo trên render
+  thật (ô be): thân 187, ron tụt 122-131.
+• Sửa: scripts/soften-tile-outline.mjs đổi pixel viền sang MÀU THÂN × 0.72 (giữ
+  alpha) → ron còn 172-176 (thân 187): vẫn tách được ô kề nhau nhưng cùng tông, hết
+  vạch đen. ?v=7 → ?v=8. Điều kiện lọc phải là HAI vế (alpha < 250 VÀ max(rgb) < 40)
+  — chỉ lọc màu thì ăn thân ô tối, chỉ lọc alpha thì ăn mép khử răng cưa bình thường.
 
 ────────────────────────────────────────────────────────────────────────────
 32) L5: 60 XE → 18 XE (user 2026-08-03)
