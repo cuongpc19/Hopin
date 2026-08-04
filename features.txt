@@ -1201,6 +1201,59 @@ xuyên hơn → CÀNG NHIỀU slime bị "ăn tắt" không animation. Vì vậy
   (L5 target 70 nhưng thực đo 89-93; L22 19 vs 90; L17 53 vs 93...). User chọn
   giữ độ khó ĐANG SHIP cho L5, KHÔNG kéo về 70. Cần một đợt re-calibrate riêng.
 
+33) MÀU Ô BÀN CỜ NEO VỀ PALETTE + BẬT MIPMAP (user 2026-08-04)
+────────────────────────────────────────────────────────────────────────────
+• Gốc vấn đề user hỏi: "ảnh game màu gen ra k rõ bằng Unity k". Đo ra art tile-*.png
+  được vẽ ĐỘC LẬP với src/game/palette.ts nên lệch: sat trung vị 0.580 vs palette
+  0.729 (xanh lá), 0.683 vs 0.794 (teal), 0.624 vs 0.744 (xanh dương). Hue đúng,
+  chỉ nhạt — nên các cặp dễ lẫn (lá/lá-đậm, teal/xanh) khó tách.
+• SỬA: scripts/resat-tiles.mjs — lấy TRUNG VỊ của phần cap đục, kéo về đúng palette,
+  rồi NHÂN CÙNG HỆ SỐ cho mọi pixel (không set màu phẳng). Giữ trọn chuyển sắc:
+  chênh lệch sáng-tối trong ô 55% → 53%. Backup art-orig/ (gitignore; git mới là
+  nguồn thật). Bump cache-buster ?v=6 → ?v=7.
+• ⚠ HỆ SỐ PHẢI CHẶN ĐỂ KHÔNG CẮT TRẦN: min(pS/mS, 1/maxS). Bản đầu không chặn →
+  trắng (palette V=1.0) bị ép nửa trên clamp ở 255, thân ô phẳng lì chỉ còn viền
+  tối = user thấy "lởm chởm". Hệ quả tự nhiên: đỏ/vàng/cam/hồng vốn đã kịch trần
+  nên KHÔNG đổi gì; chỉ xanh lá/teal/xanh dương/lá đậm/đỏ tía/xám nhạt được nâng.
+• ⚠ ĐỪNG thay bằng "keycap xám + setTint". Đã thử: tint là phép NHÂN nên không
+  pixel nào sáng hơn được màu palette, mà highlight 2.5D theo định nghĩa là chỗ
+  sáng hơn màu khối → ô bẹt hoàn toàn. Không mốc chuẩn hoá nào cứu được.
+• MIPMAP (src/main.ts): Phaser mặc định mipmapFilter='' = KHÔNG mipmap. Tile là
+  texture 128px vẽ ở ~32px (cell 12.5 × 1.3 × DPR 2) = thu nhỏ ~4×, nên GPU lấy ~1
+  texel/pixel: viền vát (≈2 px thiết bị) lúc trúng mẫu lúc không, tuỳ vị trí lẻ của
+  từng ô → CÙNG MÀU BE mà ô này có vạch ô kia không, và trái ≠ phải vì this.cell là
+  số lẻ (12.509 ở board 26×26). Đặt 'LINEAR_MIPMAP_LINEAR'. An toàn: Phaser chỉ áp
+  cho texture luỹ thừa 2 (minFilter = (pow && mipmapFilter) ? … : gl.LINEAR) — 26
+  ảnh được hưởng (19 tile, coin, heart, nav), 63 ảnh còn lại y nguyên.
+• CÒN LẠI CHƯA LÀM: slime-*.png (~560px) vẽ ở ~32px = thu nhỏ 17×, KHÔNG luỹ thừa 2
+  nên không được mipmap. Đây là vật thể ĐANG CHẠY nên rung dễ thấy nhất. Hướng sửa:
+  resize về 64×64.
+• ⚠⚠ BÀI HỌC ĐẮT NHẤT PHIÊN: tôi làm suốt buổi trên 19 file tile TRÊN ĐĨA vốn ĐÃ CŨ
+  so với git (đủ 19/19 lệch hash; đĩa còn bóng đổ ~1800 px nửa-trong-suốt, HEAD đã
+  bóc còn ~390). Kiểm bằng: git hash-object <file> vs git rev-parse HEAD:<path>.
+  LÀM ĐẦU PHIÊN nếu định sửa art — git status có thể là ảnh chụp cũ.
+• Vạch tối giữa hai ô: KHÔNG phải bóng đổ (đo có/không bóng chỉ lệch 134 vs 129).
+  Là khe hở 0.4% lộ nền board + vát cạnh của cap. Nới ×1.3 để xoá vạch ĐÃ BỊ BÁC BỎ
+  HAI LẦN (4407671 thử 1.41 → 749f198 trả lại; 2026-08-04 thử 1.38 → trả lại): xoá
+  vạch thì các ô cùng màu dính thành mảng, mất khả năng ĐẾM ô. Vạch = vát cạnh làm
+  đúng việc. Hai chỗ dùng hệ số nay gom vào hằng TILE_CAP_FIT (makeKey + ô "?" lúc
+  lộ màu BẮT BUỘC bằng nhau).
+
+34) LEVEL EDITOR: KÍCH THƯỚC THEO Ô CHỌN + BẢNG MÀU "?" (user 2026-08-04)
+────────────────────────────────────────────────────────────────────────────
+• Lỗi: chọn 35×35 rồi bấm "Tạo slime từ ảnh" vẫn ra 25×25 và ô chọn tự nhảy về 25.
+  Do buildFromImage dùng cứng BOARD_SIZE/IMG_INNER = 25 cho cả 3 khâu (lấy mẫu ảnh,
+  dựng canvas, cập nhật ô chọn). Nay đọc #boardSize. Ô chọn vẫn hoạt động bình
+  thường ở đường "đổi cỡ lưới đang có" — chỉ đường đi từ ẢNH là bỏ qua nó.
+• Thêm hàng swatch "?" (19 màu) để vẽ ô ẩn. KHÔNG thêm màu mới vào palette: game
+  giữ MÀU THẬT ở board[i], còn hidden[i] chỉ là cờ "ô này bị che". Thêm 19 màu giả
+  sẽ lọt vào đếm chìa / rương / kiểm tra giải-được và chests[].color (xe đỏ-ẩn bị
+  coi là loại xe khác xe đỏ). Nội bộ = màu i + cờ paintHidden.
+• Nối đủ 5 đường: xuất JSON, nhập JSON, lưu vào game, tải level từ game, đổi cỡ lưới.
+  Ô trống KHÔNG được mang cờ ẩn (game hiểu nhầm thành ô có slime) — chặn lúc xuất.
+• Gộp code vẽ ô: trước có HAI bản (chuột / cảm ứng) — đúng kiểu trùng lặp sẽ lệch
+  ngay khi ô có thêm trạng thái. Nay chung dressCell() + applyPaint().
+
 ────────────────────────────────────────────────────────────────────────────
 GHI CHÚ CHUNG
 ────────────────────────────────────────────────────────────────────────────

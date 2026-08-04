@@ -131,6 +131,27 @@ const SLOT_SIZE = 49; // waiting bay size — giảm 10% (54→49) để queue n
 const INV_GAP_X = 30; // queue column gap at scale 1
 const INV_GAP_Y = 16; // queue row gap at scale 1
 const CLUSTER_MIN_SCALE = 0.6; // never shrink the cluster past this — cars stay tappable
+// How much to blow up a keycap tile texture so the CAP fills its cell. The PNG is 128px
+// but the cap only spans x=15..113 of it (~77%) — the rest is transparent margin plus a
+// drop shadow on the RIGHT side only. 1/0.766 = 1.306, which is where the old 1.3 came from.
+//
+// 1.3 lands 0.4% SHORT (cap = 0.996 cell), so neighbouring caps don't quite touch. The board
+// panel shows through that hairline, antialiasing widens it, and each cap's own dark bevel
+// edge sits right beside it — together a faint seam, obvious only between LIGHT tiles
+// (white / pink / beige) where the contrast is large.
+//
+// ⚠ NOT the drop shadow. 749f198 already stripped that from all 19 PNGs, and measuring the
+// seam with vs without it moves the number by ~4 (134 vs 129) — the shadow was never the
+// cause. Don't go hunting it again.
+//
+// ⚠ WIDENING TO CLOSE THE SEAM HAS BEEN TRIED TWICE AND REJECTED TWICE: 4407671 went to 1.41
+// and 749f198 put it back (user 2026-08-03); 1.38 was tried and reverted again 2026-08-04.
+// Measured on the real board tone (0xdccfb4 ≈ 207) against a white tile, darkest pixel:
+//     ×1.30 → 134    ×1.34 → 165    ×1.38 → 184    ×1.42 → 198
+// Widening does erase the seam — but that seam is what SEPARATES one keycap from the next. At
+// 1.38 a run of same-colour tiles merges into one slab, and this is a puzzle where reading how
+// many tiles of a colour remain matters. The seam is the bevel doing its job, not a defect.
+const TILE_CAP_FIT = 1.3;
 // Fixed car size — the SAME on every level (independent of the grid's cell size,
 // which changes with the level's rows/cols). ~30% bigger than the old sizing.
 const CAR_SIZE = 55;
@@ -459,7 +480,7 @@ export class GameScene extends Phaser.Scene {
       // Glossy keycap board-tile art (public/art/slime/tile-<id>.png). If present it
       // REPLACES the procedural flat tile in create(); missing ones fall back to it.
       // ?v= cache-buster: bump when the tile PNGs change so browsers refetch (they cache by URL).
-      this.load.image(`tile-${i}`, `art/slime/tile-${i}.png?v=11`);
+      this.load.image(`tile-${i}`, `art/slime/tile-${i}.png?v=7`); // v7: colours re-anchored to palette.ts (scripts/resat-tiles.mjs)
     }
     // XU VÀNG màn thắng (video mẫu IMG_6489). Art thật user sẽ gửi vào public/art/coin.png;
     // thiếu/hỏng → create() vẽ placeholder (makeCoinTexture).
@@ -1209,9 +1230,10 @@ export class GameScene extends Phaser.Scene {
           // hidden "?" slime — value-greyscale of the real colour (A+E), revealed on neighbour clear
           this.keys[idx] = this.makeHiddenKey(x, y, keySize, this.level.board[idx], idx);
         } else {
-          // NO 2-layer marker (user 2026-08-03: "cho ô vuông full của nó đi"). A 2-layer cell
-          // now looks exactly like a normal one — the second colour is a surprise on collect.
           this.keys[idx] = this.makeKey(id, x, y, keySize);
+          // 2-layer slime: mark it with a small corner fold so the player sees it hides
+          // a second colour underneath (revealed when the top is collected).
+          if (this.level.layer2 && this.level.layer2[idx] >= 0) this.markTwoLayer(this.keys[idx]!, keySize);
         }
       }
     }
@@ -1435,11 +1457,7 @@ export class GameScene extends Phaser.Scene {
   // tile's color with a little face. Fills the cell so the grid reads as a mosaic.
   // A grid tile = a cute critter sprite (slime) in the tile's color.
   private makeKey(colorId: number, x: number, y: number, s: number) {
-    // The keycap fills only 0.71 of its PNG (the rest is transparent margin), so ×1.3 makes it
-    // cover 0.925 of the cell — a 0.075 gap stays, showing the board panel as a light hairline
-    // between tiles. ×1.41 (= 1/0.71) closes it, but the user tried that and asked to go back:
-    // edge-to-edge tiles make same-colour areas read as one slab. Keep 1.3.
-    const img = this.add.image(0, 0, `tile-${colorId}`).setDisplaySize(s * 1.3, s * 1.3);
+    const img = this.add.image(0, 0, `tile-${colorId}`).setDisplaySize(s * TILE_CAP_FIT, s * TILE_CAP_FIT);
     const c = this.add.container(x, y, [img]); // tiles keep their OWN baked highlight — extra gloss overlay removed (it added a dark-cap artifact)
     c.setSize(s, s);
     c.setData("body", img); // kept so the collect animation can bob the body alone
@@ -1499,9 +1517,10 @@ export class GameScene extends Phaser.Scene {
         const body = tile.getData("body") as Phaser.GameObjects.Image;
         body.clearTint();
         body.setTexture(`tile-${color}`);
-        // tile-* textures are uniform 128px, but setTexture still resets display size,
-        // so re-apply the cell size (×1.3 to match makeKey's flush keycap footprint).
-        body.setDisplaySize(this.cell * 1.3, this.cell * 1.3);
+        // tile-* textures are uniform 128px, but setTexture still resets display size, so
+        // re-apply the cell size. MUST use the same TILE_CAP_FIT as makeKey — a revealed
+        // "?" tile sitting at a different size next to its neighbours is instantly obvious.
+        body.setDisplaySize(this.cell * TILE_CAP_FIT, this.cell * TILE_CAP_FIT);
         const q = tile.getData("qmark") as Phaser.GameObjects.Text | undefined;
         if (q) q.destroy();
         tile.setScale(0.6);
@@ -1511,12 +1530,20 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  // (markTwoLayer removed 2026-08-03 — the 2-layer corner fold is gone by user request; a
-  // 2-layer cell is drawn as a plain full tile. If it ever comes back: anything drawn on a
-  // tile must stay inside ±0.35s, because the keycap art is 1.3× the cell and the tile to the
-  // RIGHT is created later, so it paints over everything past that. The old fold reached
-  // 0.50s, lost its right half to the neighbour, and the surviving outlined shard read as
-  // dirt at a ~15px cell.)
+  // A small white corner fold marking a 2-layer slime (a different colour hides under it).
+  private markTwoLayer(tile: Phaser.GameObjects.Container, s: number) {
+    const g = this.add.graphics();
+    g.fillStyle(0xffffff, 0.9);
+    g.beginPath();
+    g.moveTo(s * 0.5 - s * 0.3, -s * 0.5);
+    g.lineTo(s * 0.5, -s * 0.5);
+    g.lineTo(s * 0.5, -s * 0.5 + s * 0.3);
+    g.closePath();
+    g.fillPath();
+    g.lineStyle(Math.max(1, s * 0.035), 0x2a2a3a, 0.55);
+    g.strokePath();
+    tile.add(g);
+  }
 
   // An obstacle tile (hard/soft rock, or wood), `code` = BASE code. `tileSize` is its
   // footprint (cell for 1×1, cell*2 for a BIG 2×2). `cells` = every board index it

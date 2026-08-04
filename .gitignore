@@ -24,6 +24,14 @@ public/art/level art/
 # so it can be restored if needed, but out of the repo.
 public/art/Notused/
 
+# Pre-resaturation copy of the board tiles (scripts/resat-tiles.mjs APPLY=1). Local
+# convenience only — git history is the real source for the originals.
+art-orig/
+
+# Scratch previews from the tile-colour work (resat-tiles.mjs and friends).
+scripts/_tiles-resat/
+scripts/_*.png
+
 # Local scratch/junk folder — not part of the game or build.
 /Manythings/
 

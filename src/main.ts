@@ -58,6 +58,20 @@ new Phaser.Game({
   // heat/battery saver — and browsers that ignore the hint are unaffected.
   render: {
     powerPreference: "low-power",
+    // Mipmaps for the small, heavily-minified art. A board tile is a 128px texture drawn at
+    // ~32px (cell 12.5 × 1.3 × DPR 2) — a ~4× shrink. Phaser's default is NO mipmaps, so the
+    // GPU takes roughly one texel sample per pixel: the keycap's 8px bevel (≈2 device px on
+    // screen) lands on a sample for some tiles and is skipped for others, purely from each
+    // tile's sub-pixel position. That is why the same beige read with a dark right-hand edge
+    // in one column and clean in the next (user 2026-08-04). `this.cell` is fractional
+    // (12.509 on a 26×26), so the phase drifts across the board — hence left ≠ right.
+    //
+    // Safe to set globally: Phaser only applies a mipmap min-filter to power-of-two textures
+    //   minFilter = (pow && this.mipmapFilter) ? this.mipmapFilter : gl.LINEAR;
+    // and only calls generateMipmap() for those. Our 63 non-POT images (backgrounds, cars,
+    // boosters) keep plain LINEAR and are untouched; the 26 POT ones (all 19 tiles, coin,
+    // heart, nav icons) gain proper minification. Cost is ~33% more VRAM for those 26 only.
+    mipmapFilter: "LINEAR_MIPMAP_LINEAR",
   },
   // Hard-cap the loop at 60fps. On 90/120Hz Android phones, Phaser would otherwise
   // render on every requestAnimationFrame tick (up to 120fps) — double the GPU work

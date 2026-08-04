@@ -58,6 +58,16 @@
   .swatch.sel { border-color: #fff; box-shadow: 0 0 0 2px var(--accent); }
   .swatch .idx { position: absolute; bottom: 1px; right: 3px; font-size: 9px; color: rgba(255,255,255,.85); text-shadow: 0 1px 1px #000; }
   .swatch.eraser { background: repeating-linear-gradient(45deg, #444 0 6px, #222 6px 12px); display: grid; place-items: center; font-size: 13px; }
+  /* "?" variant of a colour: paints the same colour but marks the cell HIDDEN (level.hidden) */
+  .swatch.q::after {
+    content: "?"; position: absolute; inset: 0; display: grid; place-items: center;
+    font: 700 18px/1 system-ui, sans-serif; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.7);
+  }
+  .cell.hid::after {
+    content: "?"; position: absolute; inset: 0; display: grid; place-items: center;
+    font: 700 60% /1 system-ui, sans-serif; color: rgba(255,255,255,.95); text-shadow: 0 1px 2px rgba(0,0,0,.65);
+  }
+  .cell.hid { position: relative; }
 
   /* board */
   .board-wrap { margin-top: 14px; display: inline-block; background: #fff; padding: 14px; border-radius: 12px; border: 4px solid #6d5a86; }
@@ -215,7 +225,7 @@
           <b>Màu game</b> (mặc định, BẮT BUỘC để xe có art khớp): ép ảnh về K màu game khớp nhất (tối đa 11). <b>Màu ảnh</b>: chỉ để xem thử độ nét — palette lúc đó KHÔNG phải màu game nên xe sẽ thiếu art, đừng xuất level từ chế độ này.
           <b>Nền</b>: <i>Bỏ</i> (mặc định) = tách nền, để ô trống → nhân vật nổi trên nền cỏ game (silhouette). <i>Giữ nguyên</i> = quantize cả ảnh, lấp đầy bảng cả nền. <i>Gộp 1 màu</i> = nền gộp thành 1 tile. Bỏ/Gộp dò nền (lan từ mép) → đẹp với tranh phẳng viền rõ.
           Muốn thêm KHUNG chữ nhật sau chủ thể → dùng <b>Nền = Bỏ</b> rồi bật <b>Viền = Có</b> ở hàng trên (màu sáng tự chọn).
-          <b>Cắt sát</b> tự crop vào chủ thể rồi căn giữa trong lưới 25×25. Ảnh chụp: tăng <b>Số màu</b> (12–16) cho nét hơn.
+          <b>Cắt sát</b> tự crop vào chủ thể rồi căn giữa trong lưới theo <b>Kích thước</b> đang chọn. Ảnh chụp: tăng <b>Số màu</b> (12–16) cho nét hơn.
         </p>
       </div>
 
@@ -319,8 +329,13 @@ const IMG_INNER = 25;     // chủ thể fit CẠNH DÀI = full 25 (lề tới �
 // ---- State ----
 let cols = BOARD_SIZE, rows = BOARD_SIZE;
 let board = [];        // length cols*rows, values = color id or -1
+// HIDDEN "?" slimes, parallel to board. The GAME keeps the real colour in board[i] and uses
+// level.hidden[i] >= 0 purely as the "this cell is covered" marker, so the editor stores a
+// boolean here and only expands it to the game's number[] on export.
+let hiddenArr = [];
 let chests = [];       // { color, count }
 let paintColor = 0;    // selected color id, or EMPTY for eraser
+let paintHidden = false; // true when the "?" row of the palette is selected
 let painting = false;
 let fullPalette = false; // true when the palette is a bespoke image-derived set (export it whole)
 let lightBoard = false;  // board theme: false = dark navy (default), true = light sand (level.lightBoard)
@@ -329,19 +344,24 @@ let lightBoard = false;  // board theme: false = dark navy (default), true = lig
 function newBoard(c, r, fill = EMPTY) {
   cols = c; rows = r;
   board = new Array(c * r).fill(fill);
+  hiddenArr = new Array(c * r).fill(false);
 }
 
 // Resize the grid to n×n, keeping the current drawing CENTERED (crop/pad symmetrically).
 function resizeBoard(n) {
   if (n === cols && n === rows) return;
-  const old = board, oc = cols, orr = rows;
+  const old = board, oldH = hiddenArr, oc = cols, orr = rows;
   const nb = new Array(n * n).fill(EMPTY);
+  const nh = new Array(n * n).fill(false);
   const offC = Math.floor((n - oc) / 2), offR = Math.floor((n - orr) / 2);
   for (let r = 0; r < orr; r++) for (let c = 0; c < oc; c++) {
     const nr = r + offR, nc = c + offC;
-    if (nr >= 0 && nr < n && nc >= 0 && nc < n) nb[nr * n + nc] = old[r * oc + c];
+    if (nr >= 0 && nr < n && nc >= 0 && nc < n) {
+      nb[nr * n + nc] = old[r * oc + c];
+      nh[nr * n + nc] = !!(oldH && oldH[r * oc + c]); // "?" marks must survive a resize too
+    }
   }
-  cols = rows = n; board = nb;
+  cols = rows = n; board = nb; hiddenArr = nh;
   syncSizeUI();
   renderBoard(); refresh();
 }
@@ -381,12 +401,12 @@ function renderPalette() {
   el.innerHTML = "";
   COLORS.forEach((col, i) => {
     const s = document.createElement("div");
-    s.className = "swatch" + (paintColor === i ? " sel" : "");
+    s.className = "swatch" + (paintColor === i && !paintHidden ? " sel" : "");
     s.style.background = col.hex;
     s.innerHTML = `<span class="idx">${i}</span>`;
     const editable = i >= BASE_N || fullPalette;   // custom + image-palette swatches are tweakable
     s.title = `${i} — ${col.name}` + (editable ? " (double-click để đổi/xoá)" : "");
-    s.onclick = () => { paintColor = i; renderPalette(); };
+    s.onclick = () => { paintColor = i; paintHidden = false; renderPalette(); };
     // double-click to recolor or remove (only if it's the last & unused)
     if (editable) {
       s.ondblclick = (e) => {
@@ -415,7 +435,7 @@ function renderPalette() {
     const id = COLORS.length;
     const fallback = ["#ff8c1a","#00c2d1","#7bd320","#c724b1","#ffe14d","#4d5bff","#ff4d6d","#1fae5a"];
     COLORS.push({ hex: fallback[id % fallback.length], name: "màu" + id });
-    paintColor = id; renderPalette(); refresh();
+    paintColor = id; paintHidden = false; renderPalette(); refresh();
   };
   el.appendChild(add);
   // eraser
@@ -423,11 +443,58 @@ function renderPalette() {
   er.className = "swatch eraser" + (paintColor === EMPTY ? " sel" : "");
   er.textContent = "⌫";
   er.title = "Tẩy (ô trống)";
-  er.onclick = () => { paintColor = EMPTY; renderPalette(); };
+  er.onclick = () => { paintColor = EMPTY; paintHidden = false; renderPalette(); };
   el.appendChild(er);
+
+  // ---- "?" row: same colours, but painted as HIDDEN slimes -------------------
+  // In game the tile shows a uniform "?" cover (colour NOT leaked) and can't be collected
+  // until a 4-neighbour clears; the real colour still lives in board[i]. So this is the same
+  // paint as above plus a flag — not extra palette entries.
+  const qWrap = document.createElement("div");
+  qWrap.style.cssText = "flex-basis:100%;height:0";
+  el.appendChild(qWrap);                                  // force a line break in the flex row
+  const lab = document.createElement("div");
+  lab.textContent = '"?" ẩn màu →';
+  lab.style.cssText = "align-self:center;font-size:12px;color:#9a9ab5;margin-right:2px";
+  lab.title = 'Ô hiện dấu "?" — người chơi KHÔNG thấy màu; chỉ lộ ra khi một ô kề bên bị ăn.';
+  el.appendChild(lab);
+  COLORS.forEach((col, i) => {
+    const s = document.createElement("div");
+    s.className = "swatch q" + (paintColor === i && paintHidden ? " sel" : "");
+    s.style.background = col.hex;
+    s.innerHTML = `<span class="idx">${i}</span>`;
+    s.title = `${i} — ${col.name} (ẩn "?")`;
+    s.onclick = () => { paintColor = i; paintHidden = true; renderPalette(); };
+    el.appendChild(s);
+  });
 }
 
 // ---- Board UI ----
+// Paint + repaint live in ONE place: the mouse path and the touchmove path used to carry
+// their own copies of this, which is exactly how the two drift apart when a cell gains a
+// new bit of state (the "?" flag being the case in point).
+function dressCell(el, i) {
+  const v = board[i];
+  if (v >= 0) {
+    el.classList.add("filled");
+    el.style.background = COLORS[v] ? COLORS[v].hex : "#000";
+    el.style.borderColor = "rgba(0,0,0,.15)";
+  } else {
+    el.classList.remove("filled");
+    el.style.background = "";
+    el.style.borderColor = "";
+  }
+  el.classList.toggle("hid", v >= 0 && !!hiddenArr[i]);
+}
+function applyPaint(i, el) {
+  const want = paintColor, wantHid = paintColor >= 0 && paintHidden;
+  if (board[i] === want && !!hiddenArr[i] === wantHid) return;
+  board[i] = want;
+  hiddenArr[i] = wantHid;   // erasing a cell always clears its "?" — an empty cell can't be hidden
+  dressCell(el, i);
+  refresh();
+}
+
 function renderBoard() {
   const el = document.getElementById("board");
   // Match the GAME's sizing: pin the cell to a 25-baseline so EVERY board ≥25 fills the SAME
@@ -441,16 +508,9 @@ function renderBoard() {
     const cell = document.createElement("div");
     cell.className = "cell";
     cell.style.width = px + "px"; cell.style.height = px + "px";
-    const v = board[i];
-    if (v >= 0) { cell.classList.add("filled"); cell.style.background = COLORS[v].hex; cell.style.borderColor = "rgba(0,0,0,.15)"; }
+    dressCell(cell, i);
     cell.dataset.i = i;
-    const paint = () => {
-      if (board[i] === paintColor) return;
-      board[i] = paintColor;
-      if (paintColor >= 0) { cell.classList.add("filled"); cell.style.background = COLORS[paintColor].hex; cell.style.borderColor = "rgba(0,0,0,.15)"; }
-      else { cell.classList.remove("filled"); cell.style.background = ""; cell.style.borderColor = ""; }
-      refresh();
-    };
+    const paint = () => applyPaint(i, cell);
     cell.addEventListener("mousedown", (e) => { e.preventDefault(); painting = true; paint(); });
     cell.addEventListener("mouseenter", () => { if (painting) paint(); });
     // touch
@@ -463,15 +523,7 @@ window.addEventListener("touchend", () => painting = false);
 document.getElementById("board").addEventListener("touchmove", (e) => {
   const t = e.touches[0];
   const el = document.elementFromPoint(t.clientX, t.clientY);
-  if (el && el.classList.contains("cell") && painting) {
-    const i = +el.dataset.i;
-    if (board[i] !== paintColor) {
-      board[i] = paintColor;
-      if (paintColor >= 0) { el.classList.add("filled"); el.style.background = COLORS[paintColor].hex; el.style.borderColor = "rgba(0,0,0,.15)"; }
-      else { el.classList.remove("filled"); el.style.background = ""; el.style.borderColor = ""; }
-      refresh();
-    }
-  }
+  if (el && el.classList.contains("cell") && painting) applyPaint(+el.dataset.i, el);
 }, { passive: false });
 
 // ---- Chests UI (grid, 4 per row, all rows shown; play boundary marked) ----
@@ -653,7 +705,12 @@ function buildFromImage(img) {
   const vivid = document.getElementById("imgVivid").checked; // game mode: map clusters to bright colours
   const kMax = mode === "game" ? BASE_N : 24;
   const K = Math.max(2, Math.min(kMax, +document.getElementById("imgK").value|0));
-  const maxSide = IMG_INNER;   // subject fits in 23×23, then centred in the 25×25 canvas
+  // Lưới ĐÍCH = ô "Kích thước" đang chọn, KHÔNG phải hằng số 25. Trước 2026-08-04 hàm này
+  // dùng cứng BOARD_SIZE/IMG_INNER, nên chọn 35×35 rồi bấm "Tạo slime từ ảnh" vẫn ra 25×25
+  // và ô chọn bị đặt ngược về 25 (user báo). Cạnh dài của chủ thể lấp đầy lưới; game tự lo
+  // lề tới đường ray.
+  const NSZ = Math.max(10, +document.getElementById("boardSize").value || IMG_INNER);
+  const maxSide = NSZ;
   const bgOpt = document.getElementById("imgBgMode").value;   // "flat" | "bo" | "keep"
   const autoCrop = document.getElementById("imgCrop").checked;
   const iw = img.naturalWidth, ih = img.naturalHeight;
@@ -788,11 +845,11 @@ function buildFromImage(img) {
     paintColor = 0;
   }
 
-  // center the subject sub-grid (cw×rh, ≤23) into the fixed 25×25 square canvas
+  // center the subject sub-grid (cw×rh) into the NSZ×NSZ square canvas the user picked
   const sub = board, sw = cw, sh = rh;
-  newBoard(BOARD_SIZE, BOARD_SIZE, EMPTY);
-  const ox = Math.floor((BOARD_SIZE - sw) / 2), oy = Math.floor((BOARD_SIZE - sh) / 2);
-  for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) board[(oy + y) * BOARD_SIZE + (ox + x)] = sub[y * sw + x];
+  newBoard(NSZ, NSZ, EMPTY);
+  const ox = Math.floor((NSZ - sw) / 2), oy = Math.floor((NSZ - sh) / 2);
+  for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) board[(oy + y) * NSZ + (ox + x)] = sub[y * sw + x];
 
   // For fill modes (Giữ nguyên / Gộp), extend the BACKGROUND colour into the centring
   // margins so the whole 25×25 is filled — no grass gaps at the sides. "Bỏ" keeps the
@@ -806,8 +863,8 @@ function buildFromImage(img) {
     if (fillId >= 0) for (let i = 0; i < board.length; i++) if (board[i] === EMPTY) board[i] = fillId;
   }
 
-  document.getElementById("cols").value = BOARD_SIZE;
-  document.getElementById("rows").value = BOARD_SIZE;
+  document.getElementById("cols").value = NSZ;
+  document.getElementById("rows").value = NSZ;
   selected = -1;
   borderId = detectBgId(); syncBorderCells(); if (borderId !== EMPTY) borderModeVal = "full"; // Nền "Bỏ" → không; "Gộp" → nền đầy
   renderPalette(); renderBoard(); refresh();
@@ -941,6 +998,9 @@ let levelName = "Level 1"; // which level we're currently designing
 function levelObject() {
   const o = { name: levelName, cols, rows, board: [...board], chests: chests.map(c => ({ color: c.color, count: c.count })) };
   if (lightBoard) o.lightBoard = true; // only emit when set (dark = default, omitted)
+  // hidden[] in the GAME format = real colour of a covered cell, -1 elsewhere. Emitted only
+  // when something is actually marked, so ordinary levels stay free of a dead all -1 array.
+  if (hiddenArr.some(Boolean)) o.hidden = board.map((v, i) => (hiddenArr[i] && v >= 0 ? v : -1));
   // carry palette for image-derived (bespoke) sets, or when custom colours were added beyond the base
   if (fullPalette) { o.palette = COLORS.map(c => c.hex); o.paletteFull = true; }
   else if (COLORS.length > BASE_N) o.palette = COLORS.map(c => c.hex);
@@ -950,6 +1010,7 @@ function levelObject() {
 function applyLevel(obj) {
   levelName = obj.name || levelName;
   cols = obj.cols; rows = obj.rows; board = obj.board.slice();
+  hiddenArr = obj.hidden ? obj.hidden.map(v => v >= 0) : new Array(board.length).fill(false);
   chests = (obj.chests || []).map(c => ({ color: c.color, count: c.count }));
   lightBoard = !!obj.lightBoard;
   borderId = detectBgId(); syncBorderCells(); if (borderId !== EMPTY) borderModeVal = "full"; // detected full-board bg
@@ -1174,6 +1235,7 @@ document.getElementById("gameSave").onclick = async () => {
     "Nên tạo lại bằng “Màu game” trước khi lưu. Vẫn lưu?")) return;
   const o = levelObject();
   const level = { track: "square", cols: o.cols, rows: o.rows, board: o.board, chests: o.chests };
+  if (o.hidden) level.hidden = o.hidden;   // "?" slimes (level.hidden, GameScene.hiddenSet)
   if (o.lightBoard) level.lightBoard = true; // carry the board theme into the game level
   const st = document.getElementById("gameStatus");
   try {
@@ -1211,7 +1273,7 @@ async function loadGameLevel(n) {
   const data = await fetchLevels();
   const lv = data[n];
   if (lv) {
-    applyLevel({ name: "Level " + n, cols: lv.cols, rows: lv.rows, board: lv.board, chests: lv.chests, lightBoard: lv.lightBoard });
+    applyLevel({ name: "Level " + n, cols: lv.cols, rows: lv.rows, board: lv.board, chests: lv.chests, lightBoard: lv.lightBoard, hidden: lv.hidden });
     gp.value = String(n);
     st.textContent = `Đang xem Level ${n} (từ game).`;
   } else {
