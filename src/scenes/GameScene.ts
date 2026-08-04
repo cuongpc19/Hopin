@@ -459,7 +459,7 @@ export class GameScene extends Phaser.Scene {
       // Glossy keycap board-tile art (public/art/slime/tile-<id>.png). If present it
       // REPLACES the procedural flat tile in create(); missing ones fall back to it.
       // ?v= cache-buster: bump when the tile PNGs change so browsers refetch (they cache by URL).
-      this.load.image(`tile-${i}`, `art/slime/tile-${i}.png?v=10`);
+      this.load.image(`tile-${i}`, `art/slime/tile-${i}.png?v=11`);
     }
     // XU VÀNG màn thắng (video mẫu IMG_6489). Art thật user sẽ gửi vào public/art/coin.png;
     // thiếu/hỏng → create() vẽ placeholder (makeCoinTexture).
@@ -1435,12 +1435,11 @@ export class GameScene extends Phaser.Scene {
   // tile's color with a little face. Fills the cell so the grid reads as a mosaic.
   // A grid tile = a cute critter sprite (slime) in the tile's color.
   private makeKey(colorId: number, x: number, y: number, s: number) {
-    // The keycap fills only 0.71 of its PNG (the rest is transparent margin), so the draw
-    // scale decides how much of the cell it covers: ×1.3 covered 0.925 and left a 0.075 gap
-    // where the board panel showed through as a light hairline between every pair of tiles
-    // (user 2026-08-03: "vẫn có mấy gợn gợn này"). 1/0.71 = ×1.41 makes neighbouring caps
-    // meet exactly, so only the four-corner points still show the panel.
-    const img = this.add.image(0, 0, `tile-${colorId}`).setDisplaySize(s * 1.41, s * 1.41);
+    // The keycap fills only 0.71 of its PNG (the rest is transparent margin), so ×1.3 makes it
+    // cover 0.925 of the cell — a 0.075 gap stays, showing the board panel as a light hairline
+    // between tiles. ×1.41 (= 1/0.71) closes it, but the user tried that and asked to go back:
+    // edge-to-edge tiles make same-colour areas read as one slab. Keep 1.3.
+    const img = this.add.image(0, 0, `tile-${colorId}`).setDisplaySize(s * 1.3, s * 1.3);
     const c = this.add.container(x, y, [img]); // tiles keep their OWN baked highlight — extra gloss overlay removed (it added a dark-cap artifact)
     c.setSize(s, s);
     c.setData("body", img); // kept so the collect animation can bob the body alone
