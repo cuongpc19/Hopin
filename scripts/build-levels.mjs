@@ -2461,7 +2461,9 @@ if (process.argv.includes("--slamgrade")) {
 // mức skill đã dùng. Chạy chế độ slam bay-lock, không juggle (NOJUGGLE).
 if (process.argv.includes("--mech-json")) {
   if (process.env.NOJUGGLE == null) process.env.NOJUGGLE = "1";
-  const data = JSON.parse(fs.readFileSync(OUT, "utf8"));
+  // MECH_IN: chấm D cho một file level KHÁC designed.json — để tuner dựng cả LÔ ứng viên rồi
+  // đo trong MỘT lần spawn, thay vì spawn lại cho từng phép đo (gen2-46.mjs).
+  const data = JSON.parse(fs.readFileSync(process.env.MECH_IN || OUT, "utf8"));
   const SK = process.env.SKILL != null ? Number(process.env.SKILL) : 0.75;
   const TRIALS = Number(process.env.TRIALS) || 60;
   const spec = process.env.LEVELS || "15-46";

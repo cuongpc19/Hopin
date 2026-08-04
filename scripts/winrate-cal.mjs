@@ -21,15 +21,11 @@ import fs from "node:fs";
 import { execFileSync } from "node:child_process";
 import { readD } from "./genlib.mjs";
 import { measure2 } from "./simcore2.mjs";
+import { A_CAL, B_CAL, logit as lg, sigmoid as sig, cal } from "./calib.mjs";
 
-// khớp 2026-08-04 trên 67 ván / 21 level (L15-32 + L41-43)
-const A_CAL = Number(process.env.A_CAL ?? -0.6626);
-const B_CAL = Number(process.env.B_CAL ?? 1.0070);
-
+// Hệ số + hàm nắn sống ở scripts/calib.mjs — MỘT bản duy nhất, để tuner (gen2-46.mjs) và
+// file này không trôi khỏi nhau.
 const N = Number(process.env.N || 200);
-const lg = (p) => { p = Math.min(0.97, Math.max(0.03, p / 100)); return Math.log(p / (1 - p)); };
-const sig = (z) => 1 / (1 + Math.exp(-z));
-const cal = (raw) => Math.round(100 * sig(A_CAL + B_CAL * lg(raw)));
 
 // ---- ván thật từ playlog.jsonl: {lvl: [thắng, tổng]} ------------------------------------
 function realGames() {
