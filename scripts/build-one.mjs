@@ -19,7 +19,7 @@ import path from "path";
 import { applyBoxBorder, PREFER_DARK, PREFER_LIGHT } from "./border.mjs";
 
 const ROOT = process.cwd();
-const OUT = path.join(ROOT, "src/levels/designed.json");
+const OUT = process.env.OUTFILE ? path.resolve(ROOT, process.env.OUTFILE) : path.join(ROOT, "src/levels/designed.json");
 const [, , IMG = "public/art/level art/1/1.png", CELL = "0", LEVEL = "50", KK = "8", SIZE] = process.argv;
 const cellIndex = parseInt(CELL, 10);
 const levelNum = parseInt(LEVEL, 10);
@@ -52,7 +52,9 @@ const IMG_INNER = BOARD_SIZE - 2 * SAFE_MARGIN; // subject max side = fill area
 // Drop only the MUDDY mid-tones that dull bright characters (dark-blue 13, dark-green
 // 16, plum/maroon 18) so vivid colours stay fresh — but KEEP black 12, greys 9/10,
 // brown 11, tan 14, white 8 so penguins / bears / robots keep their true colours.
-const DARK_IDS = new Set([13, 16, 18]);
+const DARK_IDS = new Set(process.env.KEEPDARK === "1" ? [] : [13, 16, 18]);
+const KEEPBG = process.env.KEEPBG === "1"; // keep the image's own background (no removal → fills board)
+const BGTOL = parseInt(process.env.BGTOL ?? "46", 10); // bg flood-remove colour tolerance (raise to strip flat colour panels)
 const BRIGHT_IDS = []; for (let i = 0; i < BASE_N; i++) if (!DARK_IDS.has(i)) BRIGHT_IDS.push(i);
 const BRIGHT_RGB = BRIGHT_IDS.map((id) => baseRgb[id]);
 
@@ -138,10 +140,10 @@ function buildFromImage(src, IW, IH, opts) {
   const LW = 140; let ww, wh;
   if (IW >= IH) { ww = LW; wh = Math.max(2, Math.round(LW * IH / IW)); } else { wh = LW; ww = Math.max(2, Math.round(LW * IW / IH)); }
   const wk = sampleGrid(src, IW, IH, 0, 0, IW, IH, ww, wh);
-  const wbg = backgroundMask(wk.px, wk.alpha, ww, wh, 46);
+  const wbg = backgroundMask(wk.px, wk.alpha, ww, wh, BGTOL);
   let minx = ww, miny = wh, maxx = -1, maxy = -1;
   for (let y = 0; y < wh; y++) for (let x = 0; x < ww; x++) { const i = y * ww + x; if (!wbg[i] && wk.alpha[i] >= 128) { if (x < minx) minx = x; if (x > maxx) maxx = x; if (y < miny) miny = y; if (y > maxy) maxy = y; } }
-  if (maxx >= minx) {
+  if (!KEEPBG && maxx >= minx) {
     const padX = Math.round((maxx - minx + 1) * 0.02) + 1, padY = Math.round((maxy - miny + 1) * 0.02) + 1;
     minx = Math.max(0, minx - padX); miny = Math.max(0, miny - padY); maxx = Math.min(ww - 1, maxx + padX); maxy = Math.min(wh - 1, maxy + padY);
     rx = minx / ww * IW; ry = miny / wh * IH; rw = (maxx - minx + 1) / ww * IW; rhi = (maxy - miny + 1) / wh * IH;
@@ -149,7 +151,8 @@ function buildFromImage(src, IW, IH, opts) {
   const HS = Math.min(320, Math.max(128, maxSide * 8)); let hw, hh;
   if (rw >= rhi) { hw = HS; hh = Math.max(2, Math.round(HS * rhi / rw)); } else { hh = HS; hw = Math.max(2, Math.round(HS * rw / rhi)); }
   const hi = sampleGrid(src, IW, IH, rx, ry, rw, rhi, hw, hh);
-  const hmask = backgroundMask(hi.px, hi.alpha, hw, hh, 46);
+  const hmask = backgroundMask(hi.px, hi.alpha, hw, hh, BGTOL);
+  if (KEEPBG) hmask.fill(false); // treat every cell as subject → the pastel bg becomes the board backdrop
   let cw, rh;
   if (rw >= rhi) { cw = maxSide; rh = Math.max(2, Math.round(maxSide * rhi / rw)); } else { rh = maxSide; cw = Math.max(2, Math.round(maxSide * rw / rhi)); }
   cw = Math.min(40, cw); rh = Math.min(40, rh);
@@ -265,7 +268,8 @@ if (FILL_BG) {
   // chỉ tôn trọng khi user ép BG_ID rõ ràng.
   const seed = process.env.BG_ID != null && process.env.BG_ID !== "bright" ? [bgId] : [];
   const prefer = [...seed, ...(levelLightBoard ? PREFER_LIGHT : PREFER_DARK).filter((c) => !seed.includes(c))];
-  const bres = applyBoxBorder(board, BOARD_SIZE, BOARD_SIZE, { margin: SAFE_MARGIN, prefer });
+  const maxPct = parseInt(process.env.MAXBORDER ?? "30", 10); // preview override (k cần winrate)
+  const bres = applyBoxBorder(board, BOARD_SIZE, BOARD_SIZE, { margin: SAFE_MARGIN, prefer, maxPct });
   if (!bres.ok) {
     console.error(`✗ viền ${bres.cells} ô = ${bres.pct}% board > 30% — ảnh KHÔNG ĐẠT rule viền (chọn ảnh chủ thể đặc/gọn hơn; KHÔNG thu nhỏ chủ thể)`);
     process.exit(2);
