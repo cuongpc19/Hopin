@@ -1254,6 +1254,30 @@ xuyên hơn → CÀNG NHIỀU slime bị "ăn tắt" không animation. Vì vậy
 • Gộp code vẽ ô: trước có HAI bản (chuột / cảm ứng) — đúng kiểu trùng lặp sẽ lệch
   ngay khi ô có thêm trạng thái. Nay chung dressCell() + applyPaint().
 
+35) DỰNG LẠI HÀNG XE L2-30 THEO WINRATE (user 2026-08-05)
+────────────────────────────────────────────────────────────────────────────
+Chỉ dựng lại HÀNG XE, không đụng tranh (art chốt ở 6627197). Bộ dựng:
+scripts/gen-design.mjs + scripts/design-core.mjs, luật ghi ở
+Manythings/Design level/builder-rules.md.
+
+• NỀN DỄ = orderByPeel: mô phỏng tia bóc bàn từng lớp rồi phát xe ĐÚNG thứ tự và
+  đúng số lượng ô đã bóc. Đầu hàng luôn có màu ăn được → không kẹt bay. Cách cũ
+  (xếp theo thời điểm màu lộ ra lần đầu) quá thô: L25 7%, L16 32%, L6 41%.
+• ĐỘ KHÓ = 3 núm: `wave` (gộp bao nhiêu LỚP BÓC vào một đợt xe — vừa giảm số xe
+  vừa tăng khó, lệch pha CÓ CHẶN), `pressure` (đẩy một tỉ lệ hàng xe lên sớm),
+  `lay` (lớp 2, CHỈ ở level target ≤60%).
+• Đã thử và BỎ: gộp xe cùng màu theo cửa sổ hàng xe (kéo xe đi xa tuỳ ý, L6 rơi
+  94%→27%); xếp xe theo thứ tự xe đi vòng gặp màu (không hơn).
+• Số xe: 15-65/level (trước 49-143), trung bình 13-44 slime/xe.
+• Kết quả đo (thước hiệu chuẩn (B+D)/2, trần 94%): 29/29 level nằm trong ±12 điểm
+  quanh target của winratedesign1.csv. Riêng L10 chỉ tới 57% so với target 65% —
+  tranh có 3 màu vụn thành 28-52 đốm ≤2 ô, xe màu đó phải chờ rải khắp hành trình.
+• L11 và L16 ở bản trước KHÔNG THỂ THẮNG: hàng xe thuộc về một bàn khác (L11 có
+  102 ghế màu id9 mà bàn không có ô nào màu đó). Bản này sửa.
+• BẤT BIẾN: `node scripts/check-seats.mjs` — mỗi màu, tổng sức chứa xe = đúng số ô
+  của màu đó (kể cả lớp 2). Xe chỉ rời bay khi đầy 100%. L51 hỏng bất biến từ
+  trước, chưa sửa (ngoài phạm vi L2-30).
+
 ────────────────────────────────────────────────────────────────────────────
 GHI CHÚ CHUNG
 ────────────────────────────────────────────────────────────────────────────

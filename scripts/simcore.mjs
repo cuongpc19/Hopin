@@ -42,7 +42,7 @@ export const clearCell = (s, i) => {
   }
 };
 
-function rayHit(s, startR, startC, dr, dc) {
+export function rayHit(s, startR, startC, dr, dc) {
   const { cols, rows, occ } = s;
   // ĐÁ CỨNG (code ≥90): chặn tia như slime (GameScene rayHit dừng ở MỌI ô có tile, kể cả đá)
   // nhưng không bao giờ là target. Ô "?" ẩn cũng chặn tia (tile thật) — caller lọc target.
@@ -70,7 +70,7 @@ export function laneSeq(s) {
   return seq;
 }
 // 3 tia từ (edge,lane) — như findLosTargets: thẳng + 2 chéo XUẤT PHÁT LỆCH 1 lane
-function lanRays(s, e, l) {
+export function lanRays(s, e, l) {
   const { cols, rows } = s;
   if (e === "b") return [[rows - 1, l, -1, 0], [rows - 1, l - 1, -1, -1], [rows - 1, l + 1, -1, 1]];
   if (e === "t") return [[0, l, 1, 0], [0, l - 1, 1, -1], [0, l + 1, 1, 1]];
