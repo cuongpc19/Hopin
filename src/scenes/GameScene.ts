@@ -13,6 +13,7 @@ import {
   type Level,
   type TrackKind,
 } from "../game/level";
+import { drawVoxelCube, voxelFrontOverlap, setVoxelFrontRatio } from "../render/voxelCube";
 import { Audio } from "../game/audio";
 import { t as tr, tf as trf, getLang, setLang } from "../game/i18n";
 import { getLives, spendLife, showHeartsModal } from "../game/lives";
@@ -152,6 +153,11 @@ const CLUSTER_MIN_SCALE = 0.6; // never shrink the cluster past this — cars st
 // 1.38 a run of same-colour tiles merges into one slab, and this is a puzzle where reading how
 // many tiles of a colour remain matters. The seam is the bevel doing its job, not a defect.
 const TILE_CAP_FIT = 1.3;
+// Ô bàn cờ vẽ bằng khối kẹo nổi (voxelCube) thay vì nạp PNG. Đặt false để quay lại bộ
+// tile-<id>.png trong public/art/slime/.
+const VOXEL_TILES = true;
+// Do day THAN o (mat truoc). 0.2 = look "puffy" goc cua playbook, cao hon = khoi day hon.
+const VOXEL_BODY = 0.3;
 // Fixed car size — the SAME on every level (independent of the grid's cell size,
 // which changes with the level's rows/cols). ~30% bigger than the old sizing.
 const CAR_SIZE = 55;
@@ -480,7 +486,7 @@ export class GameScene extends Phaser.Scene {
       // Glossy keycap board-tile art (public/art/slime/tile-<id>.png). If present it
       // REPLACES the procedural flat tile in create(); missing ones fall back to it.
       // ?v= cache-buster: bump when the tile PNGs change so browsers refetch (they cache by URL).
-      this.load.image(`tile-${i}`, `art/slime/tile-${i}.png?v=7`); // v7: colours re-anchored to palette.ts (scripts/resat-tiles.mjs)
+      this.load.image(`tile-${i}`, `art/slime/tile-${i}.png?v=11`); // v11: ovuong2.jpg + keo day mat truoc 21% (scripts/tint-ovuong.mjs BODY=0.21)
     }
     // XU VÀNG màn thắng (video mẫu IMG_6489). Art thật user sẽ gửi vào public/art/coin.png;
     // thiếu/hỏng → create() vẽ placeholder (makeCoinTexture).
@@ -528,6 +534,9 @@ export class GameScene extends Phaser.Scene {
     // A Vite dev-server 200-for-missing yields a tiny broken texture, so also regen when
     // the texture is absent or degenerate (width < 8).
     for (let i = 0; i < COLORS.length; i++) {
+      // VOXEL: dựng ô ngay trong game từ MỘT màu phẳng (public/pixel-voxel-rendering).
+      // Không cần file PNG, và ô luôn khớp palette.ts — đổi màu trong palette là ô đổi theo.
+      if (VOXEL_TILES) { this.makeVoxelTileTexture(`tile-${i}`, COLORS[i]); continue; }
       const t = this.textures.exists(`tile-${i}`) ? this.textures.get(`tile-${i}`) : null;
       const ok = t && t.getSourceImage() && (t.getSourceImage() as HTMLImageElement).width >= 8;
       if (!ok) this.makeTileTexture(`tile-${i}`, COLORS[i]);
@@ -3561,6 +3570,30 @@ export class GameScene extends Phaser.Scene {
   // on the tray cars). Uniform 128px so setTexture on reveal needs no resize juggling.
   // Tile BEVEL PHẲNG — bản gốc (user 2026-08-01 thử 3 bản "3D jelly" rồi quyết quay về:
   // các bản khối/hạt cườm đều nhiễu ở cỡ ô nhỏ; bản phẳng nguyên thuỷ sạch nhất).
+  // Ô bàn cờ vẽ theo lối KHỐI KẸO NỔI (public/pixel-voxel-rendering/PLAYBOOK.md).
+  // Toàn bộ khối — mặt trên phồng, mặt trước tối, 4 cạnh vát, sheen, bóng đổ — suy ra từ ĐÚNG
+  // MỘT màu phẳng, nên không cần asset và không bao giờ lệch với palette.ts.
+  //
+  // HÌNH HỌC: khối vẽ CAO HƠN ô của nó — nắp trồi lên trên một dải `overlap = 0.2·h` (playbook
+  // §3). Ở đây mỗi ô là một sprite VUÔNG riêng, nên phải chọn h sao cho (h + overlap) = w, tức
+  // h = w/1.2; nếu không Phaser ép ảnh về vuông và khối bị nén dẹt.
+  //
+  // Playbook §1: dưới ~6px thì khối đọc thành nhiễu. Bàn 39×39 cho ô ~9px nên vẫn trên ngưỡng,
+  // nhưng đó là lý do bàn càng thưa ô càng đẹp.
+  private makeVoxelTileTexture(key: string, col: number, size = 128) {
+    if (this.textures.exists(key)) this.textures.remove(key);
+    const tex = this.textures.createCanvas(key, size, size);
+    const ctx = tex?.getContext();
+    if (!tex || !ctx) { this.makeTileTexture(key, col, size); return; }
+    setVoxelFrontRatio(VOXEL_BODY);
+    const margin = size * 0.06;                    // chừa chỗ cho bóng đổ tràn phải/dưới
+    const w = size - margin * 2;
+    const h = w / (1 + VOXEL_BODY);                // (h + ratio·h) = w → khối vừa khít ô vuông
+    const overlap = voxelFrontOverlap(h);
+    drawVoxelCube(ctx, margin, margin + overlap, w, h, [(col >> 16) & 0xff, (col >> 8) & 0xff, col & 0xff]);
+    tex.refresh();
+  }
+
   private makeTileTexture(key: string, col: number, size = 128) {
     if (this.textures.exists(key)) this.textures.remove(key);
     const g = this.make.graphics({ x: 0, y: 0 }, false);

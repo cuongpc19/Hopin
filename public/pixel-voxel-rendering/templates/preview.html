@@ -1,0 +1,345 @@
+<!doctype html>
+<!--
+  preview.html — tune the voxel block look by eye, then copy the numbers into voxelCube.ts.
+
+  Open it straight from disk (double-click). No server, no build, no dependencies.
+
+  ⚠️ THE DRAWING CODE BELOW IS A DELIBERATE SECOND COPY of voxelCube.ts, in plain JS, with the
+  tuned numbers lifted into `K` so sliders can drive them. That duplication is the price of a
+  zero-dependency tuning sandbox. The rule: this file is where you DECIDE the numbers, voxelCube.ts
+  is where they LIVE. When you settle on a look, copy the values from the readout at the bottom
+  into voxelCube.ts and re-run its tests — if you changed the shadow or the front-face height, the
+  halo tests will tell you what else must move.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Voxel block preview</title>
+    <style>
+      body {
+        margin: 0; padding: 24px; background: #e8e0d4; color: #3a2f24;
+        font: 14px/1.45 ui-sans-serif, system-ui, sans-serif;
+        display: grid; gap: 20px; justify-items: center;
+      }
+      h1 { margin: 0; font-size: 17px; }
+      .wrap { display: flex; gap: 28px; align-items: flex-start; flex-wrap: wrap; justify-content: center; max-width: 1180px; }
+      .row { flex: 1 1 620px; }
+      .panel {
+        background: #f6f1e8; border-radius: 12px; padding: 16px 18px; min-width: 290px;
+        box-shadow: 0 6px 18px #0001;
+      }
+      .knob { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; margin-bottom: 10px; }
+      .knob label { font-size: 12px; opacity: .8; }
+      .knob output { font-size: 12px; font-variant-numeric: tabular-nums; opacity: .65; }
+      .knob input { grid-column: 1 / -1; width: 100%; }
+      .row { display: flex; flex-wrap: wrap; gap: 22px; justify-content: center; align-items: flex-end; }
+      figure { margin: 0; text-align: center; }
+      figcaption { margin-top: 7px; opacity: .65; font-size: 12px; }
+      canvas { background: #f3eee6; border-radius: 10px; box-shadow: 0 10px 26px #0002; }
+      p.note { max-width: 640px; margin: 0; opacity: .7; font-size: 12px; text-align: center; }
+      pre {
+        background: #2c2419; color: #f0e6d6; padding: 12px 14px; border-radius: 10px;
+        font-size: 12px; max-width: 640px; overflow-x: auto;
+      }
+      button { font: inherit; padding: 6px 12px; border-radius: 8px; border: 1px solid #0002; cursor: pointer; }
+    </style>
+  </head>
+  <body>
+    <h1>Voxel block preview — tune by eye</h1>
+
+    <div class="wrap">
+      <div class="panel" id="knobs"></div>
+      <div class="row" id="row"></div>
+    </div>
+
+    <p class="note">
+      The bottom strip is the <strong>too-small test</strong>: below roughly 6&nbsp;px a cell the
+      lid, the bevels and the shadow eat the whole face and the grid reads as noise, not as blocks.
+      If your art needs cells that small, use flat fills instead.
+    </p>
+
+    <pre id="out"></pre>
+    <button id="reset">Reset to shipped values</button>
+
+    <script>
+      // ── tunables (the shipped values) ────────────────────────────────────────────────────
+      const SHIPPED = {
+        cellPx: 15,        // grid cell size, px
+        front: 0.20,       // front-face height / lid overhang, as a fraction of cell height
+        radius: 0.20,      // corner radius, as a fraction of min(bw, bh)
+        gap: 0.02,         // seam between blocks, as a fraction of min(w, h)
+        rimHi: 84,         // top bevel brightness  (shadeColor delta)
+        rimLo: -96,        // right bevel darkness  (shadeColor delta)
+        sheen: 0.31,       // broad convex highlight alpha
+        gloss: 0.30,       // small specular dot alpha
+        shadow: 1.00,      // cast-shadow strength multiplier
+      };
+      const K = { ...SHIPPED };
+
+      const KNOBS = [
+        ['cellPx', 4, 40, 1,     'Cell size (px)'],
+        ['front',  0.05, 0.45, 0.01, 'Block thickness — front face / lid overhang'],
+        ['radius', 0.02, 0.45, 0.01, 'Corner roundness'],
+        ['gap',    0,    0.08, 0.005,'Seam between blocks'],
+        ['rimHi',  0,    140,  1,    'Top bevel brightness'],
+        ['rimLo', -160,  0,    1,    'Right bevel darkness'],
+        ['sheen',  0,    0.7,  0.01, 'Convex sheen (roundness of the lid)'],
+        ['gloss',  0,    0.7,  0.01, 'Specular dot'],
+        ['shadow', 0,    2,    0.05, 'Cast shadow strength'],
+      ];
+
+      // ── the painter (a JS mirror of voxelCube.ts — see the header warning) ───────────────
+      const clamp255 = (v) => (v < 0 ? 0 : v > 255 ? 255 : v);
+      const shade = (c, a) => [clamp255(c[0] + a), clamp255(c[1] + a), clamp255(c[2] + a)];
+      const rgbStr = (c, a = 1) =>
+        a >= 1 ? `rgb(${c[0]},${c[1]},${c[2]})` : `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+      const frontOverlap = (h) => Math.max(1.4, h * K.front);
+
+      function drawVoxelCube(c, x, y, w, h, base) {
+        const m = Math.min(w, h);
+        const overlap = frontOverlap(h);
+        const frontH = overlap;
+        const vx = x, vy = y - overlap, vw = w, vh = h + overlap;
+        const gap = Math.max(0.2, Math.min(0.55, m * K.gap));
+        const bx = vx + gap, by = vy + gap, bw = vw - gap * 2, bh = vh - gap * 2;
+        if (bw <= 0 || bh <= 0) return;
+        const r = Math.max(0.3, Math.min(bw, bh) * K.radius);
+        const lidH = bh - frontH;
+        const frontY = by + lidH;
+        const rim = Math.max(0.7, Math.min(bw, Math.max(lidH, 1)) * 0.11);
+
+        // 1. cast shadow
+        {
+          const sox = Math.max(0.9, m * 0.11), soy = Math.max(1.1, m * 0.15);
+          c.fillStyle = `rgba(35,24,14,${0.16 * K.shadow})`;
+          c.beginPath();
+          c.roundRect(bx + sox * 0.55, by + soy * 0.55, bw + sox * 0.55, bh + soy * 0.45, r * 1.05);
+          c.fill();
+          c.fillStyle = `rgba(28,18,10,${0.28 * K.shadow})`;
+          c.beginPath();
+          c.roundRect(bx + sox, by + soy, bw * 0.98, bh * 0.96, r);
+          c.fill();
+        }
+        // 2. groove
+        c.fillStyle = rgbStr(shade(base, -52));
+        c.beginPath();
+        c.roundRect(x + gap * 0.5, y + gap * 0.5, w - gap, h - gap, Math.max(0.3, r * 0.85));
+        c.fill();
+
+        c.save();
+        c.beginPath(); c.roundRect(bx, by, bw, bh, r); c.clip();
+
+        // 3. front face
+        const fg = c.createLinearGradient(bx, frontY, bx, by + bh);
+        fg.addColorStop(0, rgbStr(shade(base, -34)));
+        fg.addColorStop(0.4, rgbStr(shade(base, -56)));
+        fg.addColorStop(1, rgbStr(shade(base, -78)));
+        c.fillStyle = fg; c.fillRect(bx, frontY, bw, frontH);
+
+        // 4. front side lighting
+        const sideW = Math.min(bw * 0.18, Math.max(1.1, rim * 1.1));
+        const lf = c.createLinearGradient(bx, frontY, bx + sideW, frontY);
+        lf.addColorStop(0, rgbStr(shade(base, -6), 0.55));
+        lf.addColorStop(1, rgbStr(shade(base, -6), 0));
+        c.fillStyle = lf; c.fillRect(bx, frontY, sideW, frontH);
+        const rf = c.createLinearGradient(bx + bw, frontY, bx + bw - sideW, frontY);
+        rf.addColorStop(0, rgbStr(shade(base, -85), 0.78));
+        rf.addColorStop(1, rgbStr(shade(base, -85), 0));
+        c.fillStyle = rf; c.fillRect(bx + bw - sideW, frontY, sideW, frontH);
+
+        // 5. shelf crease
+        const sh = c.createLinearGradient(bx, frontY - 0.5, bx, frontY + Math.min(3.2, frontH));
+        sh.addColorStop(0, 'rgba(0,0,0,0)');
+        sh.addColorStop(0.2, 'rgba(0,0,0,0.38)');
+        sh.addColorStop(1, 'rgba(0,0,0,0)');
+        c.fillStyle = sh; c.fillRect(bx, frontY - 0.5, bw, Math.min(3.5, frontH + 0.5));
+
+        // 6. lit line at the top of the front
+        c.fillStyle = rgbStr(shade(base, 30), 0.4);
+        c.fillRect(bx, frontY, bw, Math.max(0.55, frontH * 0.1));
+
+        // 7. bottom bounce light
+        {
+          const blh = Math.max(0.8, Math.min(frontH * 0.55, 3.2));
+          const bl = c.createLinearGradient(bx, by + bh, bx, by + bh - blh);
+          bl.addColorStop(0, rgbStr(shade(base, 46), 0.6));
+          bl.addColorStop(0.6, rgbStr(shade(base, 24), 0.28));
+          bl.addColorStop(1, rgbStr(shade(base, 24), 0));
+          c.fillStyle = bl; c.fillRect(bx, by + bh - blh, bw, blh);
+        }
+
+        // 8. lid
+        if (lidH > 1.5) {
+          c.fillStyle = rgbStr(shade(base, 4)); c.fillRect(bx, by, bw, lidH);
+          const cx = bx + bw * 0.38, cy = by + lidH * 0.36, pR = Math.max(bw, lidH) * 0.85;
+          const pil = c.createRadialGradient(cx, cy, 0, cx, cy, pR);
+          pil.addColorStop(0, rgbStr(shade(base, 28), 0.21));
+          pil.addColorStop(0.45, rgbStr(shade(base, 8), 0.09));
+          pil.addColorStop(0.8, rgbStr(base, 0));
+          pil.addColorStop(1, rgbStr(shade(base, -22), 0.2));
+          c.fillStyle = pil; c.fillRect(bx, by, bw, lidH);
+
+          const lf2 = c.createLinearGradient(bx, by, bx, by + lidH);
+          lf2.addColorStop(0, 'rgba(0,0,0,0)');
+          lf2.addColorStop(0.7, 'rgba(0,0,0,0)');
+          lf2.addColorStop(1, 'rgba(0,0,0,0.2)');
+          c.fillStyle = lf2; c.fillRect(bx, by, bw, lidH);
+
+          const rimT = Math.min(rim, lidH * 0.38), rimL = Math.min(rim, bw * 0.38);
+          const rimB = Math.min(rim * 0.95, lidH * 0.3), rimR = Math.min(rim * 1.1, bw * 0.4);
+          const tr = c.createLinearGradient(bx, by, bx, by + rimT);
+          tr.addColorStop(0, rgbStr(shade(base, K.rimHi), 0.72));
+          tr.addColorStop(0.62, rgbStr(shade(base, K.rimHi * 0.42), 0.35));
+          tr.addColorStop(1, rgbStr(shade(base, K.rimHi * 0.42), 0));
+          c.fillStyle = tr; c.fillRect(bx, by, bw, rimT);
+
+          const lr = c.createLinearGradient(bx, by, bx + rimL, by);
+          lr.addColorStop(0, rgbStr(shade(base, K.rimHi * 0.69), 0.62));
+          lr.addColorStop(0.68, rgbStr(shade(base, K.rimHi * 0.26), 0.28));
+          lr.addColorStop(1, rgbStr(shade(base, K.rimHi * 0.26), 0));
+          c.fillStyle = lr; c.fillRect(bx, by, rimL, lidH);
+
+          const br = c.createLinearGradient(bx, by + lidH, bx, by + lidH - rimB);
+          br.addColorStop(0, rgbStr(shade(base, K.rimLo * 0.81), 0.85));
+          br.addColorStop(0.5, rgbStr(shade(base, K.rimLo * 0.36), 0.35));
+          br.addColorStop(1, rgbStr(shade(base, K.rimLo * 0.36), 0));
+          c.fillStyle = br; c.fillRect(bx, by + lidH - rimB, bw, rimB);
+
+          const rr = c.createLinearGradient(bx + bw, by, bx + bw - rimR, by);
+          rr.addColorStop(0, rgbStr(shade(base, K.rimLo), 0.92));
+          rr.addColorStop(0.68, rgbStr(shade(base, K.rimLo * 0.47), 0.45));
+          rr.addColorStop(1, rgbStr(shade(base, K.rimLo * 0.47), 0));
+          c.fillStyle = rr; c.fillRect(bx + bw - rimR, by, rimR, lidH);
+
+          const px = bx + bw * 0.5, py = by + lidH * 0.3, sR = Math.max(bw, lidH) * 0.72;
+          const sheen = c.createRadialGradient(px, py, 0, px, py, sR);
+          sheen.addColorStop(0, `rgba(255,255,255,${K.sheen})`);
+          sheen.addColorStop(0.5, `rgba(255,255,255,${K.sheen * 0.35})`);
+          sheen.addColorStop(1, 'rgba(255,255,255,0)');
+          c.fillStyle = sheen; c.fillRect(bx, by, bw, lidH);
+
+          const gR = Math.min(bw, lidH) * 0.2, gx = bx + bw * 0.28, gy = by + lidH * 0.26;
+          const gl = c.createRadialGradient(gx, gy, 0, gx, gy, gR);
+          gl.addColorStop(0, `rgba(255,255,255,${K.gloss})`);
+          gl.addColorStop(0.5, `rgba(255,255,255,${K.gloss * 0.27})`);
+          gl.addColorStop(1, 'rgba(255,255,255,0)');
+          c.fillStyle = gl;
+          c.beginPath(); c.arc(gx, gy, gR, 0, Math.PI * 2); c.fill();
+        }
+
+        c.restore();
+        c.strokeStyle = rgbStr(shade(base, -70), 0.36);
+        c.lineWidth = Math.max(0.35, m * 0.022);
+        c.beginPath();
+        c.roundRect(bx + c.lineWidth / 2, by + c.lineWidth / 2, bw - c.lineWidth, bh - c.lineWidth, r);
+        c.stroke();
+      }
+
+      function drawVoxelPainting(c, grid, palette, cellPx) {
+        for (let row = 0; row < grid.length; row++) {
+          for (let col = 0; col < grid[0].length; col++) {
+            const idx = grid[row][col];
+            if (idx === null || idx === undefined) continue;
+            const x0 = Math.round(col * cellPx), y0 = Math.round(row * cellPx);
+            const x1 = Math.round((col + 1) * cellPx), y1 = Math.round((row + 1) * cellPx);
+            drawVoxelCube(c, x0, y0, x1 - x0, y1 - y0, palette[idx]);
+          }
+        }
+      }
+
+      // ── scenes ───────────────────────────────────────────────────────────────────────────
+      const PALETTE = [
+        [242, 120, 32], [255, 210, 70], [255, 255, 255],
+        [236, 220, 190], [210, 90, 28], [250, 160, 50],
+      ];
+      const MUSHROOM = [
+        [0, 0, 1, 2, 1, 0],
+        [0, 0, 0, 1, 0, 0],
+        [5, 0, 0, 0, 0, 5],
+        [5, 5, 0, 0, 5, 5],
+        [null, 4, 5, 5, 4, null],
+        [null, null, 3, 3, null, null],
+        [null, null, 3, 3, null, null],
+      ];
+      const SAME_ROW = [[0, 0, 0, 0, 0, 0, 0, 0]];
+      const TINY_ROW = [[0, 1, 5, 0, 4, 0, 1, 5, 0, 4, 0, 1, 5, 0, 4, 0]];
+
+      const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+      const row = document.getElementById('row');
+
+      function canvasFig(label, w, h, zoom, draw) {
+        const fig = document.createElement('figure');
+        const cv = document.createElement('canvas');
+        cv.width = Math.round(w * zoom * dpr);
+        cv.height = Math.round(h * zoom * dpr);
+        cv.style.width = w * zoom + 'px';
+        cv.style.height = h * zoom + 'px';
+        const c = cv.getContext('2d');
+        c.setTransform(zoom * dpr, 0, 0, zoom * dpr, 0, 0);
+        c.imageSmoothingEnabled = true;
+        c.imageSmoothingQuality = 'high';
+        draw(c);
+        const cap = document.createElement('figcaption');
+        cap.textContent = label;
+        fig.append(cv, cap);
+        return fig;
+      }
+
+      function render() {
+        const cell = K.cellPx;
+        // Zooms are chosen so the four scenes fit one strip at any cell size: the inspect tile
+        // gets a big zoom, the grids stay modest.
+        const gridZoom = Math.max(1.5, Math.min(3, 42 / cell));
+        row.replaceChildren(
+          canvasFig(`one block @ ${cell}px (inspect)`, cell + 8, cell + 8, Math.max(4, Math.min(10, 120 / cell)),
+            (c) => drawVoxelCube(c, 4, 4, cell, cell, PALETTE[0])),
+          canvasFig(`grid @ ${cell}px`, cell * 6 + 4, cell * 7 + 4, gridZoom,
+            (c) => { c.translate(2, 2); drawVoxelPainting(c, MUSHROOM, PALETTE, cell); }),
+          canvasFig('same colour in a row (groove test)', cell * 8 + 4, cell + 8, gridZoom,
+            (c) => { c.translate(2, 4); drawVoxelPainting(c, SAME_ROW, PALETTE, cell); }),
+          canvasFig('4px cells — too small for this look', 4 * 16 + 4, 12, 5,
+            (c) => { c.translate(2, 4); drawVoxelPainting(c, TINY_ROW, PALETTE, 4); }),
+        );
+        document.getElementById('out').textContent =
+          'voxelCube.ts values:\n' +
+          `  voxelFrontOverlap: Math.max(1.4, cellH * ${K.front})\n` +
+          `  corner radius:     Math.max(0.3, Math.min(bw, bh) * ${K.radius})\n` +
+          `  gap:               Math.max(0.2, Math.min(0.55, m * ${K.gap}))\n` +
+          `  top bevel:         shadeColor(base, ${Math.round(K.rimHi)})\n` +
+          `  right bevel:       shadeColor(base, ${Math.round(K.rimLo)})\n` +
+          `  sheen alpha:       ${K.sheen}\n` +
+          `  specular alpha:    ${K.gloss}\n` +
+          (K.shadow !== 1 ? `  shadow x${K.shadow}  -> ALSO update voxelShadowSpillPx\n` : '');
+      }
+
+      const knobs = document.getElementById('knobs');
+      for (const [key, min, max, step, label] of KNOBS) {
+        const box = document.createElement('div');
+        box.className = 'knob';
+        box.innerHTML =
+          `<label for="k-${key}">${label}</label><output id="o-${key}"></output>` +
+          `<input id="k-${key}" type="range" min="${min}" max="${max}" step="${step}">`;
+        knobs.append(box);
+        const input = box.querySelector('input');
+        const out = box.querySelector('output');
+        input.value = K[key];
+        out.textContent = K[key];
+        input.addEventListener('input', () => {
+          K[key] = parseFloat(input.value);
+          out.textContent = input.value;
+          render();
+        });
+      }
+      document.getElementById('reset').addEventListener('click', () => {
+        Object.assign(K, SHIPPED);
+        for (const [key] of KNOBS) {
+          document.getElementById('k-' + key).value = K[key];
+          document.getElementById('o-' + key).textContent = K[key];
+        }
+        render();
+      });
+
+      render();
+    </script>
+  </body>
+</html>
