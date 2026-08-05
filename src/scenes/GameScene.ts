@@ -157,7 +157,7 @@ const TILE_CAP_FIT = 1.3;
 // tile-<id>.png trong public/art/slime/.
 const VOXEL_TILES = true;
 // Do day THAN o (mat truoc). 0.2 = look "puffy" goc cua playbook, cao hon = khoi day hon.
-const VOXEL_BODY = 0.3;
+const VOXEL_BODY = 0.34;
 // Fixed car size — the SAME on every level (independent of the grid's cell size,
 // which changes with the level's rows/cols). ~30% bigger than the old sizing.
 const CAR_SIZE = 55;

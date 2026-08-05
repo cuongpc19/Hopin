@@ -252,9 +252,9 @@ export function drawVoxelCube(
 
   // ── 3. Front face ─────────────────────────────────────────────────────────────────────────
   const frontGrad = c.createLinearGradient(bx, frontY, bx, by + bh);
-  frontGrad.addColorStop(0, rgbStr(shadeColor(base, -34)));
-  frontGrad.addColorStop(0.4, rgbStr(shadeColor(base, -56)));
-  frontGrad.addColorStop(1, rgbStr(shadeColor(base, -78)));
+  frontGrad.addColorStop(0, rgbStr(shadeColor(base, -26)));
+  frontGrad.addColorStop(0.4, rgbStr(shadeColor(base, -48)));
+  frontGrad.addColorStop(1, rgbStr(shadeColor(base, -70)));
   c.fillStyle = frontGrad;
   c.fillRect(bx, frontY, bw, frontH);
 
@@ -362,8 +362,8 @@ export function drawVoxelCube(
       const py = by + lidH * 0.3;
       const pR = Math.max(bw, lidH) * 0.72;
       const sheen = c.createRadialGradient(px, py, 0, px, py, pR);
-      sheen.addColorStop(0, 'rgba(255,255,255,0.31)');
-      sheen.addColorStop(0.5, 'rgba(255,255,255,0.11)');
+      sheen.addColorStop(0, 'rgba(255,255,255,0.39)');
+      sheen.addColorStop(0.5, 'rgba(255,255,255,0.15)');
       sheen.addColorStop(1, 'rgba(255,255,255,0)');
       c.fillStyle = sheen;
       c.fillRect(bx, by, bw, lidH);
