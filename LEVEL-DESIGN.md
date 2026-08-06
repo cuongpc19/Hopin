@@ -450,30 +450,28 @@ sẽ bị rơi im lặng.
 
 ---
 
-## 10. Trạng thái hiện tại (2026-08-06, sau `99ae5c9`)
+## 10. Trạng thái hiện tại (2026-08-06)
 
-**Art:** vừa có đợt mới của user — L4/L6 vẽ bằng code, L8 lấy tranh chim cánh cụt của L50,
-L10 đổi sang bóng bay (tranh công cũ đã bỏ khỏi bộ), và L15/20/25/30 **hoán đổi trọn gói**
-(board + xe) với L17/24/28/29 để nhịp ÷5 nằm trên lưới 25×25.
+**Art:** mốc `916846d`. L4/L6 vẽ bằng code, L8 lấy tranh của L50, L10 là bóng bay, L15/20/25/30
+đã hoán đổi trọn gói với L17/24/28/29; L187-196 là 10 level hoa văn đối xứng vẽ bằng code.
 
-**Việc còn dở — nhịp ÷5 đang BỊ ĐẢO.** Vì hoán đổi mang theo cả độ khó:
+**Hàng xe:** dựng lại xong cho L2-30 và L187-196.
 
-| | L15 | L20 | L25 | L30 | | L17 | L24 | L28 | L29 |
-|---|---|---|---|---|---|---|---|---|---|
-| đang là | 94% | 94% | 86% | 74% | | 36% | 58% | 66% | 51% |
-| phải là | ~50% | ~40% | ~60% | ~45% | | ~90% | ~90% | ~75% | ~75% |
+| | trước | sau |
+|---|---|---|
+| L2-30 | 1092 xe, 522 xe <10 slime | **504 xe, 60 xe <10 slime** |
+| L187-196 | ~540 xe | **83 xe**, xe nhỏ nhất 40 slime |
 
-**Số xe:** 1092 cho L2-30, trong đó **522 xe dưới 10 slime**. Đây là thứ user phàn nàn trực
-tiếp ("sao có nhiều xe có số slime nhỏ thế"). Bản trước khi có art mới đã hạ được xuống 579 xe
-/ 77 xe vụn bằng `absorbTiny` + đưa `minCar` vào thang quét — công cụ vẫn còn, chỉ cần chạy lại
-trên board mới.
+Cách làm: 17 level board không đổi thì lắp thẳng hàng xe đã tune (0 phép đo); chỉ 12 level đổi
+board mới phải quét. Nhịp ÷5 đã trả về đúng chỗ (L15 50%, L20 69%, L25 55%, L30 51%) và
+L17/24/28/29 quay lại dễ (84/92/71/76). L3-9 đều ≥90% theo yêu cầu "bấm sướng tay".
+L190/192/193 dùng hàng xe phát đúng nhịp bóc, áp lực 0 — dễ nhất dựng được.
 
-**Bất biến:** L2-30 sạch. **L51 vẫn hỏng** (màu id5: 103 ô / 811 ghế, bốn màu khác có ô mà
-không có xe) — hỏng từ trước, chưa ai sửa, level đó không thể thắng.
+**Lệch duy nhất: L10 = 51% so với target 65%.** Board bóng bay nhảy thẳng 94% → 35% không có
+bậc trung gian; quét cả chiều lớp-2 (60/100/150 ô) cũng chỉ tới đó. Phiên khác cũng chỉ đưa
+được tới 58%. Muốn đúng target thì phải đổi tranh.
 
-**Level chưa dựng lại:** L31-46 vẫn là bản cũ.
+**Bất biến:** L2-30 và L187-196 sạch. **L51 vẫn hỏng** (id5: 103 ô / 811 ghế) — không thể
+thắng, hỏng từ lâu, chưa ai sửa.
 
-**Việc tiếp theo, theo thứ tự:**
-1. Dựng lại hàng xe cho toàn bộ L2-30 trên board mới — trả nhịp ÷5 về đúng chỗ và hạ số xe.
-2. Sửa L51 hoặc bỏ nó ra khỏi bộ.
-3. L31-46.
+**Việc tiếp theo:** L31-46 vẫn là bản cũ; L51 cần sửa hoặc bỏ.

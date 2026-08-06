@@ -39,7 +39,18 @@ const SPEC = (() => {
   } catch { /* không có CSV thì dùng mặc định bên dưới */ }
   return out;
 })();
-const spec = (n) => SPEC[n] || { target: 20, maxCol: 12, minCar: 16, twins: 2 };
+// user 2026-08-06: "winrate cho level 3-9, cứ trên 90% nhé, 95% cũng được, miễn sao user bấm
+// sướng tay" → đè lên cột target của CSV (CSV cho L3 81%, L5 70%). Thước bão hoà ở 94% nên 90
+// ở đây nghĩa là "dễ hết mức đo được".
+const EASY_RUN = { from: 3, to: 9, target: 90 };
+// Đè target cho level không có trong CSV (L47+):  TGT="187:88,190:94,…"
+const TGT = Object.fromEntries((process.env.TGT || "").split(",").filter(Boolean)
+  .map((s) => s.split(":").map(Number)));
+const spec = (n) => {
+  const s = SPEC[n] || { target: 20, maxCol: 12, minCar: 16, twins: 2 };
+  if (TGT[n] != null) return { ...s, target: TGT[n] };
+  return n >= EASY_RUN.from && n <= EASY_RUN.to ? { ...s, target: EASY_RUN.target } : s;
+};
 
 // SỐ XE là MỘT CHIỀU CỦA THANG, không phải hằng số. Guide §2e đã cảnh báo và đo 2026-08-05
 // xác nhận: gộp xe to KHÔNG trung tính — L16 bản gốc 130 xe nhỏ đạt 80%, dựng lại 25 xe to
