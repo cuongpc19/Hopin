@@ -129,6 +129,29 @@ export function orderByPeel(L, cap, mergeWin, wave = Number(process.env.WAVE ?? 
 // Lấy `k` xe từ nửa sau hàng, chèn vào HỒI THẮT (22-62% hàng xe). Chúng tới trước khi màu của
 // mình lộ ra → đỗ lì trong ô chờ → khoá bay → người chơi phải chọn gỡ bằng xe nào (guide §2b:
 // đặt quyết-định-có-hậu-quả vào khúc giữa, đừng để hụt ở mét cuối).
+// ---- NUỐT XE VỤN ------------------------------------------------------------------------
+// Tia bóc ăn phần dày ở ngoài trước nên mỗi màu còn lại một mẩu ở cuối → đuôi hàng là một
+// loạt xe 1-10 slime (L2: …18, 11, 10, 9, 7, 4, 1). Bấm nhiều mà chẳng được gì.
+// Gộp mẩu đó vào xe CÙNG MÀU, ưu tiên xe ĐỨNG SAU: dời xe ra sau thì màu của nó đã lộ sẵn,
+// vô hại. Chỉ khi không có xe sau mới lùi vào xe trước — hướng đó mới sinh xe-đứng-chờ.
+export function absorbTiny(order, minSize, hardMax = 140) {
+  if (!minSize) return order;
+  const cars = order.map((c) => ({ ...c }));
+  for (let i = 0; i < cars.length; i++) {
+    const c = cars[i];
+    if (!c || c.count >= minSize) continue;
+    let tgt = -1;
+    for (let j = i + 1; j < cars.length; j++)
+      if (cars[j] && cars[j].color === c.color && cars[j].count + c.count <= hardMax) { tgt = j; break; }
+    if (tgt < 0) for (let j = i - 1; j >= 0; j--)
+      if (cars[j] && cars[j].color === c.color && cars[j].count + c.count <= hardMax) { tgt = j; break; }
+    if (tgt < 0) continue;                       // màu chỉ có đúng một xe → phải giữ
+    cars[tgt].count += c.count;
+    cars[i] = null;
+  }
+  return cars.filter(Boolean);
+}
+
 // `frac` = TỈ LỆ hàng xe bị đẩy lệch pha (0…0.5). Bản trước dùng SỐ CỐ ĐỊNH nên với hàng
 // 50-130 xe thì đẩy 9 xe chẳng ăn thua — 120 xe còn lại vẫn đúng nhịp, level vẫn 94%.
 export function shiftEarly(order, frac, seed) {

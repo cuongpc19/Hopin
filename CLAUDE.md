@@ -7,6 +7,11 @@ mosaic picture made of coloured tiles, outside-in. User designs, Claude builds.
 - **Full feature log: `FEATURES.txt`** (Vietnamese, numbered sections). Read it before
   touching levels, mechanics, or visuals. Windows note: `features.txt` == `FEATURES.txt`
   (case-insensitive filesystem — same file).
+- **Building or retuning levels? Read `LEVEL-DESIGN.md` FIRST — all of it.** It holds the
+  four hard invariants (art is frozen at `6627197`; car seats must equal board cells; every
+  change must be measured; never report an unmeasured number), the four-step generator, the
+  knobs with their measured effects, the approaches already tried and rejected, and the
+  mistakes that cost hours last time. `node scripts/check-seats.mjs` after every write.
 
 ## ONE version, ONE folder, ONE branch (2026-08-02)
 

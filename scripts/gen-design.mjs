@@ -14,7 +14,7 @@
 import fs from "node:fs";
 import { readD, writeD, isC, colorDepth, mkRng, addLayer2Clusters } from "./genlib.mjs";
 import { gradeBatch } from "./calib.mjs";
-import { orderByPeel, shiftEarly, lossProfile, positionPenalty, twinGapOk, twinShape } from "./design-core.mjs";
+import { orderByPeel, shiftEarly, absorbTiny, lossProfile, positionPenalty, twinGapOk, twinShape } from "./design-core.mjs";
 
 const LANES = 4;
 const N_B = Number(process.env.N_B || 100);
@@ -130,7 +130,7 @@ export function build(src, n, rung) {
   // NỀN DỄ HOÀN HẢO: xe phát theo ĐÚNG TRÌNH TỰ BÀN ĐƯỢC BÓC → đầu hàng luôn có màu ăn được,
   // không kẹt bay được. Đo 2026-08-05: đưa L25 từ 7% lên 94%, L16 32%→94%, L6 41%→94%.
   // ĐỘ KHÓ: đẩy `pressure` xe từ nửa sau lên hồi giữa → tới trước khi màu của mình lộ.
-  L.chests = shiftEarly(orderByPeel(L, rung.cap || CAPS[0], rung.merge ?? 0, rung.wave ?? 1), rung.pressure, seed);
+  L.chests = absorbTiny(shiftEarly(orderByPeel(L, rung.cap || CAPS[0], rung.merge ?? 0, rung.wave ?? 1), rung.pressure, seed), rung.minCar ?? Number(process.env.MINCAR || 0));
 
   const cdep = colorDepth(L);
   twinsInCrunch(L, twinCount(n, sp), cdep, seed);
@@ -166,9 +166,14 @@ const LADDER = [];
   const press = (process.env.PRESS || "0,1,2,3").split(",").map(Number);
   const lays = (process.env.LAY2 || "0,40").split(",").map(Number);
   const waves = (process.env.WAVES || "1,2,3").split(",").map(Number);
+  // NGƯỠNG NUỐT XE VỤN là một TRỤC CỦA THANG, không phải hậu xử lý. Gộp xe vụn làm level DỄ đi
+  // (ít xe đứng chờ hơn), nên nó phải được chọn CÙNG LÚC với cỡ xe / wave / áp lực thì mới vừa
+  // bỏ được đuôi xe 1-5 slime vừa giữ winrate. Gộp sau khi đã chốt nấc thì level nào cũng lệch.
+  const mins = (process.env.MINCAR_LADDER || "").split(",").filter((s) => s !== "").map(Number);
   const mr = Number(process.env.MAX_RUN || 99);
   for (const cap of CAPS) for (const wave of waves) for (const pressure of press) for (const lay of lays)
-    LADDER.push({ cap, wave, pressure, lay, maxRun: mr });
+    for (const minCar of (mins.length ? mins : [undefined]))
+      LADDER.push({ cap, wave, pressure, lay, maxRun: mr, ...(minCar === undefined ? {} : { minCar }) });
 }
 
 if (process.argv.includes("--scan1")) {
@@ -201,9 +206,7 @@ if (process.argv.includes("--pick")) {
   const byLv = {};
   for (const r of rows) (byLv[r.n] = byLv[r.n] || []).push(r);
 
-  console.log("Dung lai L2-46 theo level-design-guide + winratedesign1.csv\n");
-  console.log('lv  | tgt | win  | thua@ | ap | lop2 | xe | doi | up | ghi chu');
-  const out = {};
+  const chosen = {};
   for (const n of Object.keys(byLv).map(Number).sort((a, b) => a - b)) {
     const t = spec(n).target;
     // vòng 1: lọc theo winrate. vòng 2: chỉ những ứng viên đã gần target mới đo VỊ TRÍ THUA
@@ -219,17 +222,46 @@ if (process.argv.includes("--pick")) {
     // hoà nhau thì ÍT XE THẮNG (user: "giảm thiểu số xe để chơi đỡ mệt"). 0.25đ/xe: chênh 20 xe
     // ăn đứt chênh 5 điểm winrate — mà 5 điểm thì nằm gọn trong sai số ~8 điểm của thước.
     const key = (r) => score(r.win, r.lossAt, t) + r.cars * 0.25;
-    const best = pool.slice().sort((a, b) => key(a) - key(b) || a.ri - b.ri)[0];
-    const L = build(d[n], n, best.rung);
+    chosen[n] = pool.slice().sort((a, b) => key(a) - key(b) || a.ri - b.ri)[0];
+  }
+
+  // ---- NUỐT XE VỤN: chọn ngưỡng LỚN NHẤT mà winrate không xê dịch quá dung sai -------------
+  // Đuôi hàng toàn xe 1-10 slime là hệ quả của lịch bóc (ngoài dày, trong vụn), không phải ý đồ.
+  // Ngưỡng phải ĐO chứ không đoán: gộp xe cùng màu có thể làm xe đứng chờ → kẹt bay.
+  const MINCARS = (process.env.MINCARS || "0,10,18,28,40").split(",").map(Number);
+  const lvls = Object.keys(chosen).map(Number).sort((a, b) => a - b);
+  const jobs = [];
+  for (const n of lvls) {
+    // nấc đã tự mang ngưỡng (quét chung với winrate) thì GIỮ NGUYÊN, đừng quét đè lên
+    const fixed = chosen[n].rung.minCar;
+    for (const mc of (fixed == null ? MINCARS : [fixed])) jobs.push({ n, mc, L: build(d[n], n, { ...chosen[n].rung, minCar: mc }) });
+  }
+  console.error(`nuot xe vun: ${lvls.length} level x ${MINCARS.length} nguong = ${jobs.length} phep do`);
+  const gm = gradeBatch(jobs.map((j) => j.L), { n: N_B, tag: "mincar" });
+  const byMc = {};
+  jobs.forEach((j, i) => { (byMc[j.n] = byMc[j.n] || []).push({ mc: j.mc, win: gm[i].win, L: j.L }); });
+
+  console.log("Dung lai L2-46 theo level-design-guide + winratedesign1.csv\n");
+  console.log('lv  | tgt | win  | thua@ | ap | lop2 | xe | nho | doi | up | ghi chu');
+  const out = {};
+  for (const n of lvls) {
+    const t = spec(n).target, base = chosen[n];
+    const tol = Math.max(12, Math.abs(base.win - t));
+    const okMc = byMc[n].filter((v) => Math.abs(v.win - t) <= tol);
+    const pickMc = (okMc.length ? okMc : byMc[n].filter((v) => v.mc === 0)).slice(-1)[0];
+    const L = pickMc.L;
+    const lossAt = lossProfile(L).lossAt;
     const lay = L.layer2 ? L.layer2.filter((v) => v >= 0).length : 0;
     const tw = new Set(L.chests.filter((c) => c.pairId != null).map((c) => c.pairId)).size;
     const bu = L.chests.filter((c) => c.buried).length;
+    const tiny = L.chests.filter((c) => c.count < 10).length;
     const note = [];
-    if (Math.abs(best.win - t) > 10) note.push('winrate lech');
-    if (best.lossAt != null && (best.lossAt < 25 || best.lossAt > 75)) note.push('thua o met cuoi');
+    if (Math.abs(pickMc.win - t) > 10) note.push('winrate lech');
+    if (lossAt != null && (lossAt < 25 || lossAt > 75)) note.push('thua o met cuoi');
     console.log(
-      `L${String(n).padEnd(3)}| ${String(t).padStart(3)}% | ${String(best.win).padStart(3)}% |  ${String(best.lossAt ?? '-').padStart(3)}% |` +
-      ` ${String(best.rung.pressure)}  | ${String(lay).padStart(4)} | ${String(L.chests.length).padStart(2)} | ${String(tw).padStart(3)} | ${String(bu).padStart(2)} | ${note.join(', ')}`
+      `L${String(n).padEnd(3)}| ${String(t).padStart(3)}% | ${String(pickMc.win).padStart(3)}% |  ${String(lossAt ?? '-').padStart(3)}% |` +
+      ` ${String(base.rung.pressure)}  | ${String(lay).padStart(4)} | ${String(L.chests.length).padStart(2)} |` +
+      ` ${String(tiny).padStart(3)} | ${String(tw).padStart(3)} | ${String(bu).padStart(2)} | ${note.join(', ')}`
     );
     out[n] = L;
   }
