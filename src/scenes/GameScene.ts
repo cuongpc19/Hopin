@@ -2994,27 +2994,44 @@ export class GameScene extends Phaser.Scene {
       this.openSettings();
     });
 
-    // DEBUG "WIN" button (user 2026-07-27): instantly clear the level without playing —
-    // a test convenience sitting in the free strip between the gear and the level pill.
-    const winX = 105;
-    const winPill = this.add.graphics().setDepth(D);
-    winPill.fillStyle(0x5cb85c, 1); // xanh tươi đồng bộ với nút "+" (user 2026-08-02)
-    winPill.fillRoundedRect(winX - 30, y - 14, 60, 28, 14);
-    winPill.lineStyle(2, 0xffffff, 0.9);
-    winPill.strokeRoundedRect(winX - 30, y - 14, 60, 28, 14);
-    this.add
-      .text(winX, y, "WIN", { fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "15px", color: "#ffffff" })
-      .setOrigin(0.5)
-      .setDepth(D + 2);
-    const winHit = this.add
-      .rectangle(winX, y, 60, 28, 0xffffff, 0.001)
-      .setDepth(D + 3)
-      .setInteractive({ useHandCursor: true });
-    winHit.on("pointerdown", () => {
+    // ===== DEBUG STRIP — PREV · WIN · NEXT ==================================
+    // Test-only shortcuts (WIN user 2026-07-27; PREV/NEXT 2026-08-05). Deliberately TINY
+    // because they are temporary — user: "cho bé hẳn nhé (sau này sẽ bỏ)". To remove them
+    // later, delete this whole block; nothing else references it.
+    //
+    // They share the free strip between the gear (ends x≈51) and the level pill (starts
+    // x≈173 at "LEVEL 300", the widest label) — about 121px for all three. Hence 34×18 with
+    // 4px gaps: the row ends at x=165, leaving ~8px. A FOURTH button will not fit here.
+    const dbgW = 34, dbgH = 18;
+    const dbgBtn = (cx: number, label: string, fill: number, onTap: () => void) => {
+      const g = this.add.graphics().setDepth(D);
+      g.fillStyle(fill, 1);
+      g.fillRoundedRect(cx - dbgW / 2, y - dbgH / 2, dbgW, dbgH, dbgH / 2);
+      g.lineStyle(1.5, 0xffffff, 0.85);
+      g.strokeRoundedRect(cx - dbgW / 2, y - dbgH / 2, dbgW, dbgH, dbgH / 2);
+      this.add
+        .text(cx, y, label, { fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "10px", color: "#ffffff" })
+        .setOrigin(0.5)
+        .setDepth(D + 2);
+      this.add
+        .rectangle(cx, y, dbgW, dbgH + 8, 0xffffff, 0.001) // hit area taller than the pill — 18px is below a comfortable tap target
+        .setDepth(D + 3)
+        .setInteractive({ useHandCursor: true })
+        .on("pointerdown", () => {
+          this.tweens.add({ targets: [g], scale: 0.9, duration: 80, yoyo: true });
+          onTap();
+        });
+    };
+    // PREV/NEXT JUMP — they do NOT go through win(): no reward, no win screen, no progress
+    // unlock. startLevel() wipes the scene and resets won/lost, so both are safe to hit even
+    // while the win or lose overlay is up. PREV floors at level 1.
+    dbgBtn(72, "PREV", 0x8a7fd6, () => this.startLevel(Math.max(1, this.levelNum - 1)));
+    dbgBtn(110, "WIN", 0x5cb85c, () => { // xanh tươi đồng bộ với nút "+" (user 2026-08-02)
       if (this.won || this.lost) return;
-      this.tweens.add({ targets: [winPill], scale: 0.9, duration: 80, yoyo: true });
       this.win();
     });
+    dbgBtn(148, "NEXT", 0x3f7fd6, () => this.startLevel(this.levelNum + 1));
+    // ===== END DEBUG STRIP ==================================================
 
     // Level pill (center): red rounded pill with bold white text.
     const lvlText = this.add
