@@ -163,6 +163,28 @@ lossProfile(L, 40)                            // → { win, lossAt, nLoss }
 `lossAt` = **% BÀN đã ăn lúc thua** (trung vị). Không phải % số xe — một xe đi nhiều chuyến nên
 chia theo xe cho ra số >100%.
 
+### 2.4 `RAWTGT` — đặt mốc trên thang thô khi B và D cãi nhau
+
+`TGT` đặt mốc cho con số **đã hiệu chuẩn**, tức trung bình B/D rồi nắn. Nhược điểm: nó nhận cả
+những nấc mà hai mô hình nói ngược nhau. L25 ở bản `3f34889` đọc 58% — nghe hợp lý — nhưng đó là
+trung bình của **B=98 và D=48**, không mô hình nào tin con số ấy.
+
+`RAWTGT="15:40,20:40,25:40"` đòi **cả hai** cùng đứng gần mốc: khoảng cách = `max(|B−t|, |D−t|)`,
+nên nấc lệch pha giữa hai mô hình bị loại thẳng. `--scan1`/`--scan2` vì vậy ghi cả `b` và `d`
+vào bảng quét, không chỉ số đã nắn.
+
+⚠ **Thang thô không phải winrate người thật.** Quy đổi (`calib.mjs`):
+
+| B = D | 30 | 40 | 50 | 56 | 66 | 70 |
+|---|---|---|---|---|---|---|
+| người thật | 18% | 26% | 34% | **40%** | **50%** | 55% |
+
+Muốn level 40% thì đặt `RAWTGT` ~56, muốn 50% thì ~66. Đặt 40 là ra 26%.
+
+**Giá phải trả:** ràng buộc này chặt hơn hẳn, và có board không đáp ứng nổi. Quét 2184 nấc cho
+L15 (2026-08-07) chỉ tìm được **đúng một** nấc có cả B lẫn D trong ±12 quanh 40; L20 có 4, L25 có
+3. Nếu một level không có nấc nào lọt thì đó là tính chất của board, đừng nới mốc cho có.
+
 ---
 
 ## 3. Bộ dựng: 4 bước, theo đúng thứ tự

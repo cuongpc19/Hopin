@@ -52,6 +52,23 @@ const spec = (n) => {
   return n >= EASY_RUN.from && n <= EASY_RUN.to ? { ...s, target: EASY_RUN.target } : s;
 };
 
+// ---- target trên THANG THÔ:  RAWTGT="15:40,20:40,25:40" ----------------------------------
+// TGT đặt mốc cho con số ĐÃ HIỆU CHUẨN, tức trung bình của B và D rồi nắn. Nhược điểm: nó
+// nhận cả những nấc mà hai mô hình cãi nhau to (L15 bản 3f34889: B=48, D=77 — trung bình 63
+// trông đẹp, nhưng đó là trung bình của hai phỏng đoán trái ngược, không mô hình nào tin được).
+// RAWTGT đòi CẢ HAI cùng đứng gần mốc: khoảng cách = max(|B−t|, |D−t|), nên nấc lệch pha giữa
+// hai mô hình bị loại thẳng.
+// ⚠ ĐÂY KHÔNG PHẢI WINRATE NGƯỜI THẬT. B = D = 40 nắn ra 26% (§2.1). Đặt RAWTGT nghĩa là
+// đang nói chuyện trên thang bot, phải quy đổi trước khi so với target thiết kế.
+const RAWTGT = Object.fromEntries((process.env.RAWTGT || "").split(",").filter(Boolean)
+  .map((s) => s.split(":").map(Number)));
+const distTo = (r, n) => {
+  const rt = RAWTGT[n];
+  if (rt == null) return Math.abs(r.win - spec(n).target);
+  if (r.b == null || r.d == null) return Math.abs(r.win - rt);   // bảng quét cũ, chưa có b/d
+  return Math.max(Math.abs(r.b - rt), Math.abs(r.d - rt));
+};
+
 // SỐ XE là MỘT CHIỀU CỦA THANG, không phải hằng số. Guide §2e đã cảnh báo và đo 2026-08-05
 // xác nhận: gộp xe to KHÔNG trung tính — L16 bản gốc 130 xe nhỏ đạt 80%, dựng lại 25 xe to
 // rơi xuống 2% ở CẢ 24 nấc. Vài board chỉ giải được bằng xe nhỏ, nên để bộ chọn tự tìm.
@@ -153,7 +170,7 @@ export function build(src, n, rung) {
 // Level ≥90% thì THUA Ở ĐÂU CŨNG ĐƯỢC (user 2026-08-05): nó gần như không thua, nên mẫu thua
 // vừa bé vừa nhiễu, mà phạt vị trí lại kéo bộ chọn đi lệch khỏi target. Chỉ chấm vị trí thua
 // ở những level thật sự có người thua.
-const score = (win, lossAt, t) => Math.abs(win - t) + (t >= 90 || win >= 90 ? 0 : positionPenalty(lossAt));
+const score = (dist, win, lossAt, t) => dist + (t >= 90 || win >= 90 ? 0 : positionPenalty(lossAt));
 
 const d = readD();
 const nums = [];
@@ -191,7 +208,7 @@ if (process.argv.includes("--scan1")) {
   const Ls = nums.map((n) => build(d[n], n, EASIEST));
   console.error(`chang 1: ${nums.length} level, moi level 1 phuong an de nhat`);
   const g = gradeBatch(Ls, { n: N_B, tag: "s1" });
-  console.log(JSON.stringify(nums.map((n, i) => ({ n, ri: -1, win: g[i].win, cars: Ls[i].chests.length, rung: EASIEST }))));
+  console.log(JSON.stringify(nums.map((n, i) => ({ n, ri: -1, win: g[i].win, b: g[i].b, d: g[i].d, cars: Ls[i].chests.length, rung: EASIEST }))));
   process.exit(0);
 }
 
@@ -207,7 +224,9 @@ if (process.argv.includes("--scan2")) {
   });
   console.error(`chang 2 shard ${SHARD}: ${mine.length} level x ${LADDER.length} nac = ${jobs.length} phep do`);
   const g = gradeBatch(jobs.map((j) => j.L), { n: N_B, tag: "s2_" + SHARD });
-  console.log(JSON.stringify(jobs.map((j, i) => ({ n: j.n, ri: j.ri, win: g[i].win, cars: j.L.chests.length, rung: LADDER[j.ri] }))));
+  // ghi CẢ B và D, không chỉ số đã nắn: chọn theo thang thô (RAWTGT) cần hai con số riêng, và
+  // spread B−D là dấu hiệu nấc đó có đáng tin không.
+  console.log(JSON.stringify(jobs.map((j, i) => ({ n: j.n, ri: j.ri, win: g[i].win, b: g[i].b, d: g[i].d, cars: j.L.chests.length, rung: LADDER[j.ri] }))));
   process.exit(0);
 }
 
@@ -222,17 +241,17 @@ if (process.argv.includes("--pick")) {
     const t = spec(n).target;
     // vòng 1: lọc theo winrate. vòng 2: chỉ những ứng viên đã gần target mới đo VỊ TRÍ THUA
     // (guide §2b) — đo lossProfile cho cả thang thì phí, mà lấy thẳng thang thì mất tiêu chí.
-    const cands = byLv[n].slice().sort((a, b) => Math.abs(a.win - t) - Math.abs(b.win - t));
+    const cands = byLv[n].slice().sort((a, b) => distTo(a, n) - distTo(b, n));
     // Dung sai 12 điểm chứ không 8: sai số của chính thước đã ~8 điểm, nên trong dải đó winrate
     // không phân biệt nổi — để VỊ TRÍ THUA và SỐ XE quyết định thì đúng ý user hơn (độ khó dồn
     // vào khúc giữa, ít xe). Siết về 8 từng loại mất nấc L15 thua@51% để lấy nấc thua@89%.
-    let near = cands.filter((r) => Math.abs(r.win - t) <= 12);
-    if (!near.length) near = cands.filter((r) => Math.abs(r.win - t) <= 20);
+    let near = cands.filter((r) => distTo(r, n) <= 12);
+    if (!near.length) near = cands.filter((r) => distTo(r, n) <= 20);
     const pool = (near.length ? near : cands).slice(0, 14);
     for (const r of pool) r.lossAt = lossProfile(build(d[n], n, r.rung)).lossAt;
     // hoà nhau thì ÍT XE THẮNG (user: "giảm thiểu số xe để chơi đỡ mệt"). 0.25đ/xe: chênh 20 xe
     // ăn đứt chênh 5 điểm winrate — mà 5 điểm thì nằm gọn trong sai số ~8 điểm của thước.
-    const key = (r) => score(r.win, r.lossAt, t) + r.cars * 0.25;
+    const key = (r) => score(distTo(r, n), r.win, r.lossAt, t) + r.cars * 0.25;
     chosen[n] = pool.slice().sort((a, b) => key(a) - key(b) || a.ri - b.ri)[0];
   }
 
@@ -250,15 +269,15 @@ if (process.argv.includes("--pick")) {
   console.error(`nuot xe vun: ${lvls.length} level x ${MINCARS.length} nguong = ${jobs.length} phep do`);
   const gm = gradeBatch(jobs.map((j) => j.L), { n: N_B, tag: "mincar" });
   const byMc = {};
-  jobs.forEach((j, i) => { (byMc[j.n] = byMc[j.n] || []).push({ mc: j.mc, win: gm[i].win, L: j.L }); });
+  jobs.forEach((j, i) => { (byMc[j.n] = byMc[j.n] || []).push({ mc: j.mc, win: gm[i].win, b: gm[i].b, d: gm[i].d, L: j.L }); });
 
   console.log("Dung lai L2-46 theo level-design-guide + winratedesign1.csv\n");
-  console.log('lv  | tgt | win  | thua@ | ap | lop2 | xe | nho | doi | up | ghi chu');
+  console.log('lv  | tgt | win  |  B  |  D  | thua@ | ap | lop2 | xe | nho | doi | up | ghi chu');
   const out = {};
   for (const n of lvls) {
     const t = spec(n).target, base = chosen[n];
-    const tol = Math.max(12, Math.abs(base.win - t));
-    const okMc = byMc[n].filter((v) => Math.abs(v.win - t) <= tol);
+    const tol = Math.max(12, distTo(base, n));
+    const okMc = byMc[n].filter((v) => distTo(v, n) <= tol);
     const pickMc = (okMc.length ? okMc : byMc[n].filter((v) => v.mc === 0)).slice(-1)[0];
     const L = pickMc.L;
     const lossAt = lossProfile(L).lossAt;
@@ -267,10 +286,12 @@ if (process.argv.includes("--pick")) {
     const bu = L.chests.filter((c) => c.buried).length;
     const tiny = L.chests.filter((c) => c.count < 10).length;
     const note = [];
-    if (Math.abs(pickMc.win - t) > 10) note.push('winrate lech');
+    if (distTo(pickMc, n) > 10) note.push('winrate lech');
+    if (RAWTGT[n] != null && Math.abs(pickMc.b - pickMc.d) > 25) note.push('B/D cai nhau');
     if (lossAt != null && (lossAt < 25 || lossAt > 75)) note.push('thua o met cuoi');
     console.log(
-      `L${String(n).padEnd(3)}| ${String(t).padStart(3)}% | ${String(pickMc.win).padStart(3)}% |  ${String(lossAt ?? '-').padStart(3)}% |` +
+      `L${String(n).padEnd(3)}| ${String(RAWTGT[n] ?? t).padStart(3)}${RAWTGT[n] != null ? '~' : '%'} | ${String(pickMc.win).padStart(3)}% |` +
+      ` ${String(pickMc.b ?? '-').padStart(3)} | ${String(pickMc.d ?? '-').padStart(3)} |  ${String(lossAt ?? '-').padStart(3)}% |` +
       ` ${String(base.rung.pressure)}  | ${String(lay).padStart(4)} | ${String(L.chests.length).padStart(2)} |` +
       ` ${String(tiny).padStart(3)} | ${String(tw).padStart(3)} | ${String(bu).padStart(2)} | ${note.join(', ')}`
     );
