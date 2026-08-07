@@ -291,3 +291,29 @@ export function positionPenalty(lossAt) {
   // phải "level khó" — mà bộ chọn lại rất dễ vớ phải nấc đó vì winrate của nó trông vừa đẹp.
   return lossAt < 25 ? (25 - lossAt) * 2.5 : (lossAt - 75) * 1.2;
 }
+
+// ---- ĐÁ CỨNG DỌC CẠNH DƯỚI ----------------------------------------------------------------
+// user 2026-08-07: "slime đá thì nên để ở cạnh dưới thay vì trên đầu object". Các level đá cũ
+// (L43, L45) xây tường kín ở HÀNG 0-2, tức trên đỉnh tranh — nhìn như đá đè lên đầu nhân vật.
+//
+// ⚠ Cạnh dưới KHÔNG đối xứng với cạnh trên về mặt cơ chế: `slotEntryLaneIndex` cho xe vào từ
+// lane ĐÁY, nên tường kín ở đáy chặn ngay những lane gần chỗ xuất phát nhất. Vì vậy hàm này
+// mặc định CHỪA KHE: cứ `gapEvery` cột thì để trống một cột, cho tia vẫn lách vào được.
+// Đặt đá TRƯỚC khi dựng hàng xe — `orderByPeel` đọc board nên ghế tự khớp lại; đặt sau là hỏng
+// bất biến ghế=ô.
+export function addRocksBottom(L, nRows = 2, gapEvery = 5) {
+  const { cols, rows } = L;
+  let placed = 0;
+  for (let r = rows - nRows; r < rows; r++) {
+    if (r < 0) continue;
+    for (let c = 0; c < cols; c++) {
+      if (gapEvery > 0 && c % gapEvery === gapEvery - 1) continue;   // khe cho tia lách qua
+      const i = r * cols + c;
+      if (L.board[i] >= 90) continue;
+      L.board[i] = 90;                                              // HARD_ROCK
+      placed++;
+    }
+  }
+  if (L.layer2) for (let i = 0; i < L.layer2.length; i++) if (L.board[i] >= 90) L.layer2[i] = -1;
+  return placed;
+}

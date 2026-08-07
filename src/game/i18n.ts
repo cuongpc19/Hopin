@@ -119,6 +119,12 @@ const S: Record<string, { vi: string; en: string }> = {
     en: "These two are best buddies — they set off, park, and leave TOGETHER, always side by side. Tap one and BOTH roll out!",
   },
 
+  rockTitle: { vi: "Đá Cứng!", en: "Hard Rock!" },
+  rockDesc: {
+    vi: "Mấy tảng đá này KHÔNG ăn được — xe nào tới cũng phải chịu. Chúng còn CHẶN đường bắn, nên ô nào nấp sau đá thì phải dọn lối khác mà tới. Nhìn kỹ trước khi bấm nhé!",
+    en: "These rocks can NEVER be collected — no car can take them. They also BLOCK the line of fire, so anything hiding behind one has to be reached another way. Look before you tap!",
+  },
+
   // ---- tier banner + Home tags ----
   hardLevel: { vi: "🔥 HARD LEVEL", en: "🔥 HARD LEVEL" },
   superHardLevel: { vi: "💀 SUPER HARD", en: "💀 SUPER HARD" },

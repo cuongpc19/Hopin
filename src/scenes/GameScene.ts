@@ -772,13 +772,13 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(D + 2);
     const title = this.add
-      .text(GAME_W / 2, y0 + 116, "Đá Cứng!", {
+      .text(GAME_W / 2, y0 + 116, tr("rockTitle"), {
         fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "22px", color: "#6a4a12",
       })
       .setOrigin(0.5)
       .setDepth(D + 2);
     const desc = this.add
-      .text(GAME_W / 2, y0 + 176, "Đá cứng không phá được. Xe không gắp được slime nếu có đá cứng chắn đường — hãy chừa lối đi vòng qua nó nhé!", {
+      .text(GAME_W / 2, y0 + 176, tr("rockDesc"), {
         fontFamily: "Arial, sans-serif", fontSize: "14px", color: "#6a4a12", align: "center",
         wordWrap: { width: pw - 44 },
       })

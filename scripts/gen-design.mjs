@@ -278,7 +278,14 @@ if (process.argv.includes("--pick")) {
     const t = spec(n).target, base = chosen[n];
     const tol = Math.max(12, distTo(base, n));
     const okMc = byMc[n].filter((v) => distTo(v, n) <= tol);
-    const pickMc = (okMc.length ? okMc : byMc[n].filter((v) => v.mc === 0)).slice(-1)[0];
+    // Dự phòng phải là "nấc GẦN target nhất trong những cái đã đo", KHÔNG phải "cái có mc===0".
+    // Khi nấc thắng đã tự mang `minCar` thì byMc[n] chỉ có ĐÚNG một phần tử với mc đó; lọc
+    // mc===0 ra mảng rỗng → `.slice(-1)[0]` là undefined → TypeError, và cả lượt pick chết
+    // giữa chừng nên KHÔNG GHI GÌ. Lần 2026-08-07 nó bỏ dở 32 level normal mà chỉ báo lỗi ở
+    // cuối log; `check-seats.mjs` mới là thứ phát hiện ra (L72 lệch ghế).
+    const pickMc = okMc.length
+      ? okMc[okMc.length - 1]
+      : byMc[n].slice().sort((a, b) => distTo(a, n) - distTo(b, n))[0];
     const L = pickMc.L;
     const lossAt = lossProfile(L).lossAt;
     const lay = L.layer2 ? L.layer2.filter((v) => v >= 0).length : 0;
