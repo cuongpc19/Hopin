@@ -9,6 +9,7 @@ import {
   obstacleKind,
   softHp,
   isRemovable,
+  levelFingerprint,
   type Chest,
   type Level,
   type TrackKind,
@@ -355,6 +356,7 @@ export class GameScene extends Phaser.Scene {
   // accumulated in localStorage("hopin_playlog"). In the browser console: hopLog() to dump, hopLogClear().
   private playLog: { ev: string; [k: string]: unknown }[] = [];
   private playStart = 0;
+  private levelSig = "";
   private peakUsed = 0;
   // TRAY_BATCH: a batch (the whole set of bay cars) is currently out circling the ray.
   // While true the bays are locked (no staging) and the GO button is disabled; flips back
@@ -637,6 +639,11 @@ export class GameScene extends Phaser.Scene {
     this.twinLinkG = this.add.graphics().setDepth(DEPTH_TWINLINK);
 
     this.level = makeLevel(levelNum);
+    // Vân tay NỘI DUNG level, chốt NGAY LÚC NẠP (board bị ăn dần trong lúc chơi nên tính sau
+    // sẽ ra hash khác). Không có nó thì playlog chỉ ghi số level, mà một số level đã đổi nội
+    // dung 5 lần trong một ngày — hiệu chuẩn `winrate-cal.mjs --fit` ghép ván cũ với board mới
+    // và cho ra hệ số sai. Xem LEVEL-DESIGN.md §2.5.
+    this.levelSig = levelFingerprint(this.level);
     // SLAM = chế độ MẶC ĐỊNH cho MỌI level (user 2026-08-01): luôn bật trừ khi level ghi rõ
     // `slam: false` (opt-out cho level đặc biệt). Không cần gắn `slam:true` từng level nữa.
     this.slamMode = this.level.slam !== false; // lock mode (tap bay cars; slot locks while out)
@@ -6219,7 +6226,7 @@ export class GameScene extends Phaser.Scene {
     this.notePeak();
     const ms = Math.round((typeof performance !== "undefined" ? performance.now() : 0) - this.playStart);
     const launches = this.playLog.filter((e) => e.ev === "launch").length;
-    const summary = { lvl: this.levelNum, result, ms, launches, peakBays: this.peakUsed, bays: this.slots.length };
+    const summary = { lvl: this.levelNum, sig: this.levelSig, result, ms, launches, peakBays: this.peakUsed, bays: this.slots.length };
     this.postLog({ ev: "result", ...summary }); // dòng tổng kết (postLog gom nốt vào playLog)
     saveRun(this.levelNum, result, ms, this.playLog.slice() as never); // cất lại để chép ra sau
   }

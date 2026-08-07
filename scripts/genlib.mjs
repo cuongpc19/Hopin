@@ -371,3 +371,15 @@ export function buildBoard(img, lvl, K, size) {
     return { ok: false, exit: e.status ?? -1 };
   }
 }
+
+// ---- VÂN TAY NỘI DUNG LEVEL — BẢN SONG SINH của src/game/level.ts levelFingerprint() -------
+// Hai bên PHẢI ra cùng một chuỗi và cùng thuật toán (FNV-1a 32-bit, in base36). Sửa một bên
+// mà quên bên kia thì mọi ván trong log bị coi là lạc bản và `--fit` mất sạch dữ liệu.
+export function levelFingerprint(l) {
+  const s = `${l.cols}x${l.rows}|${l.board.join(",")}|`
+    + `${l.chests.map((c) => `${c.color}:${c.count}`).join(",")}|`
+    + `${l.layer2 ? l.layer2.join(",") : ""}`;
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return h.toString(36);
+}

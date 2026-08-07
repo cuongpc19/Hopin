@@ -19,7 +19,7 @@
 //   node scripts/winrate-cal.mjs --fit      → khớp lại hệ số từ playlog.jsonl
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
-import { readD } from "./genlib.mjs";
+import { readD, levelFingerprint } from "./genlib.mjs";
 import { measure2 } from "./simcore2.mjs";
 import { A_CAL, B_CAL, logit as lg, sigmoid as sig, cal } from "./calib.mjs";
 
@@ -28,18 +28,33 @@ import { A_CAL, B_CAL, logit as lg, sigmoid as sig, cal } from "./calib.mjs";
 const N = Number(process.env.N || 200);
 
 // ---- ván thật từ playlog.jsonl: {lvl: [thắng, tổng]} ------------------------------------
-function realGames() {
+// LỌC THEO VÂN TAY: từ 2026-08-07 mỗi dòng `result` mang `sig` = vân tay nội dung level lúc
+// chơi. Ván có sig KHÁC bản đang nằm trong designed.json bị loại — trước đây chúng vẫn được
+// đếm, nên `--fit` ghép ván trên board cũ với board mới (L15 đổi nội dung 5 lần trong một
+// ngày). Ván CŨ không có sig cũng bị loại khi `sigOf` được truyền vào: không biết nó thuộc
+// bản nào thì thà bỏ còn hơn nắn hệ số bằng dữ liệu lạc bản.
+// STALE=1 để đếm tất, dùng khi chỉ muốn xem thống kê thô chứ không hiệu chuẩn.
+function realGames(sigOf = null) {
   const out = {};
+  const keepStale = process.env.STALE === "1" || !sigOf;
   let txt;
   try { txt = fs.readFileSync("playlog.jsonl", "utf8"); } catch { return out; }
+  let dropped = 0, noSig = 0;
   for (const line of txt.trim().split(/\r?\n/)) {
     let r; try { r = JSON.parse(line); } catch { continue; }
     if (r == null || r.lvl == null || !r.result) continue;
     if (r.result !== "win" && r.result !== "lose") continue;   // bỏ ván về Home giữa chừng
+    if (!keepStale) {
+      const want = sigOf(r.lvl);
+      if (r.sig == null) { noSig++; continue; }
+      if (want != null && r.sig !== want) { dropped++; continue; }
+    }
     out[r.lvl] = out[r.lvl] || [0, 0];
     out[r.lvl][1]++;
     if (r.result === "win") out[r.lvl][0]++;
   }
+  if (!keepStale && (dropped || noSig))
+    console.error(`(bo ${noSig} van khong co van tay + ${dropped} van tren ban cu)`);
   return out;
 }
 
@@ -57,8 +72,8 @@ function modelD(nums) {
 
 // ---- --fit: khớp lại A_CAL/B_CAL từ ván thật ---------------------------------------------
 if (process.argv.includes("--fit")) {
-  const R = realGames();
   const d = readD();
+  const R = realGames((n) => (d[n] ? levelFingerprint(d[n]) : null));
   const ks = Object.keys(R).map(Number).filter((k) => d[k] && R[k][1] > 0).sort((a, b) => a - b);
   if (ks.length < 5) { console.log("Chua du van that de khop (can >=5 level)."); process.exit(0); }
   console.log(`Khop tren ${ks.reduce((a, k) => a + R[k][1], 0)} van / ${ks.length} level: L${ks.join(", L")}`);
@@ -88,18 +103,18 @@ const d = readD();
 const live = nums.filter((n) => d[n]);
 const B = {}; for (const n of live) B[n] = measure2(d[n], N);
 const D = modelD(live);
-const R = realGames();
+const R = realGames((n) => (d[n] ? levelFingerprint(d[n]) : null));   // chỉ ván ĐÚNG bản
+const RAll = realGames();                                            // mọi ván, kể cả bản cũ
 
 console.log(`Winrate da hieu chuan (B N=${N} + D, nan theo ${A_CAL.toFixed(3)}/${B_CAL.toFixed(3)})\n`);
-// ⚠ playlog.jsonl KHONG ghi phien ban level, nen cot "van that" co the la van tren BAN DUNG CU
-// neu level do da duoc dung lai sau do. Doi chieu voi git log cua src/levels/designed.json
-// truoc khi tin cot nay.
-console.log('lv  |  B  |  D  | tho | HIEU CHUAN | van that (co the la ban dung cu!)');
+// Cột "dung ban" chỉ đếm ván có vân tay khớp bản đang nằm trong designed.json — đây là cột
+// duy nhất được phép so với winrate. Cột "moi ban" gộp cả ván trên board cũ, để tham khảo.
+console.log('lv  |  B  |  D  | tho | HIEU CHUAN | van dung ban | moi ban (ke ca ban cu)');
+const pct = (r) => (r ? Math.round(100 * r[0] / r[1]) + "% (" + r[0] + "/" + r[1] + ")" : "-");
 for (const n of live) {
   const raw = (B[n] + (D[n] ?? B[n])) / 2;
-  const r = R[n];
   console.log(
     `L${String(n).padEnd(3)}| ${String(B[n]).padStart(3)} | ${String(D[n] ?? "-").padStart(3)} | ${String(Math.round(raw)).padStart(3)} |` +
-    `    ${String(cal(raw)).padStart(3)}%    | ${r ? Math.round(100 * r[0] / r[1]) + "% (" + r[0] + "/" + r[1] + ")" : "-"}`
+    `    ${String(cal(raw)).padStart(3)}%    | ${pct(R[n]).padStart(12)} | ${pct(RAll[n])}`
   );
 }

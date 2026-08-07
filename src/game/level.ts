@@ -215,3 +215,19 @@ export function makeLevel(levelNum = 1): Level {
   const chests = generateChests(board, levelNum);
   return { cols, rows, board, chests, track: "square" };
 }
+
+// ---- VÂN TAY NỘI DUNG LEVEL ---------------------------------------------------------------
+// playlog.jsonl chỉ ghi SỐ level, nên khi một level được dựng lại thì các ván cũ vẫn nằm đó
+// dưới cùng con số — `winrate-cal.mjs --fit` ghép ván trên board CŨ với board MỚI và nắn ra hệ
+// số sai. L15 đã đổi nội dung 5 lần trong ngày 2026-08-06/07 (146 → 63 → 19 → 15 → 22 xe).
+// Ghi thêm vân tay này vào dòng `result` để lọc được ván nào thuộc bản nào.
+// ⚠ `scripts/genlib.mjs levelFingerprint()` phải giữ ĐÚNG chuỗi chuẩn hoá và ĐÚNG thuật toán
+// này, nếu không hai bên ra hai hash khác nhau và bộ lọc coi như mọi ván đều lạc bản.
+export function levelFingerprint(l: Pick<Level, "cols" | "rows" | "board" | "chests" | "layer2">): string {
+  const s = `${l.cols}x${l.rows}|${l.board.join(",")}|`
+    + `${l.chests.map((c) => `${c.color}:${c.count}`).join(",")}|`
+    + `${l.layer2 ? l.layer2.join(",") : ""}`;
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return h.toString(36);
+}

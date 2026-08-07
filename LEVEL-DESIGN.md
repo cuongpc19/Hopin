@@ -175,17 +175,43 @@ vào bảng quét, không chỉ số đã nắn.
 
 ⚠ **Thang thô không phải winrate người thật.** Quy đổi (`calib.mjs`):
 
-| B = D | 30 | 40 | 50 | 56 | 66 | 70 |
-|---|---|---|---|---|---|---|
-| người thật | 18% | 26% | 34% | **40%** | **50%** | 55% |
+| B = D | 30 | 40 | **45** | 50 | 56 | 66 | 70 |
+|---|---|---|---|---|---|---|---|
+| người thật | 18% | 26% | **30%** | 34% | **40%** | **50%** | 55% |
 
-Muốn level 40% thì đặt `RAWTGT` ~56, muốn 50% thì ~66. Đặt 40 là ra 26%.
+Muốn level 30% thì đặt `RAWTGT` ~45, 40% thì ~56, 50% thì ~66. Đặt 40 là ra 26%.
 
 **Giá phải trả:** ràng buộc này chặt hơn hẳn, và có board không đáp ứng nổi. Quét 2184 nấc cho
 L15 (2026-08-07) chỉ tìm được **đúng một** nấc có cả B lẫn D trong ±12 quanh 40; L20 có 4, L25 có
 3. Nếu một level không có nấc nào lọt thì đó là tính chất của board, đừng nới mốc cho có.
 
 ---
+
+### 2.5 Vân tay level — vì sao `--fit` từng nắn bằng dữ liệu lạc bản
+
+`playlog.jsonl` chỉ ghi SỐ level. Khi một level được dựng lại, các ván cũ vẫn nằm đó dưới cùng
+con số, và `winrate-cal.mjs --fit` ghép chúng với board MỚI.
+
+Chuyện này không hiếm: **L15 đổi nội dung 5 lần trong hai ngày 2026-08-06/07** — 146 xe (39×39)
+→ 63 → 19 (25×25) → 15 → 22. User chơi thắng 4/5 ván rồi hỏi "sao winrate 21% mà tôi chơi dễ
+thế"; câu trả lời là 21% nói về bản 22 xe mà **chưa ai chơi**, còn bốn ván thắng kia là trên
+bản 15 và 19 xe.
+
+Từ 2026-08-07 mỗi dòng `result` mang thêm `sig` — vân tay FNV-1a của `cols×rows | board |
+chests | layer2`, chốt NGAY LÚC NẠP level (tính sau thì board đã bị ăn mất ô, ra hash khác).
+
+- `src/game/level.ts` → `levelFingerprint()`
+- `scripts/genlib.mjs` → **bản song sinh**, phải giữ đúng chuỗi chuẩn hoá và đúng thuật toán.
+  Sửa một bên mà quên bên kia thì mọi ván bị coi là lạc bản và `--fit` mất sạch dữ liệu.
+
+`--fit` giờ chỉ nhận ván có `sig` khớp bản đang nằm trong `designed.json`. Ván cũ không có
+`sig` cũng bị loại — không biết nó thuộc bản nào thì thà bỏ. Bảng của `winrate-cal.mjs` tách
+hai cột: *ván đúng bản* (cột duy nhất được phép so với winrate) và *mọi bản* để tham khảo.
+`STALE=1` để đếm tất.
+
+**Hệ quả thực tế:** hiệu chuẩn hiện tại (`A_CAL = −0.6626`, `B_CAL = 1.0070`) khớp trên 67 ván
+KHÔNG có vân tay, nên nó chỉ đáng tin ở mức "đã tốt hơn đoán bừa". Muốn hệ số sạch thì phải
+chơi lại một đợt trên bản hiện tại rồi mới `--fit`.
 
 ## 3. Bộ dựng: 4 bước, theo đúng thứ tự
 
