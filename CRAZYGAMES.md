@@ -293,10 +293,55 @@ grep -oE '(src|href)="/[^"]*"' dist/index.html            # phải RỖNG: cấm
 
 ### 5.3 Khai trong hồ sơ
 
-- [ ] Orientation = **portrait**, có hỗ trợ mobile
-- [ ] Bật **"Progress Save"** nếu đã làm giai đoạn 4 (không bật thì module `data` bị vô hiệu)
+- [x] **Game engine = HTML5** (không phải "Externally hosted (iframe)" — cái đó dành cho
+      game tự host rồi cho họ nhúng)
+- [ ] Orientation = **portrait**, tick **"The game supports mobile"**
+- [ ] Tick **"The game supports CrazyGames muting audio through SDK"** — đã cài, xem §2
+- [ ] KHÔNG tick "The game is an online game" (không có multiplayer)
+- [ ] "Does your game save progress?" → **"Yes, using the Data Module"**, và bật công tắc
+      **Progress Save** (không bật thì module `data` bị vô hiệu)
 - [ ] Mô tả game + phần điều khiển (**bắt buộc tiếng Anh** — bản nháp ở §5.4)
-- [ ] Ảnh bìa + video. Chưa có; `public/art/hopin2.jpg` (1656×1600) là nguồn tốt để cắt.
+- [x] Ba ảnh bìa: `store/crazygames/` (1920×1080 · 800×1200 · 800×800)
+- [ ] **Video preview — CHƯA CÓ, đây là thứ duy nhất còn chặn việc nộp**
+- [ ] URL Chính sách bảo mật (bắt buộc vì đã có telemetry — xem §6)
+
+⚠ **Đừng đặt link chính sách bảo mật TRONG game.** CrazyGames cấm link ra ngoài. URL đó chỉ
+điền vào biểu mẫu nộp, không nhúng vào giao diện game.
+
+## Giai đoạn 6 — Telemetry + Chính sách bảo mật
+
+**Telemetry** (`src/game/telemetry.ts`, xong 2026-08-08): mỗi ván kết thúc gửi một dòng về
+Firebase Realtime Database. Trước đó mọi ván đều mất trắng — `/api/hoplog` chỉ tồn tại trên
+máy dev nên bản deploy nào cũng 404 rồi bị `.catch` nuốt.
+
+- Chọn RTDB chứ không Firestore: RTDB nhận JSON thô qua REST → một `fetch`, **0 byte** thêm
+  vào bundle. Firestore REST buộc bọc kiểu từng trường, phải viết lớp chuyển đổi hai đầu.
+- Luật đã kiểm bằng thật: ghi `/runs` được · đọc `/runs` bị chặn · ghi chỗ khác bị chặn.
+  URL nằm lộ trong bundle (không tránh được với telemetry trình duyệt) nên phải khoá đọc.
+- Mỗi dòng mang **vân tay level** → `--fit` biết ván đó chơi trên bản game nào (§2.5).
+- Gửi từ MỌI nguồn kể cả localhost (user 2026-08-08). Tách ván test bằng trường `from`
+  (tên máy chủ) — lọc theo ngày không đủ vì sau khi ra mắt vẫn test song song.
+
+```bash
+FB_SECRET=<khoá> node scripts/pull-runs.mjs           # xem winrate thật
+FB_SECRET=<khoá> node scripts/pull-runs.mjs --write   # gộp vào playlog.jsonl
+node scripts/winrate-cal.mjs --fit                     # hiệu chuẩn lại thước
+```
+
+Khoá lấy ở Firebase console → ⚙ Project settings → Service accounts → Database secrets.
+**Đừng commit khoá đó.**
+
+**Chính sách bảo mật** (`site/privacy.html`, song ngữ): bắt buộc vì quy định của họ yêu cầu
+game thu thập dữ liệu ngoài sự kiện SDK phải có. Đặt trên **Firebase Hosting**, không phải
+GitHub Pages — Pages cần gói trả phí khi repo private.
+
+```bash
+npx firebase-tools login
+npx firebase-tools deploy --only hosting
+# → https://hop-n-7d1af.web.app/privacy.html
+```
+
+⚠ Còn chỗ trống `[your contact email here]` trong cả hai bản ngôn ngữ — **điền trước khi đăng**.
 
 ### 5.4 Bản nháp chữ cho hồ sơ
 
