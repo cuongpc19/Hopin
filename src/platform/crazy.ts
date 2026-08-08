@@ -55,6 +55,8 @@ declare global {
 let sdk: CrazySDK | null = null; // non-null only once init() has fully succeeded
 let hostLocale: string | null = null;
 let gaveUp = false; // budget expired — this session stays local-only, see boot()
+let loadingPending = false; // loadingStart() was asked for before the SDK existed
+let loadingDone = false; // …and whether loadingStop() has already been through
 
 // The site's own mute button, seeded from ?muteAudio=true so it can be exercised without
 // the SDK — that is the flag their QA uses to test this, and it also lets us check the
@@ -204,6 +206,16 @@ async function boot(): Promise<void> {
     // take the game down.
     setMuted(!!candidate.game.settings?.muteAudio);
     candidate.game.addSettingsChangeListener?.((s) => setMuted(!!s?.muteAudio));
+
+    // Replay the loadingStart that arrived before we existed. Skipped if loading already
+    // finished, since a Start after its own Stop would be worse than none.
+    if (loadingPending && !loadingDone) {
+      try {
+        candidate.game.loadingStart();
+      } catch {
+        /* kệ — chỉ là số liệu */
+      }
+    }
   } catch {
     sdk = null; // half-initialised is the same as absent
   }
@@ -227,10 +239,20 @@ export const crazyPlatform: Platform = {
     if (!sdk) gaveUp = true;
   },
 
+  // The splash asks for loadingStart BEFORE init() has resolved — it has to, that is the
+  // moment loading begins — so at that point there is no SDK to tell. Remember the request
+  // and replay it the instant the SDK is up (see boot()), otherwise they only ever receive
+  // a Stop with no Start and their loading-duration metric measures nothing. That metric
+  // feeds the "loads in under 10 seconds" benchmark Basic Launch is graded on.
   loadingStart() {
+    if (!sdk) {
+      loadingPending = true;
+      return;
+    }
     call((g) => g.loadingStart());
   },
   loadingStop() {
+    loadingDone = true;
     call((g) => g.loadingStop());
   },
 
