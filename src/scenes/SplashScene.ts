@@ -85,10 +85,20 @@ export class SplashScene extends Phaser.Scene {
       .setOrigin(0.5, 1)
       .setAlpha(0.85);
 
-    // Auto-advance to Home: show the loading screen for a MINIMUM of 3s, but if the
-    // Home assets ("load các level") are still loading past that, wait until they finish
-    // first — then fade to the picker. No tap required (user 2026-08-01).
-    const MIN_MS = 3000;
+    // Auto-advance to Home. No tap required (user 2026-08-01).
+    //
+    // On the web host the poster is pure cost: CrazyGames measures time-to-gameplay all
+    // the way to the gameplayStart call, and average session length and conversion are
+    // two of the three KPIs Basic Launch is graded on. A fixed 3s of poster buys nothing
+    // there — unlike the APK, where it hides real engine start-up — so that build leaves
+    // as soon as the Home art is actually ready (user 2026-08-08: "cho thấp nhất có thể").
+    //
+    // FLOOR is the shortest the poster may show. Not zero: a splash that appears and
+    // vanishes within a frame or two reads as a glitch, not as speed.
+    const FLOOR_MS = __TARGET__ === "crazy" ? 300 : 3000;
+    // Hard stop, so a slow network cannot strand the player on the poster. Matches the old
+    // behaviour exactly — 3s and then go, ready or not.
+    const CAP_MS = 3000;
     const t0 = this.time.now;
     let went = false;
     let loadDone = false;
@@ -106,7 +116,7 @@ export class SplashScene extends Phaser.Scene {
       const w = Phaser.Math.Clamp(prog.v, 0, 1) * (barW - 4);
       if (w > 0.5) { barFill.fillStyle(0xffd95e, 1); barFill.fillRoundedRect(barX + 2, barY + 2, w, barH - 4, (barH - 4) / 2); }
     };
-    this.tweens.add({ targets: prog, v: 0.92, duration: MIN_MS, ease: "Sine.out", onUpdate: drawBar });
+    this.tweens.add({ targets: prog, v: 0.92, duration: FLOOR_MS, ease: "Sine.out", onUpdate: drawBar });
 
     // Bring the host SDK up while the poster is on screen. Its init is asynchronous
     // and nothing may call into it before that resolves, so the loading screen is the
@@ -114,9 +124,15 @@ export class SplashScene extends Phaser.Scene {
     // script we simply carry on with a no-op host (CRAZYGAMES.md §2).
     platform.loadingStart();
     void platform.init().then(() => {
-      // The SDK knows the player's locale better than the browser does. Only takes
-      // effect if they have never picked a language themselves, and Home is still
-      // ~3s away, so it is built in the right language.
+      // Refine the language from the SDK's locale. This is only ever a refinement: i18n
+      // already picked a language synchronously at module load from navigator.language,
+      // so every screen is drawn in the right one from the first frame.
+      //
+      // It genuinely may land after Home is built now that the poster can be as short as
+      // 300ms — fetching their script takes longer than that. Text already drawn is not
+      // re-rendered, so on the rare boot where the SDK disagrees with the browser, Home
+      // stays in the browser's language until the next screen. Not worth holding up the
+      // game for: time-to-gameplay is a graded KPI and this is a cosmetic edge case.
       const l = platform.preferredLang();
       if (l) applyHostLang(l);
     });
@@ -137,12 +153,18 @@ export class SplashScene extends Phaser.Scene {
     this.load.image("star-icon", "art/star.png");
     this.load.image("start-slime", "art/slime-3.png");
     for (const b of ["add", "hand", "refresh", "magnet"]) this.load.image(`booster-${b}`, `art/booster-${b}.png`);
-    this.load.once("complete", () => { loadDone = true; });
+    // Leave the moment the Home art is ready, but never before FLOOR_MS. On a warm cache
+    // "complete" fires almost immediately, so the web build spends ~0.3s here instead of 3.
+    this.load.once("complete", () => {
+      loadDone = true;
+      const left = FLOOR_MS - (this.time.now - t0);
+      if (left <= 0) goHome();
+      else this.time.delayedCall(left, goHome);
+    });
     this.load.start();
-    // Splash CỐ ĐỊNH ~3s rồi sang Home — KHÔNG chờ load lâu hơn (user 2026-08-02: nhanh hơn,
-    // asset nhỏ đã cache + Home tự preload). Sau này load level thật sẽ chạy theo tiến độ thực.
-    this.time.delayedCall(MIN_MS, goHome);
-    void t0;
+    // Backstop: go anyway at CAP_MS even if the art never finished — same as the old
+    // fixed-3s behaviour, so a slow network is no worse off than before.
+    this.time.delayedCall(CAP_MS, goHome);
 
     // A tap only skips ahead once loading is DONE (so Home never shows unloaded art); it
     // also serves as the audio-unlock gesture browsers require.
