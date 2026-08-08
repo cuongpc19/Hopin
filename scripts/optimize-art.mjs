@@ -31,6 +31,28 @@ for (const junk of ["Notused", "level art", "tmp"]) {
   }
 }
 
+// Individual files the game never loads. They sit loose in the main art folders rather
+// than in the scrap folders above, so the sweep never caught them — 243KB of a build we
+// were about to hand to CrazyGames (checked 2026-08-08 by matching every shipped image
+// against the source; these five had no reference anywhere the game runs).
+//
+// ⚠ Removed from dist ONLY. The originals stay in public/art, and slime3D.png in
+// particular is still the SOURCE the Android launcher icons are cut from
+// (scripts/setup-android.mjs) — it just has no business inside the web build.
+for (const dead of [
+  "slime3D.png", // 3x3 sheet; only sliced offline by scripts/slice-slime3d.mjs
+  "slimeHome.png", // superseded; Home draws background2.jpg
+  "backgroundHome.png", // ditto
+  "coin/coin_complete.png",
+  "slime/tile-gloss.png",
+]) {
+  const p = join(ART_DIR, dead);
+  if (existsSync(p)) {
+    rmSync(p, { force: true });
+    console.log(`[optimize-art] removed dist/art/${dead} (khong dung toi)`);
+  }
+}
+
 function* walk(dir) {
   for (const name of readdirSync(dir)) {
     const p = join(dir, name);
