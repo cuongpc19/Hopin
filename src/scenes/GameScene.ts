@@ -15,7 +15,7 @@ import {
   type TrackKind,
 } from "../game/level";
 import { drawVoxelCube, voxelFrontOverlap, setVoxelFrontRatio } from "../render/voxelCube";
-import { glossyButton } from "../game/ui";
+import { tileButton } from "../game/ui";
 import { Audio } from "../game/audio";
 import { t as tr, tf as trf, getLang, setLang } from "../game/i18n";
 import { getLives, spendLife, showHeartsModal, canEnterLevel, graceMsLeft } from "../game/lives";
@@ -3356,11 +3356,11 @@ export class GameScene extends Phaser.Scene {
     const btnY = y0 + ph - 40;
     const cbw = 128;
     const cbh = 50;
-    for (const o of glossyButton(this, {
+    for (const o of tileButton(this, {
       x: GAME_W / 2 - 68, y: btnY, w: cbw, h: cbh, label: opts.cancelLabel,
       fill: 0x3a9a44, dark: 0x246e2c, depth: C + 2, onClick: closeConfirm,
     })) objs.push(o);
-    for (const o of glossyButton(this, {
+    for (const o of tileButton(this, {
       x: GAME_W / 2 + 68, y: btnY, w: cbw, h: cbh, label: opts.confirmLabel,
       fill: 0xe0483a, dark: 0xa5281e, depth: C + 2,
       onClick: () => { closeConfirm(); opts.onConfirm(); },
@@ -6434,7 +6434,7 @@ export class GameScene extends Phaser.Scene {
       sub?: string,
       coin?: boolean
     ) => {
-      for (const o of glossyButton(this, {
+      for (const o of tileButton(this, {
         x: bx, y: by, w: bw, h: bh, label, fill, dark: stroke,
         onClick, enabled, depth: 402, sub, coin,
       })) objs.push(o);
