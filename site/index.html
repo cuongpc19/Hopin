@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hop In!</title>
+    <style>
+      :root { --bg: #f7f4ec; --ink: #2c2a26; --soft: #6b665c; --accent: #3f8a3f; }
+      @media (prefers-color-scheme: dark) {
+        :root { --bg: #17181c; --ink: #e8e5dd; --soft: #a09a8e; --accent: #7bc47b; }
+      }
+      body {
+        margin: 0; min-height: 100vh; display: grid; place-items: center;
+        background: var(--bg); color: var(--ink); text-align: center;
+        font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+        padding: 24px;
+      }
+      h1 { font-size: 2rem; margin: 0 0 6px; }
+      p { color: var(--soft); margin: 0 0 24px; }
+      a { color: var(--accent); }
+    </style>
+  </head>
+  <body>
+    <!-- Deliberately minimal: this exists so the Hosting root is not a 404 next to the
+         privacy policy, which is the page that actually has to be public. A real landing
+         page can replace it whenever there is something to link to. -->
+    <main>
+      <h1>Hop In!</h1>
+      <p>Tap a car, send it round the track, and peel the picture.</p>
+      <p><a href="./privacy.html">Privacy Policy</a></p>
+    </main>
+  </body>
+</html>

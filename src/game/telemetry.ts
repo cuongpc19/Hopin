@@ -21,18 +21,21 @@ const ENDPOINT =
   "https://hop-n-7d1af-default-rtdb.asia-southeast1.firebasedatabase.app/runs.json";
 
 /**
- * Máy dev có làm bẩn dữ liệu không? Mặc định BỎ QUA localhost: mỗi lần tôi test một level
- * là một dòng rác lẫn vào số liệu người chơi thật, và chính chuyện lẫn dữ liệu lạc bản đã
- * từng làm hỏng một đợt hiệu chuẩn (LEVEL-DESIGN.md §2.5).
- * Thêm `?tele=1` vào URL để ép gửi khi cần thử chính đường ống này.
+ * MỌI ván đều gửi, kể cả từ localhost (user 2026-08-08: "để test cũng được").
+ *
+ * Đổi lại, mỗi dòng mang theo TÊN MÁY CHỦ nó được chơi trên đó, để lúc phân tích tách được
+ * ván test khỏi ván người chơi thật. Lọc lúc đọc chứ không chặn lúc ghi: chặn thì mất luôn,
+ * còn lọc thì lúc nào muốn xem cũng còn. `scripts/pull-runs.mjs` mặc định bỏ máy nhà ra khỏi
+ * bảng winrate, thêm `--all` để đếm tất.
+ *
+ * Vì sao phải tách: lẫn dữ liệu lạc bản chính là thứ đã làm hỏng một đợt hiệu chuẩn
+ * (LEVEL-DESIGN.md §2.5) — 67 ván không rõ thuộc bản nào.
  */
-function shouldSend(): boolean {
+function whereFrom(): string {
   try {
-    if (new URLSearchParams(location.search).get("tele") === "1") return true;
-    const h = location.hostname;
-    return h !== "localhost" && h !== "127.0.0.1" && !h.endsWith(".local");
+    return location.hostname || "?";
   } catch {
-    return false; // không có location thì không đoán mò
+    return "?";
   }
 }
 
@@ -44,14 +47,14 @@ function shouldSend(): boolean {
  * đúng lúc dễ mất dữ liệu nhất.
  */
 export function sendRun(summary: Record<string, unknown>) {
-  if (!shouldSend()) return;
   try {
     const row = {
       ...summary,
       dev: deviceId(), // mã ngẫu nhiên mỗi máy — KHÔNG phải danh tính, xem trang privacy
-      host: platform.name, // web | crazy | android — để tách nguồn lúc phân tích
+      host: platform.name, // web | crazy | android
+      from: whereFrom(), // tên máy chủ: localhost vs crazygames.com — xem whereFrom()
       build: __APP_BUILD__, // hash commit: biết dòng này thuộc bản game nào
-      at: Date.now(),
+      at: Date.now(), // lọc theo ngày là đủ để bỏ giai đoạn test trước khi ra mắt
     };
     void fetch(ENDPOINT, {
       method: "POST",

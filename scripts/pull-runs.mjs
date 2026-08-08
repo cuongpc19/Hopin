@@ -45,7 +45,10 @@ console.log(`Tai ve ${rows.length} van.`);
 const byHost = {};
 const byLevel = {};
 for (const r of rows) {
-  byHost[r.host ?? "?"] = (byHost[r.host ?? "?"] ?? 0) + 1;
+  // `from` = ten may chu (localhost / crazygames.com …). In ra de biet dong nao la van test:
+  // sau khi game ra mat thi loc theo ngay khong tach duoc nua, vi ta van test song song.
+  const src = `${r.host ?? "?"}@${r.from ?? "?"}`;
+  byHost[src] = (byHost[src] ?? 0) + 1;
   const k = r.lvl ?? "?";
   const b = (byLevel[k] = byLevel[k] ?? { n: 0, win: 0 });
   b.n++;
