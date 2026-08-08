@@ -51,6 +51,8 @@ const S: Record<string, { vi: string; en: string }> = {
   plusBay: { vi: "+1 ô chờ!", en: "+1 waiting bay!" },
   queueEmptyT: { vi: "Hàng xe trống rồi", en: "Queue is empty" },
   grabHint: { vi: "Bốc xe bất kỳ — nên chọn xe hàng dưới!", en: "Grab any car — a back-row one is best!" },
+  grabPickTitle: { vi: "Chọn xe để bốc", en: "Pick a car to grab" },
+  grabPickHint: { vi: "Xem được 5 hàng — bấm xe bạn cần", en: "All 5 rows — tap the car you need" },
   twinGrabAll: {
     vi: "Xe nối dây: cả nhóm phải ở 2 hàng đầu mới bốc cùng được",
     en: "Linked cars: all must be in the first 2 rows to grab them together",

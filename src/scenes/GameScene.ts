@@ -15,6 +15,7 @@ import {
   type TrackKind,
 } from "../game/level";
 import { drawVoxelCube, voxelFrontOverlap, setVoxelFrontRatio } from "../render/voxelCube";
+import { glossyButton } from "../game/ui";
 import { Audio } from "../game/audio";
 import { t as tr, tf as trf, getLang, setLang } from "../game/i18n";
 import { getLives, spendLife, showHeartsModal } from "../game/lives";
@@ -380,7 +381,6 @@ export class GameScene extends Phaser.Scene {
   private slotWarnActive = false; // waiting bays all full → flashing a warning
   private slotWarnG: Phaser.GameObjects.GameObject[] = []; // the pulsing warning rings
   private handMode = false; // "Hand" booster armed: next tap picks a queued car
-  private handMarks: Phaser.GameObjects.GameObject[] = []; // rings recommending back-row cars
   private magnetMode = false; // "Magnet" booster armed: next tap picks a slime colour
   private boosterCounts: Record<string, number> = {}; // owned count per booster key
   private boostBar?: Phaser.GameObjects.Container; // holds the booster buttons (rebuilt on change)
@@ -617,7 +617,6 @@ export class GameScene extends Phaser.Scene {
     this.slotWarnActive = false; // children.removeAll() already destroyed old rings
     this.slotWarnG = [];
     this.handMode = false;
-    this.handMarks = [];
     this.magnetMode = false;
     this.keys = [];
     this.track = [];
@@ -2401,86 +2400,113 @@ export class GameScene extends Phaser.Scene {
     }
     if (!this.affordToast("hand")) return;
     this.handMode = true;
-    this.toast(tr("grabHint"));
-    this.armHandHighlight(); // spotlight the buried back-row cars (Grab's best use)
-    // Defer one tick so the tap that pressed the booster button isn't captured.
-    this.time.delayedCall(40, () =>
-      this.input.once("pointerdown", (p: Phaser.Input.Pointer) => {
-        this.handMode = false;
-        this.clearHandHighlight();
-        let best: ChestView | null = null;
-        let bestD = Infinity;
-        for (const v of queued) {
-          if (!v.container.scene) continue;
-          const d = Phaser.Math.Distance.Between(p.worldX, p.worldY, v.container.x, v.container.y);
-          if (d < bestD) {
-            bestD = d;
-            best = v;
-          }
-        }
-        if (best && bestD < 40) {
-          // Linked cars leave together, so EVERY member must be reachable near the
-          // front: each must sit in the first two rows (row 1 or 2). Any deeper and the
-          // group can't be pulled out cleanly — reject WITHOUT spending the booster.
-          if (best.group) {
-            const ok = this.groupOf(best).every((m) => {
-              const p = this.findInInventory(m);
-              return p && p.r <= 1;
-            });
-            if (!ok) {
-              this.toast(tr("twinGrabAll"));
-              return;
-            }
-          }
-          this.consumeBooster("hand");
-          this.launchQueued(best);
-          this.toast(tr("carSent"));
-        } else {
-          this.toast(tr("cancelled"));
-        }
-      }),
-    );
+    // ZOOMED PICKER (user 2026-08-08): the lineup only shows 2 rows, so "grab ANY car"
+    // was a promise the player couldn't act on — the useful buried car was off-screen.
+    // Same shape as the Magnet picker: freeze, blow the queue up over 5 rows, confirm.
+    this.time.delayedCall(40, () => {
+      if (this.won || this.lost) { this.handMode = false; return; }
+      this.openGrabPicker();
+    });
   }
 
-  // Un-dim and ring the SECOND-row cars while Grab is armed, so the player sees the
-  // cars they can pull straight up. (Only row 2 — row 3+ is barely visible, so
-  // ringing it just looks like clutter peeking out.)
-  private armHandHighlight() {
-    this.clearHandHighlight();
-    for (const col of this.invColumns) {
-      const r = 1;
-      if (col.length > r) {
-        const v = col[r];
-        if (!v.container.scene) continue;
-        v.container.setAlpha(1); // un-dim so the buried car stands out
-        const s = this.chestSize * 0.98;
-        const ring = this.add
-          .rectangle(v.container.x, v.container.y, s, s)
-          .setStrokeStyle(3, 0xffe14a, 0.95)
-          .setDepth(25);
-        this.tweens.add({
-          targets: ring,
-          alpha: { from: 0.95, to: 0.3 },
-          scale: { from: 1, to: 1.12 },
-          duration: 480,
-          yoyo: true,
-          repeat: -1,
-          ease: "Sine.inOut",
-        });
-        this.handMarks.push(ring);
+  // The zoomed Grab picker — 5 queue rows at a readable size. Every exit funnels
+  // through one closeAll() so handMode/tutPaused can't stick half-set (the same bug
+  // class that bit the Magnet picker).
+  private openGrabPicker() {
+    this.tutPaused = true;
+    const D = 400;
+    const lanes = Math.max(1, this.invColumns.length);
+    const ROWS = 5;
+    const zc = Math.min((GAME_W - 56) / lanes, (GAME_H * 0.52) / ROWS);
+    const bw = lanes * zc, bh = ROWS * zc;
+    const headH = 62, footH = 84;
+    const pw = Math.max(bw + 28, 300), ph = headH + bh + footH;
+    const x0 = GAME_W / 2 - pw / 2, y0 = GAME_H / 2 - ph / 2;
+    const bx = GAME_W / 2 - bw / 2, by = y0 + headH;
+
+    const dim = this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0x000000, 0.6).setDepth(D).setInteractive();
+    const panel = this.add.graphics().setDepth(D + 1);
+    panel.fillStyle(0xf7edd0, 1); panel.fillRoundedRect(x0, y0, pw, ph, 18);
+    panel.lineStyle(4, 0x8a5a12, 1); panel.strokeRoundedRect(x0, y0, pw, ph, 18);
+    const title = this.add.text(GAME_W / 2, y0 + 24, tr("grabPickTitle"), {
+      fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "19px", color: "#6a4a12",
+    }).setOrigin(0.5).setDepth(D + 2);
+    const info = this.add.text(GAME_W / 2, y0 + 46, tr("grabPickHint"), {
+      fontFamily: "Arial, sans-serif", fontSize: "13px", color: "#6a4a12",
+    }).setOrigin(0.5).setDepth(D + 2);
+
+    // One sprite per queued car, laid out exactly like the lineup: column = its
+    // queue column, row = how deep it sits in that column.
+    const slots: { v: ChestView; img: Phaser.GameObjects.Image; txt: Phaser.GameObjects.Text; cx: number; cy: number }[] = [];
+    this.invColumns.forEach((col, ci) => {
+      col.slice(0, ROWS).forEach((v, ri) => {
+        if (!v.container.scene) return;
+        const cx = bx + ci * zc + zc / 2, cy = by + ri * zc + zc / 2;
+        const key = v.chest.kind === "hammer" ? "car-hammer" : v.chest.kind === "wood" ? "car-wood" : `car-${v.chest.color}`;
+        const hasTrim = this.textures.get(key).has("trim");
+        const img = (hasTrim ? this.add.image(cx, cy, key, "trim") : this.add.image(cx, cy, key)).setDepth(D + 2);
+        img.setScale((zc * 0.82) / (img.height || zc));
+        const txt = this.add.text(cx, cy, String(v.chest.count), {
+          fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: `${Math.round(zc * 0.3)}px`,
+          color: TEXT_LIGHT, stroke: "#00000099", strokeThickness: 3,
+        }).setOrigin(0.5).setDepth(D + 3);
+        slots.push({ v, img, txt, cx, cy });
+      });
+    });
+
+    const ring = this.add.graphics().setDepth(D + 4);
+    const btnY = y0 + ph - 30;
+    const no = this.add.text(GAME_W / 2 - 66, btnY, tr("cancel"), {
+      fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "15px", color: "#ffffff",
+      backgroundColor: "#b0392b", padding: { x: 16, y: 8 },
+    }).setOrigin(0.5).setDepth(D + 5).setInteractive({ useHandCursor: true });
+    const yes = this.add.text(GAME_W / 2 + 60, btnY, tr("use"), {
+      fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "15px", color: "#ffffff",
+      backgroundColor: "#3a8a3a", padding: { x: 22, y: 8 },
+    }).setOrigin(0.5).setDepth(D + 5).setInteractive({ useHandCursor: true }).setVisible(false);
+    const hit = this.add.rectangle(bx + bw / 2, by + bh / 2, bw + zc, bh + zc, 0x000000, 0.001)
+      .setDepth(D + 4).setInteractive();
+
+    const objs: Phaser.GameObjects.GameObject[] = [dim, panel, title, info, ring, no, yes, hit,
+      ...slots.map((s) => s.img), ...slots.map((s) => s.txt)];
+    let closed = false;
+    const closeAll = () => {
+      if (closed) return;
+      closed = true;
+      objs.forEach((o) => o.destroy());
+      this.handMode = false;
+      this.tutPaused = false;
+    };
+
+    let pick: ChestView | null = null;
+    hit.on("pointerdown", (p: Phaser.Input.Pointer) => {
+      let best: typeof slots[number] | null = null, bestD = (zc * 0.75) ** 2;
+      for (const s of slots) {
+        const d = (p.worldX - s.cx) ** 2 + (p.worldY - s.cy) ** 2;
+        if (d < bestD) { bestD = d; best = s; }
       }
-    }
+      if (!best) return;
+      pick = best.v;
+      ring.clear(); ring.lineStyle(4, 0xffd34d, 1);
+      ring.strokeRoundedRect(best.cx - zc * 0.45, best.cy - zc * 0.45, zc * 0.9, zc * 0.9, 8);
+      // Linked cars leave together, so the whole group must sit in the first two rows.
+      const group = pick.group ? this.groupOf(pick) : null;
+      const ok = !group || group.every((m) => { const q = this.findInInventory(m); return q && q.r <= 1; });
+      yes.setVisible(ok);
+      if (!ok) this.toast(tr("twinGrabAll"));
+    });
+    yes.on("pointerdown", () => {
+      const chosen = pick;
+      closeAll();
+      if (!chosen || !chosen.container.scene) return;
+      this.consumeBooster("hand");
+      this.launchQueued(chosen);
+      this.toast(tr("carSent"));
+    });
+    no.on("pointerdown", () => { closeAll(); this.toast(tr("cancelled")); });
+    dim.on("pointerdown", () => { closeAll(); this.toast(tr("cancelled")); });
   }
 
-  private clearHandHighlight() {
-    if (this.handMarks.length === 0) return;
-    for (const o of this.handMarks) {
-      this.tweens.killTweensOf(o);
-      o.destroy();
-    }
-    this.handMarks = [];
-    this.layoutInventory(false); // restore the dimmed back rows
-  }
 
   // Launch a specific queued car regardless of its position in the column.
   private launchQueued(view: ChestView) {
@@ -2529,15 +2555,28 @@ export class GameScene extends Phaser.Scene {
     if (!this.affordToast("refresh")) return;
     this.consumeBooster("refresh");
 
-    // build an assignment that covers each remaining colour at least once, then
-    // fills the rest at random; shuffle so positions are random.
+    // Build an assignment that covers each remaining colour at least once, then fills
+    // the rest in proportion to how much of each colour is still on the board.
+    const remainCount = new Map<number, number>();
+    for (let i = 0; i < this.keys.length; i++) {
+      if (!this.keys[i]) continue;
+      const c = this.level.board[i];
+      if (c >= 0 && c < HARD_ROCK) remainCount.set(c, (remainCount.get(c) ?? 0) + 1);
+    }
     const assign: number[] = [];
     for (const c of left) if (assign.length < cars.length) assign.push(c);
-    while (assign.length < cars.length) assign.push(left[Math.floor(Math.random() * left.length)]);
-    for (let i = assign.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [assign[i], assign[j]] = [assign[j], assign[i]];
-    }
+    const byShare = left.slice().sort((a, b) => (remainCount.get(b) ?? 0) - (remainCount.get(a) ?? 0));
+    for (let i = 0; assign.length < cars.length; i++) assign.push(byShare[i % byShare.length]);
+
+    // ORDER THE RESULT, don't scatter it (user 2026-08-08: "shuffle xong thì xe xếp
+    // đẹp, dễ chơi hơn"). The old code shuffled positions at random, so the booster
+    // could hand back a queue no better than the one it replaced — and on the level
+    // that teaches it, that made the tutorial land or miss on a coin flip.
+    // Colours a car can eat RIGHT NOW go to the front; ties break on how much of the
+    // colour is left, so the front cars are both edible and worth sending.
+    this.computeReachableColors();
+    const rank = (c: number) => (this.reachableColors.has(c) ? 0 : 1) * 1e6 - (remainCount.get(c) ?? 0);
+    assign.sort((a, b) => rank(a) - rank(b));
     // Focus the lineup area (dim around it + a glowing frame) so the player's eye
     // goes there, then recolour the cars in a slow left-to-right "flip" wave.
     const total = (cars.length - 1) * 90 + 440;
@@ -3231,29 +3270,19 @@ export class GameScene extends Phaser.Scene {
     }
 
     const closeConfirm = () => objs.forEach((o) => o.destroy());
-    const stay = this.add
-      .text(GAME_W / 2 - 70, y0 + ph - 44, opts.cancelLabel, {
-        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "16px", color: "#ffffff",
-        backgroundColor: "#3a8a3a", padding: { x: 24, y: 9 },
-      })
-      .setOrigin(0.5)
-      .setDepth(C + 2)
-      .setInteractive({ useHandCursor: true });
-    const go = this.add
-      .text(GAME_W / 2 + 66, y0 + ph - 44, opts.confirmLabel, {
-        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "15px", color: "#ffffff",
-        backgroundColor: "#c8392e", padding: { x: 18, y: 9 },
-      })
-      .setOrigin(0.5)
-      .setDepth(C + 2)
-      .setInteractive({ useHandCursor: true });
-    objs.push(stay, go);
-    stay.on("pointerdown", closeConfirm);
+    const btnY = y0 + ph - 40;
+    const cbw = 128;
+    const cbh = 50;
+    for (const o of glossyButton(this, {
+      x: GAME_W / 2 - 68, y: btnY, w: cbw, h: cbh, label: opts.cancelLabel,
+      fill: 0x3a9a44, dark: 0x246e2c, depth: C + 2, onClick: closeConfirm,
+    })) objs.push(o);
+    for (const o of glossyButton(this, {
+      x: GAME_W / 2 + 68, y: btnY, w: cbw, h: cbh, label: opts.confirmLabel,
+      fill: 0xe0483a, dark: 0xa5281e, depth: C + 2,
+      onClick: () => { closeConfirm(); opts.onConfirm(); },
+    })) objs.push(o);
     dim.on("pointerdown", closeConfirm);
-    go.on("pointerdown", () => {
-      closeConfirm();
-      opts.onConfirm();
-    });
   }
 
   private openSettings() {
@@ -6289,7 +6318,9 @@ export class GameScene extends Phaser.Scene {
       heroBottom = heroCY + 20;
     }
 
-    // Small rounded button helper (rounded rect + centred label + invisible hit zone).
+    // Glossy button helper (shared src/game/ui.ts) — gradient body, sheen, drop shadow,
+    // tap bounce, and an optional coin price pill. `sub`/`coin` add the "PLAY ON / 900 🪙"
+    // look; omit them for a plain label.
     const mkBtn = (
       bx: number,
       by: number,
@@ -6299,35 +6330,14 @@ export class GameScene extends Phaser.Scene {
       fill: number,
       stroke: number,
       onClick: () => void,
-      enabled = true
+      enabled = true,
+      sub?: string,
+      coin?: boolean
     ) => {
-      const r = Math.min(bh / 2, 16);
-      const g = this.add.graphics().setDepth(402);
-      g.fillStyle(enabled ? fill : 0xa39b8c, 1);
-      g.fillRoundedRect(bx - bw / 2, by - bh / 2, bw, bh, r);
-      g.lineStyle(3, enabled ? stroke : 0x7d766a, 1);
-      g.strokeRoundedRect(bx - bw / 2, by - bh / 2, bw, bh, r);
-      objs.push(g);
-      objs.push(
-        this.add
-          .text(bx, by, label, {
-            fontFamily: "Arial, sans-serif",
-            fontStyle: "bold",
-            fontSize: `${Math.round(bh * 0.34)}px`,
-            color: enabled ? "#ffffff" : "#efe9dc",
-            align: "center",
-          })
-          .setOrigin(0.5)
-          .setDepth(403)
-      );
-      if (enabled) {
-        const hit = this.add
-          .rectangle(bx, by, bw, bh, 0xffffff, 0.001)
-          .setDepth(404)
-          .setInteractive({ useHandCursor: true });
-        hit.on("pointerdown", onClick);
-        objs.push(hit);
-      }
+      for (const o of glossyButton(this, {
+        x: bx, y: by, w: bw, h: bh, label, fill, dark: stroke,
+        onClick, enabled, depth: 402, sub, coin,
+      })) objs.push(o);
     };
 
     const closeAll = () => objs.forEach((o) => o.destroy());
@@ -6348,25 +6358,28 @@ export class GameScene extends Phaser.Scene {
       if (pending) this.parkChest(pending); // (classic/tray only) the overflow car goes into the new bay
     };
 
-    // Revive button (green, big). Greyed out with a hint if the player can't pay.
+    // Revive button (green, big) with a coin price pill. Greyed out with a hint if the
+    // player can't pay.
     const btnW = Math.min(GAME_W - 70, 280);
-    const reviveY = heroBottom + 34;
+    const reviveY = heroBottom + 40;
     mkBtn(
       cx,
       reviveY,
       btnW,
-      60,
-      canAfford ? trf("reviveBtn", { n: REVIVE_COST }) : trf("reviveNeed", { n: REVIVE_COST }),
+      68,
+      canAfford ? "REVIVE" : trf("reviveNeed", { n: REVIVE_COST }),
       0x35b04a,
       0x1f7d33,
       revive,
+      canAfford,
+      canAfford ? String(REVIVE_COST) : undefined,
       canAfford
     );
 
     // Secondary row: replay this level | back to Home.
     const gap = 14;
     const bw = (btnW - gap) / 2;
-    const by = reviveY + 60;
+    const by = reviveY + 70;
     // A failed attempt costs ONE heart the moment the player gives up on it — retry or
     // walk away, same price (user 2026-08-02). Revive is the paid escape and is free of
     // hearts, so the deduction lives here on the two "attempt over" buttons. Both confirm
