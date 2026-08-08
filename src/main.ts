@@ -49,7 +49,17 @@ try {
 // fragments of a 2x one every frame at 60fps — the main reason the game ran hot
 // on retina Macs/iPhones. 2x is already pixel-crisp on those screens, so this
 // roughly halves GPU fill for no visible quality loss.
-const DPR = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
+//
+// devicePixelRatio ALONE is not enough (user 2026-08-08: cars looked blurry on a big
+// screen). On an ordinary non-retina monitor it reports 1, so the canvas was built at
+// 480x768 and then FIT stretched it up to fill a ~1000px-tall browser window — a 1.3x
+// upscale of every sprite. Flat tiles survive that; the cars' faces and numbers do not.
+// Phones and retina Macs never showed it because they already report 2.
+//
+// So take whichever is larger: the device's pixel density, or how much FIT is about to
+// stretch us. The 2x ceiling still holds, so the heat fix above is untouched.
+const stretch = window.innerHeight > 0 ? window.innerHeight / GAME_H : 1;
+const DPR = Math.max(1, Math.min(Math.max(window.devicePixelRatio || 1, stretch), 2));
 
 new Phaser.Game({
   type: Phaser.AUTO,
