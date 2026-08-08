@@ -15,7 +15,7 @@ export type Lang = "vi" | "en";
 //      (user 2026-08-02)
 let lang: Lang = platform.preferredLang() ?? "vi";
 try {
-  const saved = localStorage.getItem("pf_lang");
+  const saved = platform.storage.getItem("pf_lang");
   if (saved === "en" || saved === "vi") lang = saved;
 } catch {
   /* storage unavailable — stay on the default */
@@ -35,7 +35,7 @@ export function getLang(): Lang {
  */
 export function applyHostLang(l: Lang) {
   try {
-    if (localStorage.getItem("pf_lang")) return; // player chose — leave them alone
+    if (platform.storage.getItem("pf_lang")) return; // player chose — leave them alone
   } catch {
     /* no storage — treat as "never chose" */
   }
@@ -45,7 +45,7 @@ export function applyHostLang(l: Lang) {
 export function setLang(l: Lang) {
   lang = l;
   try {
-    localStorage.setItem("pf_lang", l);
+    platform.storage.setItem("pf_lang", l);
   } catch {
     /* ignore */
   }

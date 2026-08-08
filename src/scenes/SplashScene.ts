@@ -98,6 +98,8 @@ export class SplashScene extends Phaser.Scene {
     const FLOOR_MS = __TARGET__ === "crazy" ? 300 : 3000;
     // Hard stop, so a slow network cannot strand the player on the poster. Matches the old
     // behaviour exactly — 3s and then go, ready or not.
+    // ⚠ Kept ABOVE the SDK's own load timeout (crazy.ts LOAD_TIMEOUT_MS = 2500) so init
+    // always settles first; see the note there for what breaks if that ordering flips.
     const CAP_MS = 3000;
     const t0 = this.time.now;
     let went = false;
@@ -123,6 +125,7 @@ export class SplashScene extends Phaser.Scene {
     // only sane place for it. Never throws and never blocks: if an adblocker eats the
     // script we simply carry on with a no-op host (CRAZYGAMES.md §2).
     platform.loadingStart();
+    let storageReady = __TARGET__ !== "crazy"; // only the SDK host has anything to wait for
     void platform.init().then(() => {
       // Refine the language from the SDK's locale. This is only ever a refinement: i18n
       // already picked a language synchronously at module load from navigator.language,
@@ -135,6 +138,13 @@ export class SplashScene extends Phaser.Scene {
       // game for: time-to-gameplay is a graded KPI and this is a cosmetic edge case.
       const l = platform.preferredLang();
       if (l) applyHostLang(l);
+
+      // Saved progress is only readable now: their SDK preloads the player's data during
+      // init, so anything read before this is the local copy. Home shows gold, hearts and
+      // level progress the moment it opens — showing the local copy and then writing over
+      // it would cost a player their real save, so Home waits.
+      storageReady = true;
+      maybeGo();
     });
 
     const goHome = () => {
@@ -153,13 +163,18 @@ export class SplashScene extends Phaser.Scene {
     this.load.image("star-icon", "art/star.png");
     this.load.image("start-slime", "art/slime-3.png");
     for (const b of ["add", "hand", "refresh", "magnet"]) this.load.image(`booster-${b}`, `art/booster-${b}.png`);
-    // Leave the moment the Home art is ready, but never before FLOOR_MS. On a warm cache
-    // "complete" fires almost immediately, so the web build spends ~0.3s here instead of 3.
-    this.load.once("complete", () => {
-      loadDone = true;
+    // Leave as soon as BOTH the Home art and the saved progress are ready, but never
+    // before FLOOR_MS. On a warm cache with a healthy SDK that is a few hundred ms, versus
+    // the old flat 3 seconds.
+    const maybeGo = () => {
+      if (went || !loadDone || !storageReady) return;
       const left = FLOOR_MS - (this.time.now - t0);
       if (left <= 0) goHome();
       else this.time.delayedCall(left, goHome);
+    };
+    this.load.once("complete", () => {
+      loadDone = true;
+      maybeGo();
     });
     this.load.start();
     // Backstop: go anyway at CAP_MS even if the art never finished — same as the old

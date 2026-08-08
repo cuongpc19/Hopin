@@ -5,6 +5,7 @@
 // All calls are defensive no-ops if Web Audio is unavailable, and everything is
 // gated behind unlock() (browsers block audio until a user gesture).
 
+import { platform } from "../platform";
 const NOTE: Record<string, number> = {
   C2: 65.41, E2: 82.41, F2: 87.31, G2: 98.0, A2: 110.0,
   C3: 130.81, D3: 146.83, E3: 164.81, F3: 174.61, G3: 196.0, A3: 220.0, B3: 246.94,
@@ -25,8 +26,8 @@ class GameAudio {
   constructor() {
     // Restore saved preferences.
     try {
-      this.musicOn = localStorage.getItem("pf_music") !== "0";
-      this.sfxOn = localStorage.getItem("pf_sfx") !== "0";
+      this.musicOn = platform.storage.getItem("pf_music") !== "0";
+      this.sfxOn = platform.storage.getItem("pf_sfx") !== "0";
     } catch {
       /* storage unavailable */
     }
@@ -65,7 +66,7 @@ class GameAudio {
   setMusic(on: boolean) {
     this.musicOn = on;
     try {
-      localStorage.setItem("pf_music", on ? "1" : "0");
+      platform.storage.setItem("pf_music", on ? "1" : "0");
     } catch {
       /* ignore */
     }
@@ -77,7 +78,7 @@ class GameAudio {
   setSfx(on: boolean) {
     this.sfxOn = on;
     try {
-      localStorage.setItem("pf_sfx", on ? "1" : "0");
+      platform.storage.setItem("pf_sfx", on ? "1" : "0");
     } catch {
       /* ignore */
     }

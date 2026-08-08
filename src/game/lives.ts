@@ -32,7 +32,7 @@ const GRACE_KEY = "pf_grace_until";
 
 function readInt(key: string, dflt: number): number {
   try {
-    const v = parseInt(localStorage.getItem(key) ?? "", 10);
+    const v = parseInt(platform.storage.getItem(key) ?? "", 10);
     return Number.isFinite(v) ? v : dflt;
   } catch {
     return dflt;
@@ -40,8 +40,8 @@ function readInt(key: string, dflt: number): number {
 }
 function write(lives: number, nextAt: number) {
   try {
-    localStorage.setItem("pf_lives", String(lives));
-    localStorage.setItem("pf_lives_next", String(nextAt));
+    platform.storage.setItem("pf_lives", String(lives));
+    platform.storage.setItem("pf_lives_next", String(nextAt));
   } catch {
     /* storage unavailable — hearts stay in-memory for this session */
   }
@@ -127,7 +127,7 @@ export function canEnterLevel(): boolean {
   const until = readInt(GRACE_KEY, 0);
   if (until > 0) return Date.now() < until; // opened before: still good, or spent
   try {
-    localStorage.setItem(GRACE_KEY, String(Date.now() + GRACE_MS));
+    platform.storage.setItem(GRACE_KEY, String(Date.now() + GRACE_MS));
   } catch {
     return true; // no storage — let them play rather than strand them on a wall
   }

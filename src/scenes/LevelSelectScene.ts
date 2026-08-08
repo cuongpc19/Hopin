@@ -3,6 +3,7 @@ import { t as tr, tf as trf, getLang, setLang, type Lang } from "../game/i18n";
 import { getLives, msToNextHeart, formatCountdown, showHeartsModal, canEnterLevel } from "../game/lives";
 import { GAME_W, GAME_H, setPageBackground } from "./GameScene";
 import { levelDifficulty } from "../game/level";
+import { platform } from "../platform";
 import {
   getProgress,
   isEventUnlocked,
@@ -214,7 +215,7 @@ export class LevelSelectScene extends Phaser.Scene {
       getGold: () => this.gold,
       spendGold: (n) => {
         this.gold = Math.max(0, this.gold - n);
-        try { localStorage.setItem("pf_gold", String(this.gold)); } catch { /* ignore */ }
+        try { platform.storage.setItem("pf_gold", String(this.gold)); } catch { /* ignore */ }
         this.goldTx?.setText(String(this.gold));
       },
       onChanged: () => this.refreshHearts(),
@@ -234,14 +235,14 @@ export class LevelSelectScene extends Phaser.Scene {
   // Level-select mode: false = Sequential (default), true = Any Level.
   private freeSelect(): boolean {
     try {
-      return localStorage.getItem("pf_freeselect") === "1";
+      return platform.storage.getItem("pf_freeselect") === "1";
     } catch {
       return false;
     }
   }
   private setFreeSelect(v: boolean) {
     try {
-      localStorage.setItem("pf_freeselect", v ? "1" : "0");
+      platform.storage.setItem("pf_freeselect", v ? "1" : "0");
     } catch {
       /* storage unavailable */
     }
@@ -804,7 +805,7 @@ export class LevelSelectScene extends Phaser.Scene {
 
   private readInt(key: string, fallback: number): number {
     try {
-      return parseInt(localStorage.getItem(key) ?? String(fallback), 10) || fallback;
+      return parseInt(platform.storage.getItem(key) ?? String(fallback), 10) || fallback;
     } catch {
       return fallback;
     }

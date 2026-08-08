@@ -21,6 +21,7 @@
 // TEMP DISABLE (user 2026-07-26): flip to true to bring the Lucky Clover event back.
 // isEventUnlocked() short-circuits on this, so the Home banner + win-screen clover awards
 // all switch off from one place. No data is wiped — progress/clovers are kept for re-enable.
+import { platform } from "../platform";
 export const EVENT_ENABLED = false;
 export const EVENT_UNLOCK_LEVEL = 12; // event opens once this level is beaten
 export const EVENT_NAME = "Lucky Clover";
@@ -88,14 +89,14 @@ export function rewardLabel(r: EventReward): string {
 
 function readInt(key: string, def = 0): number {
   try {
-    return parseInt(localStorage.getItem(key) ?? "", 10) || def;
+    return parseInt(platform.storage.getItem(key) ?? "", 10) || def;
   } catch {
     return def;
   }
 }
 function writeInt(key: string, v: number) {
   try {
-    localStorage.setItem(key, String(v));
+    platform.storage.setItem(key, String(v));
   } catch {
     /* storage unavailable */
   }

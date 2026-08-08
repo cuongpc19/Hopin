@@ -14,11 +14,29 @@
 export type Target = "web" | "crazy" | "android";
 export type Lang = "vi" | "en";
 
+/** The slice of the localStorage API the game actually uses. */
+export interface StorageLike {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+}
+
 export interface Platform {
   readonly name: Target;
 
   /** Bring the host SDK up. Always await before using anything else. Never throws. */
   init(): Promise<void>;
+
+  /**
+   * Where saved progress lives. Same shape as localStorage, and localStorage IS the
+   * implementation everywhere except CrazyGames, where it routes to their data module
+   * so a player's progress follows them between devices.
+   *
+   * ⚠ Only trustworthy once init() has resolved — their SDK preloads the player's saved
+   * data during init, so a read before that returns the local copy, not the cloud one.
+   * SplashScene holds the game on the loading screen until then for exactly this reason.
+   */
+  readonly storage: StorageLike;
 
   // --- Engagement signals -------------------------------------------------
   // On CrazyGames these are not decoration: they are how the host knows when it
@@ -54,10 +72,40 @@ export interface Platform {
   readonly graceOnEmpty: boolean;
 }
 
+/**
+ * Plain localStorage, with the try/catch every call needs: Safari private mode throws on
+ * write, and some embeds block storage entirely. Losing a save is bad; taking the game
+ * down with an exception is worse.
+ */
+export const localStorageShim: StorageLike = {
+  getItem(key) {
+    try {
+      return localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  },
+  setItem(key, value) {
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+      /* blocked or full — this session just won't persist */
+    }
+  },
+  removeItem(key) {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      /* ignore */
+    }
+  },
+};
+
 /** Shared no-op base so each host only overrides what it actually changes. */
 export const noopPlatform: Platform = {
   name: "web",
   async init() {},
+  storage: localStorageShim,
   loadingStart() {},
   loadingStop() {},
   gameplayStart() {},

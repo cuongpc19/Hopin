@@ -9,6 +9,7 @@
 // thẳng vào file đó là mấy công cụ phát lại (scripts/replay2.mjs, simcore.mjs trips) dùng
 // được ngay, không phải chuyển đổi gì.
 
+import { platform } from "../platform";
 const KEY_RUNS = "pf_runs";       // các ván đã lưu
 const KEY_DEVICE = "pf_device";   // mã thiết bị (sinh một lần cho mỗi máy/trình duyệt)
 const MAX_RUNS = 300;             // giữ lại bấy nhiêu ván gần nhất (localStorage ~5MB)
@@ -27,10 +28,10 @@ export interface PlayRun {
 // Mã thiết bị ngắn, dễ đọc để phân biệt điện thoại với máy tính: "M-4F7A".
 export function deviceId(): string {
   try {
-    let d = localStorage.getItem(KEY_DEVICE);
+    let d = platform.storage.getItem(KEY_DEVICE);
     if (!d) {
       d = "M-" + Math.floor(Math.random() * 0xffff).toString(16).toUpperCase().padStart(4, "0");
-      localStorage.setItem(KEY_DEVICE, d);
+      platform.storage.setItem(KEY_DEVICE, d);
     }
     return d;
   } catch {
@@ -46,7 +47,7 @@ function today(): string {
 
 export function loadRuns(): PlayRun[] {
   try {
-    const raw = localStorage.getItem(KEY_RUNS);
+    const raw = platform.storage.getItem(KEY_RUNS);
     const arr = raw ? JSON.parse(raw) : [];
     return Array.isArray(arr) ? arr : [];
   } catch {
@@ -63,7 +64,7 @@ export function saveRun(lvl: number, result: "win" | "lose", ms: number, ev: Log
   if (runs.length > MAX_RUNS) runs = runs.slice(runs.length - MAX_RUNS);
   for (let attempt = 0; attempt < 6; attempt++) {
     try {
-      localStorage.setItem(KEY_RUNS, JSON.stringify(runs));
+      platform.storage.setItem(KEY_RUNS, JSON.stringify(runs));
       return;
     } catch {
       runs = runs.slice(Math.ceil(runs.length / 2)); // hết chỗ → bỏ nửa cũ, thử lại
@@ -73,7 +74,7 @@ export function saveRun(lvl: number, result: "win" | "lose", ms: number, ev: Log
 }
 
 export function clearRuns() {
-  try { localStorage.removeItem(KEY_RUNS); } catch { /* ignore */ }
+  try { platform.storage.removeItem(KEY_RUNS); } catch { /* ignore */ }
 }
 
 export interface DayGroup { day: string; dev: string; runs: number; wins: number; levels: number[] }

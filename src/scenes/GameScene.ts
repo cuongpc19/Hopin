@@ -541,10 +541,10 @@ export class GameScene extends Phaser.Scene {
     // One-time wallet reset: everyone starts from a clean 0 (wipes leftover dev/test
     // gold once). After this, wins accumulate normally and the balance persists.
     try {
-      if (localStorage.getItem("pf_gold_reset") !== "1") {
+      if (platform.storage.getItem("pf_gold_reset") !== "1") {
         this.gold = 0;
         this.saveGold();
-        localStorage.setItem("pf_gold_reset", "1");
+        platform.storage.setItem("pf_gold_reset", "1");
       }
     } catch {
       /* storage unavailable — just run with the in-memory balance */
@@ -614,12 +614,12 @@ export class GameScene extends Phaser.Scene {
     this.levelNum = levelNum;
     // Remember WHERE the player currently is (not just the highest ever reached) so the
     // Home picker features THIS level, not the max unlocked one (user 2026-07-31).
-    try { localStorage.setItem("pf_current", String(levelNum)); } catch { /* storage unavailable */ }
+    try { platform.storage.setItem("pf_current", String(levelNum)); } catch { /* storage unavailable */ }
     this.playLog = []; this.playStart = (typeof performance !== "undefined" ? performance.now() : 0); this.peakUsed = 0;
     this.boardSeq = 0; this.lastStuckProbe = 0; // fresh board → fresh futility bookkeeping
-    try { this.guideMode = localStorage.getItem("hopin_guide") === "1"; } catch { this.guideMode = false; }
+    try { this.guideMode = platform.storage.getItem("hopin_guide") === "1"; } catch { this.guideMode = false; }
     this.guideKey = ""; this.guideHand = undefined; this.guideRing = undefined; this.guidePlan = null; this.guidePlanWinning = false; this.guidePlanNonce = 0;
-    if (typeof window !== "undefined") { (window as any).hopLog = () => console.log(localStorage.getItem("hopin_playlog") || "[]"); (window as any).hopLogClear = () => localStorage.removeItem("hopin_playlog"); }
+    if (typeof window !== "undefined") { (window as any).hopLog = () => console.log(platform.storage.getItem("hopin_playlog") || "[]"); (window as any).hopLogClear = () => platform.storage.removeItem("hopin_playlog"); }
     // "start" streams AFTER makeLevel below (needs this.level); see the postLog("start") call there.
     this.children.removeAll();
     this.tweens.killAll();
@@ -787,9 +787,9 @@ export class GameScene extends Phaser.Scene {
     const hasRock = this.level.board.some((v) => isObstacle(v) && obstacleKind(v) === "hard");
     if (!hasRock) return false;
     let shown = false;
-    try { shown = localStorage.getItem("pf_rock_intro") === "1"; } catch { /* storage unavailable */ }
+    try { shown = platform.storage.getItem("pf_rock_intro") === "1"; } catch { /* storage unavailable */ }
     if (shown) return false;
-    try { localStorage.setItem("pf_rock_intro", "1"); } catch { /* storage unavailable */ }
+    try { platform.storage.setItem("pf_rock_intro", "1"); } catch { /* storage unavailable */ }
     this.showHardRockIntroModal();
     return true;
   }
@@ -903,13 +903,13 @@ export class GameScene extends Phaser.Scene {
     if (this.carGroups.length === 0) return;
     let shown = false;
     try {
-      shown = localStorage.getItem("pf_twin_intro") === "1";
+      shown = platform.storage.getItem("pf_twin_intro") === "1";
     } catch {
       /* storage unavailable */
     }
     if (shown) return;
     try {
-      localStorage.setItem("pf_twin_intro", "1");
+      platform.storage.setItem("pf_twin_intro", "1");
     } catch {
       /* storage unavailable */
     }
@@ -2238,7 +2238,7 @@ export class GameScene extends Phaser.Scene {
 
   private loadBoosterCounts(): Record<string, number> {
     try {
-      const raw = localStorage.getItem("pf_boost_counts");
+      const raw = platform.storage.getItem("pf_boost_counts");
       return raw ? (JSON.parse(raw) as Record<string, number>) : {};
     } catch {
       return {};
@@ -2246,14 +2246,14 @@ export class GameScene extends Phaser.Scene {
   }
   private saveBoosterCounts() {
     try {
-      localStorage.setItem("pf_boost_counts", JSON.stringify(this.boosterCounts));
+      platform.storage.setItem("pf_boost_counts", JSON.stringify(this.boosterCounts));
     } catch {
       /* storage unavailable */
     }
   }
   private giftedSet(): Set<string> {
     try {
-      return new Set((localStorage.getItem("pf_boost_gifted") ?? "").split(",").filter(Boolean));
+      return new Set((platform.storage.getItem("pf_boost_gifted") ?? "").split(",").filter(Boolean));
     } catch {
       return new Set();
     }
@@ -2281,7 +2281,7 @@ export class GameScene extends Phaser.Scene {
     }
     if (!changed) return;
     try {
-      localStorage.setItem("pf_boost_gifted", [...gifted].join(","));
+      platform.storage.setItem("pf_boost_gifted", [...gifted].join(","));
     } catch {
       /* storage unavailable */
     }
@@ -3232,7 +3232,7 @@ export class GameScene extends Phaser.Scene {
 
   private loadGold(): number {
     try {
-      return parseInt(localStorage.getItem("pf_gold") ?? "0", 10) || 0;
+      return parseInt(platform.storage.getItem("pf_gold") ?? "0", 10) || 0;
     } catch {
       return 0;
     }
@@ -3240,7 +3240,7 @@ export class GameScene extends Phaser.Scene {
 
   private saveGold() {
     try {
-      localStorage.setItem("pf_gold", String(this.gold));
+      platform.storage.setItem("pf_gold", String(this.gold));
     } catch {
       /* storage unavailable — keep gold in-memory only */
     }
@@ -3259,11 +3259,11 @@ export class GameScene extends Phaser.Scene {
   // given level is beaten, so replaying an easy level can't farm gold.
   private claimFirstClearReward(levelNum: number): boolean {
     try {
-      const raw = localStorage.getItem("pf_rewarded") ?? "[]";
+      const raw = platform.storage.getItem("pf_rewarded") ?? "[]";
       const done = new Set<number>(JSON.parse(raw));
       if (done.has(levelNum)) return false;
       done.add(levelNum);
-      localStorage.setItem("pf_rewarded", JSON.stringify([...done]));
+      platform.storage.setItem("pf_rewarded", JSON.stringify([...done]));
       return true;
     } catch {
       return true; // storage unavailable — just award it (in-memory session)
@@ -3273,8 +3273,8 @@ export class GameScene extends Phaser.Scene {
   // Bump the saved progress so the level picker unlocks/star-marks levels.
   private unlockProgress(reached: number) {
     try {
-      const cur = parseInt(localStorage.getItem("pf_progress") ?? "1", 10) || 1;
-      if (reached > cur) localStorage.setItem("pf_progress", String(reached));
+      const cur = parseInt(platform.storage.getItem("pf_progress") ?? "1", 10) || 1;
+      if (reached > cur) platform.storage.setItem("pf_progress", String(reached));
     } catch {
       /* storage unavailable — progress just won't persist */
     }
@@ -3422,7 +3422,7 @@ export class GameScene extends Phaser.Scene {
     // Step guide (user 2026-07-30): default OFF; when ON the game points at the next move.
     mkToggle(rowYs[1], tr("guide"), () => this.guideMode, (v) => {
       this.guideMode = v;
-      try { localStorage.setItem("hopin_guide", v ? "1" : "0"); } catch { /* ignore */ }
+      try { platform.storage.setItem("hopin_guide", v ? "1" : "0"); } catch { /* ignore */ }
       if (!v) this.clearGuidePointer();
     });
 
@@ -3592,8 +3592,8 @@ export class GameScene extends Phaser.Scene {
   // but re-arms the one-time tutorials & intros so the fresh run explains itself again.
   private resetProgress() {
     try {
-      localStorage.setItem("pf_progress", "1");
-      localStorage.setItem("pf_current", "1");
+      platform.storage.setItem("pf_progress", "1");
+      platform.storage.setItem("pf_current", "1");
       [
         "pf_twin_intro", "pf_rock_intro", // one-time intros explain themselves again
         // Starting over means a FRESH WALLET AND EMPTY BOOSTERS (user 2026-08-02). Carrying
@@ -3601,7 +3601,7 @@ export class GameScene extends Phaser.Scene {
         // and boosters would sit unlocked long before the levels that are meant to grant them.
         "pf_gold", "pf_boost_gifted", "pf_boost_counts",
         "pf_rewarded", // per-level first-clear payouts, so the gold can be earned again
-      ].forEach((k) => localStorage.removeItem(k));
+      ].forEach((k) => platform.storage.removeItem(k));
       // Hearts (pf_lives) are deliberately NOT reset: refilling them would turn "start over"
       // into a way to skip the wait.
     } catch { /* storage unavailable — nothing to reset */ }
@@ -6505,7 +6505,7 @@ export class GameScene extends Phaser.Scene {
     this.unlockProgress(next); // record on the picker that this level is beaten
     // Ô LEVEL ở Home đọc pf_current — thắng xong phải trỏ NGAY sang level kế, kẻo về Home
     // vẫn thấy level vừa thắng (pf_current xưa nay chỉ được ghi lúc BẮT ĐẦU chơi; user 2026-08-03).
-    try { localStorage.setItem("pf_current", String(next)); } catch { /* storage unavailable */ }
+    try { platform.storage.setItem("pf_current", String(next)); } catch { /* storage unavailable */ }
 
     // Lucky Clover event: award clovers + auto-grant any milestone rewards reached.
     // Unlocks after Level 10; every win from then on collects clovers (2 for a clean
@@ -7056,9 +7056,9 @@ export class GameScene extends Phaser.Scene {
     this.boosterCounts[key] = (this.boosterCounts[key] ?? 0) + 1;
     this.saveBoosterCounts();
     try {
-      const g = new Set((localStorage.getItem("pf_boost_gifted") ?? "").split(",").filter(Boolean));
+      const g = new Set((platform.storage.getItem("pf_boost_gifted") ?? "").split(",").filter(Boolean));
       g.add(key);
-      localStorage.setItem("pf_boost_gifted", [...g].join(","));
+      platform.storage.setItem("pf_boost_gifted", [...g].join(","));
     } catch {
       /* storage unavailable */
     }

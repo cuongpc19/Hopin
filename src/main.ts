@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { GameScene, GAME_W, GAME_H } from "./scenes/GameScene";
 import { SplashScene } from "./scenes/SplashScene";
 import { LevelSelectScene } from "./scenes/LevelSelectScene";
+import { platform } from "./platform";
 
 // Hâm nóng font game (Lilita One — banner LEVEL COMPLETE!/CLAIM): canvas Phaser chỉ dùng
 // được font đã nạp xong; load sớm để tới màn thắng đầu tiên chữ đã đúng font.
@@ -22,11 +23,15 @@ try {
     const r = p.get("reset");
     if (!r) return;
     if (r === "all") {
+      // Keys are ENUMERATED from localStorage — platform.storage has no key listing, and
+      // the local copy always mirrors the host store, so it is a complete list. Removal
+      // goes through platform.storage so the host's copy is cleared too; wiping only the
+      // local one would let the cloud save reappear on the next load.
       Object.keys(localStorage)
         .filter((k) => k.startsWith("pf_"))
-        .forEach((k) => localStorage.removeItem(k));
+        .forEach((k) => platform.storage.removeItem(k));
     } else {
-      ["pf_boost_gifted", "pf_boost_counts", "pf_twin_intro"].forEach((k) => localStorage.removeItem(k));
+      ["pf_boost_gifted", "pf_boost_counts", "pf_twin_intro"].forEach((k) => platform.storage.removeItem(k));
     }
     p.delete("reset");
     const qs = p.toString();

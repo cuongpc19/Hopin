@@ -9,10 +9,16 @@
 // script outright, and their rules require the game to stay playable regardless.
 // So: a load timeout, every call guarded, and no throw ever escapes.
 
-import { browserLang, noopPlatform, type Lang, type Platform } from "./base";
+import { browserLang, localStorageShim, noopPlatform, type Lang, type Platform, type StorageLike } from "./base";
 
 const SDK_URL = "https://sdk.crazygames.com/crazygames-sdk-v3.js";
-const LOAD_TIMEOUT_MS = 5000; // an adblocked script never fires onerror — don't hang the splash
+// An adblocked script can hang without ever firing onerror, so give up rather than wait.
+//
+// ⚠ This MUST stay below SplashScene's CAP_MS (3000). Splash holds Home until init settles
+// so that saved progress is read from their store, but the cap releases it regardless. If
+// the cap fired first, Home would open on the LOCAL copy and the next write would mirror
+// those stale values over the player's real cloud save.
+const LOAD_TIMEOUT_MS = 2500;
 
 interface CrazyGame {
   loadingStart(): void;
@@ -25,6 +31,8 @@ interface CrazySDK {
   init(): Promise<void>;
   game: CrazyGame;
   user: { systemInfo?: { locale?: string; device?: { type?: string } } };
+  /** Same shape as localStorage, synchronous, but only populated once init() resolves. */
+  data: StorageLike;
 }
 declare global {
   interface Window {
@@ -70,9 +78,47 @@ function call(fn: (g: CrazyGame) => void) {
   }
 }
 
+// Saved progress. Their data module carries the player's saves between devices, but it is
+// only populated after init() — SplashScene waits for that before any screen reads a save.
+//
+// Reads prefer the SDK once it is up; writes go to BOTH. Mirroring costs nothing and means
+// a session where their SDK fails still finds a current local copy to fall back on, instead
+// of a snapshot frozen at whenever the SDK last worked.
+const crazyStorage: StorageLike = {
+  getItem(key) {
+    if (sdk) {
+      try {
+        return sdk.data.getItem(key);
+      } catch {
+        /* fall through to the local copy */
+      }
+    }
+    return localStorageShim.getItem(key);
+  },
+  setItem(key, value) {
+    localStorageShim.setItem(key, value);
+    if (!sdk) return;
+    try {
+      sdk.data.setItem(key, value);
+    } catch {
+      /* the local write already landed */
+    }
+  },
+  removeItem(key) {
+    localStorageShim.removeItem(key);
+    if (!sdk) return;
+    try {
+      sdk.data.removeItem(key);
+    } catch {
+      /* the local removal already landed */
+    }
+  },
+};
+
 export const crazyPlatform: Platform = {
   ...noopPlatform,
   name: "crazy",
+  storage: crazyStorage,
 
   async init() {
     if (!(await loadScript())) return; // stays a no-op platform, game plays on
@@ -81,6 +127,8 @@ export const crazyPlatform: Platform = {
       if (!candidate) return;
       // Asynchronous, and the SDK is unusable until it resolves — so nothing may be
       // called before this line, which is why init() belongs on the loading screen.
+      // It also PRELOADS the player's saved data, which is why SplashScene holds Home
+      // until this settles: reading a save any earlier gets the local copy, not theirs.
       await candidate.init();
       sdk = candidate;
       hostLocale = candidate.user?.systemInfo?.locale ?? null;

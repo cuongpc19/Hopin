@@ -216,9 +216,23 @@ Nhưng có ba cách đáp ứng, và cách rẻ nhất **không cần một dòn
 Game đã lưu mọi thứ trong `localStorage` (`pf_*`), nên **APS bao trọn**. Tài liệu của họ nói
 thẳng: *"there is no implementation required from your side"*.
 
-- [x] Không phải làm gì — APS đọc `localStorage` sẵn có
-- [ ] Chỉ bật công tắc **"Progress Save"** lúc nộp **nếu** dùng module `data` (không dùng thì
-      thôi; bật nhầm cũng không sao, nhưng module `data` không bật thì bị vô hiệu)
+**Đã chọn: module `data`** (user 2026-08-08). APS đủ cho Basic Launch nhưng phụ thuộc suy đoán
+— tài liệu không nói rõ câu hỏi trong biểu mẫu ảnh hưởng thế nào tới APS — và **APS bị cấm với
+game có mua trong game**, nên chọn `data` là đi thẳng tới đích.
+
+- [x] `Platform.storage` (`src/platform/base.ts`) — cùng hình dạng `localStorage`
+- [x] `crazy.ts` định tuyến sang `window.CrazyGames.SDK.data`; **ghi vào CẢ HAI** kho, để
+      phiên nào SDK hỏng vẫn còn bản cục bộ mới, thay vì bản đóng băng từ lần SDK còn chạy
+- [x] 51 chỗ gọi `localStorage` trong `src/` đã chuyển hết
+- [x] `SplashScene` giữ Home cho tới khi `init()` xong — SDK **nạp sẵn dữ liệu người chơi
+      lúc init**, đọc sớm hơn là ra bản cục bộ
+- [ ] **Bật công tắc "Progress Save" lúc nộp** — không bật thì module `data` bị vô hiệu.
+      Trong biểu mẫu chọn **"Yes, using the Data Module from the CrazyGames SDK"**.
+
+⚠ **Ràng buộc thứ tự phải giữ:** `crazy.ts` `LOAD_TIMEOUT_MS` (2500) phải **nhỏ hơn**
+`SplashScene` `CAP_MS` (3000). Trần của splash thả người chơi vào Home bất kể init xong chưa;
+nếu trần bắn trước thì Home mở bằng bản **cục bộ**, và lần ghi kế tiếp sẽ nhân bản dữ liệu cũ
+đè lên bản lưu thật trên máy chủ của người chơi.
 
 ⚠ **Nếu định đổi tiền tố `pf_*` → `hopin:*` thì phải làm TRƯỚC khi có người chơi.** APS sao lưu
 nguyên si `localStorage`; đổi tên khoá sau khi ra mắt thì APS khôi phục khoá cũ mà game đọc
