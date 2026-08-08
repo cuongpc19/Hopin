@@ -549,6 +549,34 @@ thắng, hỏng từ lâu, chưa ai sửa.
 
 **Việc tiếp theo:** L31-46 vẫn là bản cũ; L51 cần sửa hoặc bỏ.
 
+### 10.3 L15/L20/L25: kéo mô hình B xuống (user 2026-08-08)
+
+User đặt mốc TRÊN THANG B, không phải trên winrate hiệu chuẩn — vì với ba bàn này B và D lệch
+30-39 điểm nên số hiệu chuẩn không có chỗ dựa. Kéo B xuống cũng là kéo nó về gần D.
+
+| lv | B trước | mốc B | **B sau** | D sau | lệch B/D | hiệu chuẩn | xe |
+|---|---|---|---|---|---|---|---|
+| L15 | 67 | 45 | **53** | 68 | 15 | 44% | 22 |
+| L20 | 68 | 58 | **51** | 52 | **1** | 35% | 20 |
+| L25 | 50 | 35 | **38** | 45 | 7 | 27% | 19 |
+
+Lệch B/D tụt từ 39/30/32 xuống 15/1/7 — mục đích chính đạt được, ba con số này giờ đáng tin
+hơn hẳn bản cũ. Lớp 2 giữ nguyên 40 ô cả ba. Thua@ 63/65/67% (§4 lành mạnh).
+
+⚠ **`--scan2` KHÔNG dùng được cho L20/L25.** Nó loại thẳng mọi nấc `lay > 0` khi
+`spec(n).target > 60`, mà cả hai target 62 — trong khi `build()` mở đầu bằng `delete L.layer2`.
+Chạy bộ quét chuẩn là ba bàn hard/super mất sạch lớp 2 (trái luật §5) và hụt 40 ghế. Phải tự
+viết vòng quét ép `lay: 40` vào mọi nấc.
+
+⚠ **Thang B của L20 có LỖ HỔNG và có ĐÁY.** Nấc dựng được: 82, 78, 67, 58, 57, 55, 48, 40, 33…
+— hụt hẳn khoảng 59-66. Tệ hơn, hai nấc khác hẳn nhau (cap28 w3 p0.3 và cap28 w2 p0.4) đo thật
+đều ra **đúng B=51**: quanh vùng này B chạm đáy, vặn núm không xuống thêm. Chọn theo D thì hơn
+— hai nấc đó cho D=52 và D=67, lấy nấc D=52 (lệch 1).
+
+⚠ **Trôi quét→n=200 tới ±8 và ĐỔI CHIỀU giữa các nấc CÙNG MỘT LEVEL.** L25: nấc quét B=33 đo
+thật 25 (−8), nấc quét B=40 đo thật 47 (+7), nấc quét B=38 đo thật 38 (0). Không có quy luật để
+bù. Phải kẹp hai bên rồi dò vào giữa; L25 mất 3 vòng đo mới vào mốc.
+
 ### 10.2 L10: gấp rưỡi số xe, giữ winrate (user 2026-08-08)
 
 User chơi ván thật rồi báo *"quá dễ, quá ít xe"* — L10 lúc đó 11 xe / 529 ghế (~48 slime/xe).

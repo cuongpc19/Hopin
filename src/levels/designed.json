@@ -14818,50 +14818,100 @@
     "chests": [
       {
         "color": 2,
-        "count": 130
+        "count": 26
       },
       {
         "color": 2,
-        "count": 130
+        "count": 26
       },
       {
-        "color": 8,
-        "count": 2
+        "color": 2,
+        "count": 26
       },
       {
-        "color": 12,
-        "count": 5
+        "color": 2,
+        "count": 26
       },
       {
-        "color": 16,
-        "count": 98,
+        "color": 2,
+        "count": 26
+      },
+      {
+        "color": 2,
+        "count": 26,
+        "buried": true
+      },
+      {
+        "color": 2,
+        "count": 30,
+        "pairId": 2
+      },
+      {
+        "color": 2,
+        "count": 26,
+        "buried": true
+      },
+      {
+        "color": 2,
+        "count": 26,
         "pairId": 0
       },
       {
         "color": 2,
-        "count": 41,
+        "count": 26,
+        "pairId": 1
+      },
+      {
+        "color": 1,
+        "count": 35,
+        "pairId": 2
+      },
+      {
+        "color": 2,
+        "count": 37,
+        "buried": true
+      },
+      {
+        "color": 16,
+        "count": 27,
         "pairId": 0
       },
       {
         "color": 10,
         "count": 51,
-        "buried": true
+        "pairId": 1
+      },
+      {
+        "color": 3,
+        "count": 28
       },
       {
         "color": 11,
         "count": 22
       },
       {
-        "color": 1,
-        "count": 35
-      },
-      {
         "color": 9,
         "count": 5
       },
       {
+        "color": 16,
+        "count": 27
+      },
+      {
+        "color": 8,
+        "count": 2
+      },
+      {
+        "color": 16,
+        "count": 44
+      },
+      {
+        "color": 12,
+        "count": 5
+      },
+      {
         "color": 3,
-        "count": 50
+        "count": 22
       }
     ],
     "slam": true,
@@ -19761,59 +19811,73 @@
     "chests": [
       {
         "color": 12,
-        "count": 88
+        "count": 28
+      },
+      {
+        "color": 12,
+        "count": 28
+      },
+      {
+        "color": 12,
+        "count": 32
       },
       {
         "color": 14,
-        "count": 62
+        "count": 28
       },
       {
-        "color": 2,
-        "count": 9
-      },
-      {
-        "color": 13,
-        "count": 54
-      },
-      {
-        "color": 13,
-        "count": 45,
+        "color": 14,
+        "count": 34,
         "pairId": 0
       },
       {
-        "color": 11,
-        "count": 24,
-        "buried": true
-      },
-      {
-        "color": 10,
-        "count": 27,
+        "color": 13,
+        "count": 28,
         "pairId": 1
       },
       {
         "color": 13,
-        "count": 43,
-        "pairId": 1
+        "count": 26
+      },
+      {
+        "color": 2,
+        "count": 9,
+        "buried": true
       },
       {
         "color": 11,
-        "count": 40,
+        "count": 28,
         "pairId": 0
       },
       {
         "color": 18,
-        "count": 41
+        "count": 41,
+        "pairId": 1
+      },
+      {
+        "color": 10,
+        "count": 27,
+        "buried": true
       },
       {
         "color": 13,
-        "count": 35
-      },
-      {
-        "color": 5,
-        "count": 9
+        "count": 30,
+        "buried": true
       },
       {
         "color": 13,
+        "count": 28
+      },
+      {
+        "color": 13,
+        "count": 28
+      },
+      {
+        "color": 13,
+        "count": 28
+      },
+      {
+        "color": 11,
         "count": 36
       },
       {
@@ -19823,6 +19887,14 @@
       {
         "color": 1,
         "count": 22
+      },
+      {
+        "color": 5,
+        "count": 9
+      },
+      {
+        "color": 13,
+        "count": 45
       }
     ],
     "slam": true,
@@ -26372,54 +26444,82 @@
     "chests": [
       {
         "color": 5,
-        "count": 72
-      },
-      {
-        "color": 15,
-        "count": 55
-      },
-      {
-        "color": 10,
-        "count": 84
-      },
-      {
-        "color": 0,
-        "count": 44
+        "count": 32
       },
       {
         "color": 5,
-        "count": 50,
+        "count": 32
+      },
+      {
+        "color": 5,
+        "count": 24
+      },
+      {
+        "color": 15,
+        "count": 32
+      },
+      {
+        "color": 10,
+        "count": 31,
+        "buried": true
+      },
+      {
+        "color": 0,
+        "count": 30
+      },
+      {
+        "color": 10,
+        "count": 29
+      },
+      {
+        "color": 11,
+        "count": 49,
         "buried": true
       },
       {
         "color": 2,
-        "count": 53,
+        "count": 26,
         "buried": true
+      },
+      {
+        "color": 5,
+        "count": 34
       },
       {
         "color": 0,
-        "count": 70,
-        "buried": true
-      },
-      {
-        "color": 1,
-        "count": 15
-      },
-      {
-        "color": 11,
-        "count": 49
-      },
-      {
-        "color": 13,
-        "count": 28
+        "count": 35
       },
       {
         "color": 6,
         "count": 33
       },
       {
+        "color": 13,
+        "count": 28
+      },
+      {
         "color": 18,
         "count": 16
+      },
+      {
+        "color": 1,
+        "count": 15
+      },
+      {
+        "color": 15,
+        "count": 23
+      },
+      {
+        "color": 0,
+        "count": 49
+      },
+      {
+        "color": 2,
+        "count": 27
+      },
+      {
+        "color": 10,
+        "count": 24
       }
     ],
     "slam": true,
