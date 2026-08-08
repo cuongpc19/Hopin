@@ -2460,15 +2460,38 @@ export class GameScene extends Phaser.Scene {
     this.tutPaused = true;
     const D = 400;
     const lanes = Math.max(1, this.invColumns.length);
-    const ROWS = 5;
-    const zc = Math.min((GAME_W - 56) / lanes, (GAME_H * 0.52) / ROWS);
+
+    // BOTTOM-ANCHORED (user 2026-08-08): "phần zoom ở dưới màn hình thôi, phần trên vẫn
+    // phải nhìn thấy map". The player decides WHICH car to grab by reading what is still
+    // on the board, so a centred panel covering the board asked them to choose blind.
+    //
+    // The bays sit at the top of the bottom cluster, so their top edge is exactly where
+    // the board area ends — everything from there down is ours to use.
+    const boardBottom = this.slotY - this.slotSize / 2;
+    const margin = 8;
+    const headH = 52, footH = 76;
+    const wCap = (GAME_W - 56) / lanes;
+    const hAvail = GAME_H - boardBottom - margin - headH - footH;
+    // Take as many rows as genuinely fit under the board. A 16:9 desktop frame is short
+    // and only affords 2-3; a portrait phone fits all 5. Never fewer than 2 — the lineup
+    // already shows 2, so a picker showing less would be worse than no picker at all.
+    let ROWS = 5;
+    while (ROWS > 2 && hAvail / ROWS < 34) ROWS--;
+    const zc = Math.max(30, Math.min(wCap, hAvail / ROWS));
     const bw = lanes * zc, bh = ROWS * zc;
-    const headH = 62, footH = 84;
     const pw = Math.max(bw + 28, 300), ph = headH + bh + footH;
-    const x0 = GAME_W / 2 - pw / 2, y0 = GAME_H / 2 - ph / 2;
+    const x0 = GAME_W / 2 - pw / 2;
+    const y0 = GAME_H - margin - ph; // pinned to the bottom, not centred
     const bx = GAME_W / 2 - bw / 2, by = y0 + headH;
 
-    const dim = this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0x000000, 0.6).setDepth(D).setInteractive();
+    // Swallow taps over the board so nothing behind reacts — but do NOT close on them.
+    // The player is meant to study the board while choosing; a stray tap there cancelling
+    // the booster would punish exactly the behaviour this change is for. CANCEL is the exit.
+    const blocker = this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0x000000, 0.001)
+      .setDepth(D).setInteractive();
+    // Shade only the strip the panel sits on, so the board above stays at full brightness.
+    const dim = this.add.rectangle(GAME_W / 2, (y0 + GAME_H) / 2, GAME_W, GAME_H - y0 + margin, 0x000000, 0.45)
+      .setDepth(D).setInteractive();
     const panel = this.add.graphics().setDepth(D + 1);
     panel.fillStyle(0xf7edd0, 1); panel.fillRoundedRect(x0, y0, pw, ph, 18);
     panel.lineStyle(4, 0x8a5a12, 1); panel.strokeRoundedRect(x0, y0, pw, ph, 18);
@@ -2511,7 +2534,7 @@ export class GameScene extends Phaser.Scene {
     const hit = this.add.rectangle(bx + bw / 2, by + bh / 2, bw + zc, bh + zc, 0x000000, 0.001)
       .setDepth(D + 4).setInteractive();
 
-    const objs: Phaser.GameObjects.GameObject[] = [dim, panel, title, info, ring, no, yes, hit,
+    const objs: Phaser.GameObjects.GameObject[] = [blocker, dim, panel, title, info, ring, no, yes, hit,
       ...slots.map((s) => s.img), ...slots.map((s) => s.txt)];
     let closed = false;
     const closeAll = () => {
@@ -2548,6 +2571,8 @@ export class GameScene extends Phaser.Scene {
       this.toast(tr("carSent"));
     });
     no.on("pointerdown", () => { closeAll(); this.toast(tr("cancelled")); });
+    // Tapping the shaded strip beside the cards still cancels (the old affordance);
+    // tapping the BOARD deliberately does nothing — see the blocker note above.
     dim.on("pointerdown", () => { closeAll(); this.toast(tr("cancelled")); });
   }
 
