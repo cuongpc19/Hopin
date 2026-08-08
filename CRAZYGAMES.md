@@ -199,18 +199,47 @@ vào gameplay ngay.
 
 ---
 
-## Giai đoạn 4 — Lưu tiến trình xuyên thiết bị (không bắt buộc, nhưng đáng làm)
+## Giai đoạn 4 — Lưu tiến trình: **APS lo hộ, không phải viết gì**
 
-Module `data` là **bản thay thế cắm-thẳng cho localStorage** — cùng dạng API.
-Người chưa đăng nhập thì tự lưu máy, đăng nhập vào là dữ liệu khách tự chuyển sang tài khoản.
-Giới hạn 1MB mỗi người.
+Lưu tiến trình là **bắt buộc**, không phải tuỳ chọn: *"Unless progress is not applicable for
+your game, we require you to implement one of these methods."* Game này có tiến trình (level,
+vàng, booster) nên không được miễn.
 
-- [ ] Bọc toàn bộ khoá `pf_*` qua `platform.storage` thay vì gọi thẳng `localStorage`
-- [ ] Bật công tắc **"Progress Save"** lúc nộp — không bật thì module bị vô hiệu
+Nhưng có ba cách đáp ứng, và cách rẻ nhất **không cần một dòng code nào**:
 
-Tiện thể xử luôn một món nợ: đổi tiền tố `pf_*` thành `hopin:*`. Nếu sau này có game thứ
-hai chung tên miền, `pf_progress` sẽ đụng nhau. Sửa bây giờ rẻ, sửa sau khi có người chơi
-là mất sạch tiến trình của họ.
+| cách | công |
+|---|---|
+| **APS (Automatic Progress Save)** | **0** — họ tự sao lưu & khôi phục `localStorage` giữa các máy |
+| Module `data` | bọc lại toàn bộ chỗ gọi `localStorage` |
+| Backend riêng + module `user` | nhiều nhất |
+
+Game đã lưu mọi thứ trong `localStorage` (`pf_*`), nên **APS bao trọn**. Tài liệu của họ nói
+thẳng: *"there is no implementation required from your side"*.
+
+- [x] Không phải làm gì — APS đọc `localStorage` sẵn có
+- [ ] Chỉ bật công tắc **"Progress Save"** lúc nộp **nếu** dùng module `data` (không dùng thì
+      thôi; bật nhầm cũng không sao, nhưng module `data` không bật thì bị vô hiệu)
+
+⚠ **Nếu định đổi tiền tố `pf_*` → `hopin:*` thì phải làm TRƯỚC khi có người chơi.** APS sao lưu
+nguyên si `localStorage`; đổi tên khoá sau khi ra mắt thì APS khôi phục khoá cũ mà game đọc
+khoá mới → người chơi mất sạch tiến trình. Trước ngày ra mắt thì đổi thoải mái vì chưa ai có gì.
+
+## Giai đoạn 4b — Ba chỉ số Basic Launch thật sự bị chấm
+
+Basic Launch kết thúc khi game **sống ≥ 7 ngày VÀ đạt ≥ 500 lượt chơi**; không đủ 500 lượt thì
+tự kết thúc sau **21 ngày**. Ba KPI:
+
+| chỉ số | mức game tốt | trạng thái của ta |
+|---|---|---|
+| Thời lượng chơi trung bình / phiên | **10+ phút** | giờ chơi tự do (§3) phục vụ đúng cái này |
+| Giữ chân ngày 1 | **10-15%** | localStorage + APS giữ tiến trình |
+| Chuyển đổi (chơi ≥ 1 phút) | **80%+** | vào gameplay 1 chạm |
+| Thời gian tải | **< 10 giây** | tải lần đầu 2.57 MB |
+| Cỡ build | **< 20 MB** | **5.93 MB** ✓ |
+
+Họ đo "thời gian tới lúc chơi" **tính đến lời gọi `gameplayStart`**, tức lúc chơi thật, không
+phải lúc màn chờ hiện ra. Nghĩa là `MIN_MS = 3000` ở `SplashScene` — ba giây poster cố định,
+kể cả khi tài nguyên đã nằm sẵn trong cache — bị tính thẳng vào chỉ số này.
 
 ---
 
