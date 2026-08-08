@@ -3219,7 +3219,13 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0, 0.5)
       .setDepth(D + 2);
 
-    // buy "+" button — nút xanh BÓNG như ảnh (user 2026-08-02): đế xanh đậm + thân + đốm gloss + viền trắng
+    /* ---- buy "+" button: hidden for submission ---------------------------
+    // COMMENTED OUT 2026-08-08. This one was LIVE, not decorative like the pill on Home:
+    // every tap handed out 5000 free Coin with no limit and no purchase behind it. Shipping
+    // that would make Coin meaningless — Revive costs 900 — and it is exactly the kind of
+    // leftover test control a QA pass rejects. Restore when a real shop exists.
+    //
+    // nút xanh BÓNG như ảnh (user 2026-08-02): đế xanh đậm + thân + đốm gloss + viền trắng
     const plusBase = this.add.circle(plusX, y + 1, plusR, 0x3f9b45).setDepth(D + 1); // đế đậm lộ ở đáy → khối
     const plus = this.add
       .circle(plusX, y, plusR, 0x5cb85c)
@@ -3242,6 +3248,8 @@ export class GameScene extends Phaser.Scene {
       this.tweens.add({ targets: [plus, plusBase, plusGloss], scale: 0.85, duration: 80, yoyo: true });
       this.buyGold();
     });
+    ---- end hidden ------------------------------------------------------- */
+    void [plusX, plusR, this.buyGold]; // keep these compiling while the block above is off
   }
 
   private loadGold(): number {
