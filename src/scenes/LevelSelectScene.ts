@@ -1,8 +1,9 @@
 import Phaser from "phaser";
-import { t as tr, tf as trf, getLang, setLang, langLocked, type Lang } from "../game/i18n";
+import { t as tr, tf as trf, getLang, setLang, langLocked } from "../game/i18n";
 import { getLives, msToNextHeart, formatCountdown, showHeartsModal, canEnterLevel } from "../game/lives";
 import { GAME_W, GAME_H, setPageBackground } from "./GameScene";
 import { levelDifficulty } from "../game/level";
+import { Audio } from "../game/audio";
 import { platform } from "../platform";
 import {
   getProgress,
@@ -190,7 +191,11 @@ export class LevelSelectScene extends Phaser.Scene {
       .on("pointerdown", () => this.openHearts());
     // Gold coin: a slightly bigger golden disc with a dark-gold rim, no letter.
     // Wider pill so multi-digit gold never overflows on phone (user 2026-08-02). Value centred.
-    this.goldTx = this.statPill(334, y, 158, 0xf9c22e, "", String(this.gold), "＋", "#8a5a10", 0xc98a10, 17, true);
+    // Tail was "＋" — a green add-Coin button that had no handler behind it and never did
+    // anything. Removed 2026-08-08: there is no way to buy Coin yet, and a control that
+    // promises one and does nothing is the kind of thing a QA pass calls a broken button.
+    // Put "＋" back as the 7th argument once a shop exists.
+    this.goldTx = this.statPill(334, y, 158, 0xf9c22e, "", String(this.gold), "", "#8a5a10", 0xc98a10, 17, true);
 
     const s = this.add
       .circle(GAME_W - 34, y, 22, 0xe23b3b, 1) // đỏ như gear trong game (user 2026-08-02)
@@ -254,11 +259,18 @@ export class LevelSelectScene extends Phaser.Scene {
     const pw = 320;
     // The language row spans 82px (18 gap + label + the two 40px buttons). Drop that height
     // too on a locked build, or hiding the row just leaves a blank band above CLOSE.
-    const ph = langLocked() ? 412 - 82 : 412;
+    // Title, one Sound pill (y0+70..y0+116), CLOSE at y0+ph-26. Was 412 when the menu also
+    // carried selection mode, jump-to-level and the language switcher — restore that number
+    // along with the commented-out blocks below.
+    const ph = 190;
     const x0 = GAME_W / 2 - pw / 2;
     const y0 = GAME_H / 2 - ph / 2;
     const progress = Math.max(1, this.readInt("pf_progress", 1));
     const objs: Phaser.GameObjects.GameObject[] = [];
+    // The hidden rows below were the only callers of these, and noUnusedLocals fails the
+    // build on an unused symbol. This line keeps them compiling; delete it when the
+    // commented-out blocks are restored. None of them is otherwise modified.
+    void [progress, getLang, setLang, langLocked, this.freeSelect, this.setFreeSelect];
 
     const dim = this.add
       .rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0x000000, 0.6)
@@ -278,6 +290,45 @@ export class LevelSelectScene extends Phaser.Scene {
         })
         .setOrigin(0.5)
         .setDepth(D + 2),
+    );
+
+    // TRIMMED 2026-08-08 for the CrazyGames submission: Sound only. The Home menu never
+    // had a sound control — it lived only in the in-level menu — so it is added here to
+    // match. Everything else (selection mode, jump-to-level, language) is commented out
+    // below rather than deleted; restore those and `ph` to bring the full menu back.
+    const close = () => objs.forEach((o) => o.destroy());
+    {
+      const bw = pw - 44, bh = 46, bx = x0 + 22, by = y0 + 70;
+      const g = this.add.graphics().setDepth(D + 2);
+      const label = this.add
+        .text(GAME_W / 2, by + bh / 2, "", {
+          fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "16px", color: "#ffffff",
+        })
+        .setOrigin(0.5)
+        .setDepth(D + 3);
+      const paint = () => {
+        const on = Audio.isSfxOn;
+        g.clear();
+        g.fillStyle(on ? 0x35b04a : 0xa39b8c, 1);
+        g.fillRoundedRect(bx, by, bw, bh, 12);
+        g.lineStyle(3, on ? 0x1f7d33 : 0x8a8375, 1);
+        g.strokeRoundedRect(bx, by, bw, bh, 12);
+        label.setText(`${tr("sfx")}: ${on ? tr("on") : tr("off")}`);
+      };
+      paint();
+      const hit = this.add
+        .rectangle(bx + bw / 2, by + bh / 2, bw, bh, 0xffffff, 0.001)
+        .setDepth(D + 4)
+        .setInteractive({ useHandCursor: true });
+      hit.on("pointerdown", () => {
+        Audio.unlock(); // a tap is a user gesture — safe to start audio here
+        Audio.setSfx(!Audio.isSfxOn);
+        paint();
+      });
+      objs.push(g, label, hit);
+    }
+
+    /* ---- hidden for submission -------------------------------------------
       this.add
         .text(x0 + 22, y0 + 66, tr("selMode"), {
           fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "16px", color: "#6a4a12",
@@ -390,10 +441,12 @@ export class LevelSelectScene extends Phaser.Scene {
       if (!this.canPlay()) return;
       this.scene.start("game", { level: n });
     });
+    ---- end hidden ------------------------------------------------------- */
 
-    // ---- Language (user 2026-08-02): Tiếng Việt (default) | English ------
-    // Hidden entirely on a build locked to one language (CrazyGames is English-only):
-    // a switcher that offers a language the build will not honour is worse than none.
+    /* ---- Language: hidden for submission ---------------------------------
+    // (user 2026-08-02): Tiếng Việt (default) | English. The CrazyGames build is locked
+    // to English anyway — see platform.forcedLang — so the switcher has nothing to offer
+    // there. Restore this block, its `langY`, and the jump block it positions against.
     const langY = jumpY + jumpH + 18;
     if (!langLocked()) {
     objs.push(
@@ -432,6 +485,7 @@ export class LevelSelectScene extends Phaser.Scene {
     mkLang(x0 + 22, "Tiếng Việt", getLang() === "vi", "vi");
     mkLang(x0 + 22 + segW + 12, "English", getLang() === "en", "en");
     }
+    ---- end hidden ------------------------------------------------------- */
 
     const closeBtn = this.add
       .text(GAME_W / 2, y0 + ph - 26, tr("closeCaps"), {

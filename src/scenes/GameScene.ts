@@ -135,6 +135,12 @@ const SLOT_SIZE = 49; // waiting bay size — giảm 10% (54→49) để queue n
 const INV_GAP_X = 30; // queue column gap at scale 1
 const INV_GAP_Y = 16; // queue row gap at scale 1
 const CLUSTER_MIN_SCALE = 0.6; // never shrink the cluster past this — cars stay tappable
+
+// Red pulsing rings around every bay once all of them are full. OFF since 2026-08-08
+// (user: "bỏ nhấp nháy alert khi 5 xe đầy nhé") — the bays being full is already visible,
+// and a permanent flashing alarm reads as an error state rather than as information.
+// Flip to true to bring them back; see startSlotWarning().
+const SLOT_WARNING_RINGS = false;
 // How much to blow up a keycap tile texture so the CAP fills its cell. The PNG is 128px
 // but the cap only spans x=15..113 of it (~77%) — the rest is transparent margin plus a
 // drop shadow on the RIGHT side only. 1/0.766 = 1.306, which is where the old 1.3 came from.
@@ -1930,6 +1936,10 @@ export class GameScene extends Phaser.Scene {
 
   private startSlotWarning() {
     this.slotWarnActive = true;
+    // The flag above still flips either way, so updateSlotWarning / stopSlotWarning and
+    // every caller that clears the warning on a freed bay behave exactly as before — with
+    // the rings off there is simply nothing drawn.
+    if (!SLOT_WARNING_RINGS) return;
     const art = Math.round(this.slotSize * 1.5);
     for (let i = 0; i < this.slotCount; i++) {
       const ring = this.add
@@ -3109,7 +3119,11 @@ export class GameScene extends Phaser.Scene {
       this.openSettings();
     });
 
-    // ===== DEBUG STRIP — PREV · WIN · NEXT ==================================
+    /* ===== DEBUG STRIP — PREV · WIN · NEXT =================================
+    // COMMENTED OUT 2026-08-08 for the CrazyGames submission — these are test shortcuts
+    // and a level-skip button in a published game is an instant QA rejection. Kept rather
+    // than deleted so local playtesting can switch them back on in one edit.
+    //
     // Test-only shortcuts (WIN user 2026-07-27; PREV/NEXT 2026-08-05). Deliberately TINY
     // because they are temporary — user: "cho bé hẳn nhé (sau này sẽ bỏ)". To remove them
     // later, delete this whole block; nothing else references it.
@@ -3146,7 +3160,7 @@ export class GameScene extends Phaser.Scene {
       this.win();
     });
     dbgBtn(148, "NEXT", 0x3f7fd6, () => this.startLevel(this.levelNum + 1));
-    // ===== END DEBUG STRIP ==================================================
+    ===== END DEBUG STRIP ================================================== */
 
     // Level pill (center): red rounded pill with bold white text.
     const lvlText = this.add
@@ -3357,7 +3371,9 @@ export class GameScene extends Phaser.Scene {
   private openSettings() {
     const D = 200;
     const pw = 300;
-    const ph = 438;
+    // Two rows now (Sound, Home) instead of six — 438 minus the four hidden rows at 46
+    // apart. Restore to 438 when the commented-out rows below come back.
+    const ph = 438 - 4 * 46;
     const x0 = GAME_W / 2 - pw / 2;
     const y0 = GAME_H / 2 - ph / 2;
     const dim = this.add
@@ -3418,11 +3434,22 @@ export class GameScene extends Phaser.Scene {
       row.tx.setText(`${label}: ${get() ? tr("on") : tr("off")}`);
       return row;
     };
+    // TRIMMED 2026-08-08 for the CrazyGames submission: Sound and Home only. Everything
+    // else is commented out just below rather than deleted — put the rows back and restore
+    // `ph` (see the note where it is declared) to bring the full menu back.
+    //
+    // The hidden rows were the only callers of these four, and noUnusedLocals fails the
+    // build on an unused symbol. This line keeps them compiling; delete it when the rows
+    // are restored. resetProgress() and openPlayLog() are otherwise untouched.
+    void [getLang, setLang, this.openPlayLog, this.resetProgress];
+
     mkToggle(rowYs[0], tr("sfx"), () => Audio.isSfxOn, (v) => Audio.setSfx(v));
+
+    /* ---- hidden for submission -------------------------------------------
     // Step guide (user 2026-07-30): default OFF; when ON the game points at the next move.
     mkToggle(rowYs[1], tr("guide"), () => this.guideMode, (v) => {
       this.guideMode = v;
-      try { platform.storage.setItem("hopin_guide", v ? "1" : "0"); } catch { /* ignore */ }
+      try { platform.storage.setItem("hopin_guide", v ? "1" : "0"); } catch { } // ignore
       if (!v) this.clearGuidePointer();
     });
 
@@ -3453,9 +3480,10 @@ export class GameScene extends Phaser.Scene {
 
     // Nhật ký chơi — chép log ra clipboard (dùng được cả khi chơi trên GitHub).
     mkRow(rowYs[4], tr("logBtn"), () => { kill(); this.openPlayLog(); });
+    ---- end hidden ------------------------------------------------------- */
 
     // Back to the Home screen + Close — same pill as everything above.
-    mkRow(rowYs[5], tr("levelsBtn"), () => {
+    mkRow(rowYs[1], tr("levelsBtn"), () => {
       // Walking out of a LIVE level is a failed attempt too — otherwise quitting when a
       // loss looks certain would dodge the heart (user 2026-08-02). That charge used to be
       // silent, which read as "no heart was taken at all", so ask first and name the price.
