@@ -21,6 +21,29 @@ const ENDPOINT =
   "https://hop-n-7d1af-default-rtdb.asia-southeast1.firebasedatabase.app/runs.json";
 
 /**
+ * Trang chính sách bảo mật (Firebase Hosting).
+ *
+ * Nằm CẠNH endpoint telemetry một cách có chủ ý: hễ đổi thứ game gửi đi thì trang này phải
+ * đổi theo, và để hai thứ cạnh nhau thì khó quên hơn.
+ */
+export const PRIVACY_URL = "https://hop-n-7d1af.web.app/privacy.html";
+
+/**
+ * Mở trang chính sách ở TAB MỚI. CrazyGames bắt buộc game nào thu thập dữ liệu ngoài sự kiện
+ * SDK của họ thì phải hiện thông báo ngay trong game — khai ở biểu mẫu nộp là chưa đủ.
+ *
+ * Tab mới chứ không điều hướng: game đang chạy trong iframe của họ, chuyển trang tại chỗ là
+ * đá người chơi ra khỏi ván đang chơi.
+ */
+export function openPrivacyPolicy() {
+  try {
+    window.open(PRIVACY_URL, "_blank", "noopener,noreferrer");
+  } catch {
+    /* trình duyệt chặn popup — không làm gì, đừng để game vỡ vì một cái link */
+  }
+}
+
+/**
  * MỌI ván đều gửi, kể cả từ localhost (user 2026-08-08: "để test cũng được").
  *
  * Đổi lại, mỗi dòng mang theo TÊN MÁY CHỦ nó được chơi trên đó, để lúc phân tích tách được

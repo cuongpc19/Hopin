@@ -76,6 +76,10 @@ const S: Record<string, { vi: string; en: string }> = {
   on: { vi: "BẬT", en: "ON" },
   off: { vi: "TẮT", en: "OFF" },
   home: { vi: "Home", en: "Home" },
+  // Shown in Settings and opened in a new tab. CrazyGames require a game that collects
+  // anything beyond their SDK events to say so IN GAME, not only on the submission form —
+  // and this game sends level results to Firebase, so it qualifies.
+  privacyBtn: { vi: "Chính sách bảo mật", en: "Privacy Policy" },
   replay: { vi: "Chơi lại", en: "Replay" },
   loading: { vi: "Loading", en: "Loading" },
 

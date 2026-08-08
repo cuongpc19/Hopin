@@ -21,7 +21,7 @@ import { t as tr, tf as trf, getLang, setLang } from "../game/i18n";
 import { getLives, spendLife, showHeartsModal, canEnterLevel, graceMsLeft } from "../game/lives";
 import { platform } from "../platform";
 import { saveRun, groupRuns, exportJsonl, clearRuns, deviceId, copyToClipboard } from "../game/playlog";
-import { sendRun } from "../game/telemetry";
+import { sendRun, openPrivacyPolicy } from "../game/telemetry";
 import {
   awardClovers,
   isEventUnlocked,
@@ -3386,9 +3386,9 @@ export class GameScene extends Phaser.Scene {
   private openSettings() {
     const D = 200;
     const pw = 300;
-    // Two rows now (Sound, Home) instead of six — 438 minus the four hidden rows at 46
-    // apart. Restore to 438 when the commented-out rows below come back.
-    const ph = 438 - 4 * 46;
+    // Three rows now (Sound, Home, Privacy) instead of six — 438 minus the three still
+    // hidden, at 46 apart. Restore to 438 when the commented-out rows below come back.
+    const ph = 438 - 3 * 46;
     const x0 = GAME_W / 2 - pw / 2;
     const y0 = GAME_H / 2 - ph / 2;
     const dim = this.add
@@ -3516,6 +3516,12 @@ export class GameScene extends Phaser.Scene {
         },
       });
     });
+    // Privacy Policy. Required IN GAME, not just on the submission form: their rules say a
+    // game collecting anything beyond the SDK's own events has to display the notice, and
+    // this one sends level results to Firebase. Opens in a new tab so the game is never
+    // navigated away from mid-level.
+    mkRow(rowYs[2], tr("privacyBtn"), () => openPrivacyPolicy());
+
     mkRow(y0 + ph - 30, tr("close"), () => kill());
 
     const kill = () => {

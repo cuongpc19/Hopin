@@ -5,6 +5,7 @@ import { GAME_W, GAME_H, setPageBackground } from "./GameScene";
 import { levelDifficulty } from "../game/level";
 import { Audio } from "../game/audio";
 import { platform } from "../platform";
+import { openPrivacyPolicy } from "../game/telemetry";
 import {
   getProgress,
   isEventUnlocked,
@@ -262,7 +263,7 @@ export class LevelSelectScene extends Phaser.Scene {
     // Title, one Sound pill (y0+70..y0+116), CLOSE at y0+ph-26. Was 412 when the menu also
     // carried selection mode, jump-to-level and the language switcher — restore that number
     // along with the commented-out blocks below.
-    const ph = 190;
+    const ph = 244; // tieu de + Sound + Privacy + CLOSE
     const x0 = GAME_W / 2 - pw / 2;
     const y0 = GAME_H / 2 - ph / 2;
     const progress = Math.max(1, this.readInt("pf_progress", 1));
@@ -325,6 +326,29 @@ export class LevelSelectScene extends Phaser.Scene {
         Audio.setSfx(!Audio.isSfxOn);
         paint();
       });
+      objs.push(g, label, hit);
+    }
+
+    // Privacy Policy — same requirement as the in-level menu, and this is the screen a
+    // player is most likely to be on when they go looking for it.
+    {
+      const bw = pw - 44, bh = 40, bx = x0 + 22, by = y0 + 124;
+      const g = this.add.graphics().setDepth(D + 2);
+      g.fillStyle(0xe4d3a3, 1);
+      g.fillRoundedRect(bx, by, bw, bh, 12);
+      g.lineStyle(3, 0xb79a5a, 1);
+      g.strokeRoundedRect(bx, by, bw, bh, 12);
+      const label = this.add
+        .text(GAME_W / 2, by + bh / 2, tr("privacyBtn"), {
+          fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "14px", color: "#6a4a12",
+        })
+        .setOrigin(0.5)
+        .setDepth(D + 3);
+      const hit = this.add
+        .rectangle(bx + bw / 2, by + bh / 2, bw, bh, 0xffffff, 0.001)
+        .setDepth(D + 4)
+        .setInteractive({ useHandCursor: true });
+      hit.on("pointerdown", () => openPrivacyPolicy());
       objs.push(g, label, hit);
     }
 
