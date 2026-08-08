@@ -117,7 +117,7 @@ Tức là đúng 1 click. **Có vẻ đạt**, nhưng phải tự kiểm bằng 
 
 ---
 
-## Giai đoạn 2 — SDK, phần lõi (game module)
+## Giai đoạn 2 — SDK, phần lõi (game module) ✅
 
 ```html
 <script src="https://sdk.crazygames.com/crazygames-sdk-v3.js"></script>
@@ -126,14 +126,23 @@ Tức là đúng 1 click. **Có vẻ đạt**, nhưng phải tự kiểm bằng 
 await window.CrazyGames.SDK.init();   // bất đồng bộ, phải await trước khi dùng
 ```
 
-- [ ] Nạp SDK + `init()` trong lúc hiện màn splash
-- [ ] `loadingStart()` / `loadingStop()` quanh phần nạp tài nguyên (SplashScene)
-- [ ] `gameplayStart()` khi vào màn và khi bỏ tạm dừng
-- [ ] `gameplayStop()` khi mở modal, tạm dừng, về Home, thắng/thua
-- [ ] `happytime()` khi qua màn — dùng dè, chỉ cho khoảnh khắc đáng ăn mừng
+- [x] Nạp SDK + `init()` trong lúc hiện màn splash (`SplashScene`), có **timeout 5 giây**:
+      adblock chặn script thì không bao giờ bắn `onerror`, để mặc là treo màn chờ
+- [x] `loadingStart()` / `loadingStop()`
+- [x] `gameplayStart()` cuối `startLevel()` + khi hồi sinh
+- [x] `gameplayStop()` khi thắng, thua, và khi rời scene (móc vào `shutdown` một lần,
+      thay vì đuổi theo 6 chỗ gọi `scene.start("select")` rồi sót một chỗ)
+- [x] `happytime()` khi qua màn
+- [x] Ngôn ngữ lấy từ `SDK.user.systemInfo.locale`, ghi đè bằng `applyHostLang()` sau khi
+      init xong (init bất đồng bộ nên chạy SAU lúc `i18n.ts` được nạp lần đầu)
 
-`gameplayStart/Stop` không phải trang trí: đó là cách họ biết lúc nào **được phép chèn
-quảng cáo**. Gọi sai chỗ là quảng cáo nhảy vào giữa lượt chơi.
+**Thủ thuật đáng nhớ:** `tutPaused` đã đổi thành cặp getter/setter, và chính setter phát
+`gameplayStop/Start`. Có 9 chỗ trong `GameScene` bật cờ này; làm ở tầng cờ nghĩa là chỗ
+thứ 10 không thể quên. `gameplayStart/Stop` không phải trang trí — đó là cách host biết
+lúc nào **được phép chèn quảng cáo**, gọi sai chỗ là quảng cáo nhảy vào giữa lượt chơi.
+
+**Bất biến phải giữ:** mọi thứ trong `crazy.ts` phải sống sót khi SDK không bao giờ tới.
+Kiểm bằng cách build `VITE_TARGET=web` rồi `grep crazygames` trong bundle — phải ra 0.
 
 ---
 

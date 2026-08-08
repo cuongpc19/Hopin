@@ -19,6 +19,7 @@ import { glossyButton } from "../game/ui";
 import { Audio } from "../game/audio";
 import { t as tr, tf as trf, getLang, setLang } from "../game/i18n";
 import { getLives, spendLife, showHeartsModal, canEnterLevel, graceMsLeft } from "../game/lives";
+import { platform } from "../platform";
 import { saveRun, groupRuns, exportJsonl, clearRuns, deviceId, copyToClipboard } from "../game/playlog";
 import {
   awardClovers,
@@ -406,7 +407,24 @@ export class GameScene extends Phaser.Scene {
   // Level-1 tutorial: step 1 = tap a queued car; step 2 = tap the car that parked.
   private tutStep = 0;
   private tutObjs: Phaser.GameObjects.GameObject[] = [];
-  private tutPaused = false; // a tutorial is up → freeze the game until the player acts
+  private _tutPaused = false; // backing field — always write through `tutPaused` below
+  /**
+   * A tutorial or modal is up → freeze the game until the player acts.
+   *
+   * The setter doubles as the host's pause signal. CrazyGames decides when it may
+   * interrupt with an ad purely from gameplayStart/Stop, so every modal that freezes
+   * the board has to bracket it — miss one and an ad lands mid-turn. Nine places set
+   * this flag; routing the signal through the flag itself means a tenth cannot forget.
+   */
+  private get tutPaused(): boolean {
+    return this._tutPaused;
+  }
+  private set tutPaused(v: boolean) {
+    if (v === this._tutPaused) return;
+    this._tutPaused = v;
+    if (v) platform.gameplayStop();
+    else if (!this.won && !this.lost) platform.gameplayStart(); // don't "resume" a finished level
+  }
   private tutHand?: Phaser.GameObjects.Text; // the bobbing 👆 (re-animated on a mis-tap)
   private tutHandY = 0; // the hand's resting Y (bob baseline)
   // Tutorial slam (sentinel 11-14): bước "bấm đâu cũng được để tiếp tục" — mats gọi hàm này
@@ -501,6 +519,11 @@ export class GameScene extends Phaser.Scene {
   }
 
   create() {
+    // Leaving this scene by ANY route — Home, quit, out of hearts, a win that walks
+    // away — ends gameplay for the host. Hooking shutdown once beats chasing the six
+    // separate scene.start("select") calls and missing one.
+    this.events.once("shutdown", () => platform.gameplayStop());
+
     // The canvas is DPR times bigger than the world; zoom the camera back so
     // code keeps working in 480x854 units while rendering at full resolution.
     const dpr = this.scale.gameSize.width / GAME_W;
@@ -750,6 +773,11 @@ export class GameScene extends Phaser.Scene {
     else this.maybeShowTwinIntro(); // first level with a twin pair → explain twin cars
     // Cảnh báo tier khi VÀO level khó (user 2026-08-01): banner 🔥HARD/💀SUPER ~1.5s.
     if (levelDifficulty(levelNum) !== "normal") this.showTierBanner(levelDifficulty(levelNum) === "superhard");
+
+    // Play is live from here. Told to the host LAST, after every intro modal above has
+    // had its chance to set tutPaused — otherwise we would announce "playing" and the
+    // setter would immediately have to take it back.
+    if (!this.tutPaused) platform.gameplayStart();
   }
 
   // ---- Hard-rock intro (first level that has hard rock) ---------------
@@ -6292,6 +6320,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private showLoseModal(pending?: ActiveChest) {
+    platform.gameplayStop(); // play is over — a legal ad moment for the host
     const REVIVE_COST = 900;
     const canAfford = this.gold >= REVIVE_COST;
     const cx = GAME_W / 2;
@@ -6374,6 +6403,7 @@ export class GameScene extends Phaser.Scene {
       if (this.slotWarnActive) this.stopSlotWarning(); // fresh empty bay clears the "full" warning
       this.flashNewSlot(this.slotCount - 1); // call out the brand-new bay
       if (pending) this.parkChest(pending); // (classic/tray only) the overflow car goes into the new bay
+      platform.gameplayStart(); // same attempt continues — play is live again
     };
 
     // Revive button (green, big) with a coin price pill. Greyed out with a hint if the
@@ -6473,6 +6503,9 @@ export class GameScene extends Phaser.Scene {
   // Tap bất kỳ đâu (hoặc CLAIM) → vào thẳng level tiếp theo như cũ.
   private showWinModal(reward: number, cloverAward: ReturnType<typeof awardClovers> | undefined) {
     Audio.victory(); // fanfare chúc mừng (jingle nguyên bản — an toàn bản quyền)
+    // Play is over — tell the host before the modal, so this is a legal ad moment.
+    platform.gameplayStop();
+    platform.happytime(); // confetti on the host page; their docs say big moments only
     const cx = GAME_W / 2;
     const cy = GAME_H / 2;
     const objs: Phaser.GameObjects.GameObject[] = [];

@@ -1,7 +1,8 @@
 import Phaser from "phaser";
 import { GAME_W, GAME_H, setPageBackground } from "./GameScene";
 import { Audio } from "../game/audio";
-import { t as tr } from "../game/i18n";
+import { t as tr, applyHostLang } from "../game/i18n";
+import { platform } from "../platform";
 
 // Fade out and remove the pre-boot loading screen baked into index.html.
 function hideBootScreen() {
@@ -107,10 +108,24 @@ export class SplashScene extends Phaser.Scene {
     };
     this.tweens.add({ targets: prog, v: 0.92, duration: MIN_MS, ease: "Sine.out", onUpdate: drawBar });
 
+    // Bring the host SDK up while the poster is on screen. Its init is asynchronous
+    // and nothing may call into it before that resolves, so the loading screen is the
+    // only sane place for it. Never throws and never blocks: if an adblocker eats the
+    // script we simply carry on with a no-op host (CRAZYGAMES.md §2).
+    platform.loadingStart();
+    void platform.init().then(() => {
+      // The SDK knows the player's locale better than the browser does. Only takes
+      // effect if they have never picked a language themselves, and Home is still
+      // ~3s away, so it is built in the right language.
+      const l = platform.preferredLang();
+      if (l) applyHostLang(l);
+    });
+
     const goHome = () => {
       if (went) return;
       went = true;
       prog.v = 1; drawBar(); // đầy 100% trước khi chuyển
+      platform.loadingStop();
       this.cameras.main.fadeOut(350, 244, 239, 224);
       this.cameras.main.once("camerafadeoutcomplete", () => this.scene.start("select"));
     };

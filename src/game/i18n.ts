@@ -25,6 +25,23 @@ export function getLang(): Lang {
   return lang;
 }
 
+/**
+ * The host learned the player's language after boot — CrazyGames' SDK init is
+ * asynchronous, so its locale arrives later than this module's first evaluation.
+ *
+ * Only applies when the player has never chosen for themselves; an explicit pick
+ * saved in pf_lang always wins. Text already drawn is not re-rendered, so call this
+ * before building a screen (SplashScene does, while Home is still 3 seconds away).
+ */
+export function applyHostLang(l: Lang) {
+  try {
+    if (localStorage.getItem("pf_lang")) return; // player chose — leave them alone
+  } catch {
+    /* no storage — treat as "never chose" */
+  }
+  lang = l;
+}
+
 export function setLang(l: Lang) {
   lang = l;
   try {
