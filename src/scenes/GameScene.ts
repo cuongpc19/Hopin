@@ -6467,10 +6467,23 @@ export class GameScene extends Phaser.Scene {
       platform.gameplayStart(); // same attempt continues — play is live again
     };
 
+    // Say what Revive does before asking for 900 Coin. It adds ONE waiting bay and leaves
+    // the board untouched; a big green button on a jammed screen otherwise reads as "clear
+    // the jam", and the player pays expecting a rescue they don't get (user 2026-08-08).
+    objs.push(
+      this.add
+        .text(cx, heroBottom + 18, tr("reviveDesc"), {
+          fontFamily: "Arial, sans-serif", fontSize: "13px", color: "#e6d6c6", align: "center",
+          wordWrap: { width: GAME_W - 90 },
+        })
+        .setOrigin(0.5)
+        .setDepth(401),
+    );
+
     // Revive button (green, big) with a coin price pill. Greyed out with a hint if the
     // player can't pay.
     const btnW = Math.min(GAME_W - 70, 280);
-    const reviveY = heroBottom + 40;
+    const reviveY = heroBottom + 66; // was +40 — room for the line above
     mkBtn(
       cx,
       reviveY,
