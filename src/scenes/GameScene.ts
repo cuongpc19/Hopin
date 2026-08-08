@@ -490,7 +490,13 @@ export class GameScene extends Phaser.Scene {
     this.load.image("slot", "art/ocho.png"); // grass-framed dirt parking bay (waiting slot)
     this.load.image("start-signal", "art/start-signal.png"); // start marker at the car spawn
     this.load.image("victory", "art/victory.png"); // win-screen hero art
-    this.load.image("out-of-space", "art/outofspace.png"); // queue-full (lose) hero art
+    // Queue-full (lose) hero art. The CROPPED copy: the original has "Clear conveyor and
+    // open up slots to keep playing!" printed across the bottom, which is simply wrong —
+    // Revive adds ONE bay and leaves the board alone. Cropping that band off keeps the
+    // title and the five-full-bays picture (both accurate) and hands the wording to
+    // tr("reviveDesc") below, where it can be corrected and translated. The uncropped
+    // original is still in public/art/outofspace.png.
+    this.load.image("out-of-space", "art/outofspace-cropped.png");
     this.load.image("heart-icon", "art/heart.png?v=1"); // hearts panel art (shared with Home)
     this.load.image("car-vip", "art/car-vip.png"); // golden/purple VIP car for the Magnet booster
     for (const b of ["add", "hand", "refresh", "magnet"]) {
@@ -6400,7 +6406,8 @@ export class GameScene extends Phaser.Scene {
       .setInteractive();
     objs.push(dim);
 
-    // Hero art ("OUT OF SPACE!" — already carries its own title & hint text).
+    // Hero art: "OUT OF SPACE!" plus the five full bays. It carries the TITLE only — the
+    // hint line underneath it comes from tr("reviveDesc"), see the preload note.
     const imgSize = Math.min(GAME_W - 56, 300);
     const heroCY = cy - 92;
     let heroBottom = heroCY;
