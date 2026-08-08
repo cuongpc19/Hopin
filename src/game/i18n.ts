@@ -1,4 +1,4 @@
-// Tiny i18n for Hop In! — Vietnamese (default) + English.
+// Tiny i18n for Hop In! — English (default) + Vietnamese.
 // Usage: t("key") → current-language string; tf("key", {n: 5}) fills {n} templates.
 // The choice persists in localStorage("pf_lang"); switch via the Settings modal.
 
@@ -11,9 +11,10 @@ export type Lang = "vi" | "en";
 //      choice (CrazyGames is English-only, user 2026-08-08)
 //   1. what the player explicitly chose before (pf_lang)
 //   2. what the host suggests, from the SDK locale or the browser
-//   3. Vietnamese, the user's choice for the self-hosted and Android builds
-//      (user 2026-08-02)
-let lang: Lang = platform.forcedLang ?? platform.preferredLang() ?? "vi";
+//   3. English (user 2026-08-08). Was Vietnamese from 2026-08-02 until then; flipped
+//      because the audience is now global. Vietnamese is still complete and still wins
+//      whenever the player picks it — this only decides the FIRST launch.
+let lang: Lang = platform.forcedLang ?? platform.preferredLang() ?? "en";
 if (!platform.forcedLang) {
   try {
     const saved = platform.storage.getItem("pf_lang");

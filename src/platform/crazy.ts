@@ -222,7 +222,8 @@ export const crazyPlatform: Platform = {
   // ENGLISH ONLY on this host (user 2026-08-08: "language duy nhất tiếng Anh đã nhé").
   // Their audience is global and English is their hard requirement; a Vietnamese browser
   // would otherwise flip the whole game, and the switcher would offer a language nobody
-  // there reads. Self-hosted and Android keep both languages and the Vietnamese default.
+  // there reads. Self-hosted and Android keep both languages, but they default to English
+  // too since 2026-08-08 — so this flag now only removes the CHOICE, not the starting language.
   forcedLang: "en",
 
   // Web-portal players arrive once and leave. A "wait 30 minutes" wall ends the

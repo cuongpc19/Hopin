@@ -3467,7 +3467,7 @@ export class GameScene extends Phaser.Scene {
       if (!v) this.clearGuidePointer();
     });
 
-    // Language switch (user 2026-08-02): Tiếng Việt default, tap flips vi ↔ en and the
+    // Language switch: English default since 2026-08-08, tap flips vi ↔ en and the
     // modal reopens fully redrawn (booster bar too). The rest of the HUD keeps
     // universal words (Level/Home/Coin) so no live redraw is needed there.
     mkRow(rowYs[2], tr("language"), () => {
