@@ -12,13 +12,19 @@
 import { browserLang, localStorageShim, noopPlatform, type Lang, type Platform, type StorageLike } from "./base";
 
 const SDK_URL = "https://sdk.crazygames.com/crazygames-sdk-v3.js";
-// An adblocked script can hang without ever firing onerror, so give up rather than wait.
+// TOTAL budget for getting the SDK up — script fetch AND their init() together.
 //
-// ⚠ This MUST stay below SplashScene's CAP_MS (3000). Splash holds Home until init settles
+// ⚠ This MUST stay below SplashScene's CAP_MS (3000). Splash holds Home until this settles
 // so that saved progress is read from their store, but the cap releases it regardless. If
 // the cap fired first, Home would open on the LOCAL copy and the next write would mirror
 // those stale values over the player's real cloud save.
-const LOAD_TIMEOUT_MS = 2500;
+//
+// Measured 2026-08-08 from Vietnam: a cold fetch of their script took 7.9s (1.2s of it DNS),
+// warm ones 1.0-1.4s. On crazygames.com itself the player has usually loaded it already, but
+// the budget has to assume they haven't — an ad SDK must never be what makes a game feel slow.
+const READY_BUDGET_MS = 2200;
+// Script-tag timeout on its own. An adblocked script can hang without ever firing onerror.
+const LOAD_TIMEOUT_MS = 2000;
 
 interface CrazyGame {
   loadingStart(): void;
@@ -42,6 +48,27 @@ declare global {
 
 let sdk: CrazySDK | null = null; // non-null only once init() has fully succeeded
 let hostLocale: string | null = null;
+let gaveUp = false; // budget expired — this session stays local-only, see boot()
+
+// The DNS/TLS warm-up for their CDN lives in index.html, injected at build time by the
+// `crazyPreconnect` plugin in vite.config.ts — see the note there for why it cannot live
+// here. This module must stay FREE OF TOP-LEVEL SIDE EFFECTS: the moment it has one,
+// Rollup can no longer drop it from the web build, and the self-hosted game starts
+// reaching for CrazyGames' servers.
+
+/** Resolve whatever `p` gives, or null once `ms` has passed. Never rejects. */
+function withDeadline<T>(p: Promise<T>, ms: number): Promise<T | null> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (v: T | null) => {
+      if (settled) return;
+      settled = true;
+      resolve(v);
+    };
+    p.then(finish, () => finish(null));
+    setTimeout(() => finish(null), ms);
+  });
+}
 
 /** Inject the SDK script. Resolves false on error OR timeout — never rejects. */
 function loadScript(): Promise<boolean> {
@@ -115,26 +142,40 @@ const crazyStorage: StorageLike = {
   },
 };
 
+/** Fetch the script and complete their handshake. Never throws; sets `sdk` on success. */
+async function boot(): Promise<void> {
+  try {
+    if (!(await loadScript())) return; // blocked or offline — game plays on without it
+    const candidate = window.CrazyGames?.SDK;
+    if (!candidate) return;
+    // Asynchronous, and the SDK is unusable until it resolves — which is why init()
+    // belongs on the loading screen. It also PRELOADS the player's saved data, the
+    // reason SplashScene holds Home: reading a save earlier gets the local copy.
+    await candidate.init();
+    if (gaveUp) return; // the deadline already passed — see init()
+    sdk = candidate;
+    hostLocale = candidate.user?.systemInfo?.locale ?? null;
+  } catch {
+    sdk = null; // half-initialised is the same as absent
+  }
+}
+
 export const crazyPlatform: Platform = {
   ...noopPlatform,
   name: "crazy",
   storage: crazyStorage,
 
   async init() {
-    if (!(await loadScript())) return; // stays a no-op platform, game plays on
-    try {
-      const candidate = window.CrazyGames?.SDK;
-      if (!candidate) return;
-      // Asynchronous, and the SDK is unusable until it resolves — so nothing may be
-      // called before this line, which is why init() belongs on the loading screen.
-      // It also PRELOADS the player's saved data, which is why SplashScene holds Home
-      // until this settles: reading a save any earlier gets the local copy, not theirs.
-      await candidate.init();
-      sdk = candidate;
-      hostLocale = candidate.user?.systemInfo?.locale ?? null;
-    } catch {
-      sdk = null; // half-initialised is the same as absent
-    }
+    // One deadline over the whole handshake. Their init() has no timeout of its own and
+    // will sit forever outside a CrazyGames frame, so without this the only thing ending
+    // the wait is SplashScene's cap — three seconds of a game that looks hung.
+    await withDeadline(boot(), READY_BUDGET_MS);
+    // Out of budget with nothing to show: stay local-only for the rest of the session.
+    // boot() may still finish later, and adopting the SDK at that point would be worse
+    // than useless — we would already have read the LOCAL save, and the next write would
+    // copy those values over the player's real cloud save. Losing a session of syncing
+    // beats losing their progress.
+    if (!sdk) gaveUp = true;
   },
 
   loadingStart() {
@@ -177,6 +218,12 @@ export const crazyPlatform: Platform = {
     if (hostLocale) return hostLocale.toLowerCase().startsWith("vi") ? "vi" : "en";
     return browserLang();
   },
+
+  // ENGLISH ONLY on this host (user 2026-08-08: "language duy nhất tiếng Anh đã nhé").
+  // Their audience is global and English is their hard requirement; a Vietnamese browser
+  // would otherwise flip the whole game, and the switcher would offer a language nobody
+  // there reads. Self-hosted and Android keep both languages and the Vietnamese default.
+  forcedLang: "en",
 
   // Web-portal players arrive once and leave. A "wait 30 minutes" wall ends the
   // session permanently, and works against the one thing the host asks of a game —

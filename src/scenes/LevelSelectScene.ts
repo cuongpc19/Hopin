@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { t as tr, tf as trf, getLang, setLang, type Lang } from "../game/i18n";
+import { t as tr, tf as trf, getLang, setLang, langLocked, type Lang } from "../game/i18n";
 import { getLives, msToNextHeart, formatCountdown, showHeartsModal, canEnterLevel } from "../game/lives";
 import { GAME_W, GAME_H, setPageBackground } from "./GameScene";
 import { levelDifficulty } from "../game/level";
@@ -252,7 +252,9 @@ export class LevelSelectScene extends Phaser.Scene {
   private openSettings() {
     const D = 400;
     const pw = 320;
-    const ph = 412;
+    // The language row spans 82px (18 gap + label + the two 40px buttons). Drop that height
+    // too on a locked build, or hiding the row just leaves a blank band above CLOSE.
+    const ph = langLocked() ? 412 - 82 : 412;
     const x0 = GAME_W / 2 - pw / 2;
     const y0 = GAME_H / 2 - ph / 2;
     const progress = Math.max(1, this.readInt("pf_progress", 1));
@@ -390,7 +392,10 @@ export class LevelSelectScene extends Phaser.Scene {
     });
 
     // ---- Language (user 2026-08-02): Tiếng Việt (default) | English ------
+    // Hidden entirely on a build locked to one language (CrazyGames is English-only):
+    // a switcher that offers a language the build will not honour is worse than none.
     const langY = jumpY + jumpH + 18;
+    if (!langLocked()) {
     objs.push(
       this.add
         .text(x0 + 22, langY + 8, "Ngôn ngữ / Language", {
@@ -426,6 +431,7 @@ export class LevelSelectScene extends Phaser.Scene {
     };
     mkLang(x0 + 22, "Tiếng Việt", getLang() === "vi", "vi");
     mkLang(x0 + 22 + segW + 12, "English", getLang() === "en", "en");
+    }
 
     const closeBtn = this.add
       .text(GAME_W / 2, y0 + ph - 26, tr("closeCaps"), {

@@ -98,8 +98,8 @@ export class SplashScene extends Phaser.Scene {
     const FLOOR_MS = __TARGET__ === "crazy" ? 300 : 3000;
     // Hard stop, so a slow network cannot strand the player on the poster. Matches the old
     // behaviour exactly — 3s and then go, ready or not.
-    // ⚠ Kept ABOVE the SDK's own load timeout (crazy.ts LOAD_TIMEOUT_MS = 2500) so init
-    // always settles first; see the note there for what breaks if that ordering flips.
+    // ⚠ Kept ABOVE the host's whole handshake budget (crazy.ts READY_BUDGET_MS = 2200) so
+    // init always settles first; see the note there for what breaks if that ordering flips.
     const CAP_MS = 3000;
     const t0 = this.time.now;
     let went = false;
@@ -118,7 +118,11 @@ export class SplashScene extends Phaser.Scene {
       const w = Phaser.Math.Clamp(prog.v, 0, 1) * (barW - 4);
       if (w > 0.5) { barFill.fillStyle(0xffd95e, 1); barFill.fillRoundedRect(barX + 2, barY + 2, w, barH - 4, (barH - 4) / 2); }
     };
-    this.tweens.add({ targets: prog, v: 0.92, duration: FLOOR_MS, ease: "Sine.out", onUpdate: drawBar });
+    // The bar creeps across the LONGEST the wait can be, not the shortest. Tweening it over
+    // FLOOR_MS made it fill in 300ms and then sit frozen while we waited on the host SDK —
+    // which reads as a hang, and is what "sao đoạn đầu load lâu thế" was actually about
+    // (user 2026-08-08). goHome snaps it to full, so leaving early still looks finished.
+    this.tweens.add({ targets: prog, v: 0.92, duration: CAP_MS, ease: "Sine.out", onUpdate: drawBar });
 
     // Bring the host SDK up while the poster is on screen. Its init is asynchronous
     // and nothing may call into it before that resolves, so the loading screen is the

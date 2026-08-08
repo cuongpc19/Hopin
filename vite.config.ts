@@ -139,11 +139,32 @@ function levelEditorApi(): Plugin {
   };
 }
 
+// Warm the DNS lookup and TLS handshake for the CrazyGames CDN, in the HTML head, so the
+// browser has a connection ready long before the SDK script is requested on the splash.
+// Measured from Vietnam 2026-08-08: a cold connection spent 1.2s in DNS alone.
+//
+// Why HERE and not in crazy.ts: doing it in the module would be a TOP-LEVEL SIDE EFFECT,
+// which stops Rollup dropping that module from the web build — and the self-hosted game
+// would then contact CrazyGames' servers on every load. Injecting at build time keeps the
+// tag exclusive to the CrazyGames bundle and gets it earlier than any script could.
+function crazyPreconnect(): Plugin {
+  return {
+    name: "crazy-preconnect",
+    transformIndexHtml(html) {
+      if (TARGET !== "crazy") return html;
+      return html.replace(
+        "</head>",
+        '  <link rel="preconnect" href="https://sdk.crazygames.com" crossorigin />\n  </head>',
+      );
+    },
+  };
+}
+
 // base: "./" makes asset paths relative — required so the built app works
 // both on the web and when wrapped by Capacitor (loaded from file://).
 export default defineConfig({
   base: "./",
-  plugins: [levelEditorApi()],
+  plugins: [levelEditorApi(), crazyPreconnect()],
   // Bake the version into the bundle so the start screen can display it.
   define: {
     __APP_VERSION__: JSON.stringify(VERSION.version),

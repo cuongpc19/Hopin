@@ -7,18 +7,20 @@ import { platform } from "../platform";
 export type Lang = "vi" | "en";
 
 // Default language, in priority order:
-//   1. what the player explicitly chose before (pf_lang) — always wins
-//   2. what the host asks for — CrazyGames requires detecting the player's language
-//      and falling back to English, so their build starts in English unless the
-//      browser actually asks for Vietnamese
+//   0. a language the HOST locks the build to — nothing overrides it, not even a saved
+//      choice (CrazyGames is English-only, user 2026-08-08)
+//   1. what the player explicitly chose before (pf_lang)
+//   2. what the host suggests, from the SDK locale or the browser
 //   3. Vietnamese, the user's choice for the self-hosted and Android builds
 //      (user 2026-08-02)
-let lang: Lang = platform.preferredLang() ?? "vi";
-try {
-  const saved = platform.storage.getItem("pf_lang");
-  if (saved === "en" || saved === "vi") lang = saved;
-} catch {
-  /* storage unavailable — stay on the default */
+let lang: Lang = platform.forcedLang ?? platform.preferredLang() ?? "vi";
+if (!platform.forcedLang) {
+  try {
+    const saved = platform.storage.getItem("pf_lang");
+    if (saved === "en" || saved === "vi") lang = saved;
+  } catch {
+    /* storage unavailable — stay on the default */
+  }
 }
 
 export function getLang(): Lang {
@@ -34,6 +36,7 @@ export function getLang(): Lang {
  * before building a screen (SplashScene does, while Home is still 3 seconds away).
  */
 export function applyHostLang(l: Lang) {
+  if (platform.forcedLang) return; // build is locked to one language
   try {
     if (platform.storage.getItem("pf_lang")) return; // player chose — leave them alone
   } catch {
@@ -42,7 +45,13 @@ export function applyHostLang(l: Lang) {
   lang = l;
 }
 
+/** True when the build is locked to one language — the switcher hides itself. */
+export function langLocked(): boolean {
+  return platform.forcedLang != null;
+}
+
 export function setLang(l: Lang) {
+  if (platform.forcedLang) return; // locked build — ignore, and don't persist a choice
   lang = l;
   try {
     platform.storage.setItem("pf_lang", l);

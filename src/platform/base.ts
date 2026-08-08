@@ -62,8 +62,13 @@ export interface Platform {
   rewarded(): Promise<boolean>;
 
   // --- Policy -------------------------------------------------------------
-  /** Language the host suggests; null = decide locally. */
+  /** Language the host suggests; null = decide locally. Ignored when `forcedLang` is set. */
   preferredLang(): Lang | null;
+  /**
+   * When set, the game runs in this language and no other: a choice saved in pf_lang is
+   * ignored and the language switcher is hidden. Undefined = the player picks.
+   */
+  readonly forcedLang?: Lang;
   /**
    * First time hearts hit zero, open a free-play window instead of a wall.
    * Web-portal players arrive once and leave; "out of hearts, wait 30 minutes"
