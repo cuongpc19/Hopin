@@ -8,7 +8,8 @@
     "build": "tsc --noEmit && vite build && node scripts/optimize-art.mjs",
     "preview": "vite preview",
     "apk": "node scripts/build-apk.mjs",
-    "deploy": "npm run build && gh-pages -d dist -f"
+    "deploy": "npm run build && gh-pages -d dist -f",
+    "zip": "node scripts/make-zip.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.1",
