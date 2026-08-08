@@ -21,6 +21,7 @@ import { t as tr, tf as trf, getLang, setLang } from "../game/i18n";
 import { getLives, spendLife, showHeartsModal, canEnterLevel, graceMsLeft } from "../game/lives";
 import { platform } from "../platform";
 import { saveRun, groupRuns, exportJsonl, clearRuns, deviceId, copyToClipboard } from "../game/playlog";
+import { sendRun } from "../game/telemetry";
 import {
   awardClovers,
   isEventUnlocked,
@@ -6371,6 +6372,7 @@ export class GameScene extends Phaser.Scene {
     const summary = { lvl: this.levelNum, sig: this.levelSig, result, ms, launches, peakBays: this.peakUsed, bays: this.slots.length };
     this.postLog({ ev: "result", ...summary }); // dòng tổng kết (postLog gom nốt vào playLog)
     saveRun(this.levelNum, result, ms, this.playLog.slice() as never); // cất lại để chép ra sau
+    sendRun(summary); // …và gửi về Firebase, thứ duy nhất đến được tay ta từ người chơi thật
   }
 
   private lose(pending?: ActiveChest) {
