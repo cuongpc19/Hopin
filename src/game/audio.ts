@@ -31,6 +31,22 @@ class GameAudio {
     } catch {
       /* storage unavailable */
     }
+    // The host's own mute button outranks everything here. CrazyGames require their
+    // setting to "take priority over your in-game audio settings", so it is applied at the
+    // MASTER gain rather than per channel: with the master at zero there is no path for
+    // setMusic/setSfx to bring the sound back, whatever the player taps.
+    platform.onHostMuteChange(() => this.applyMasterGain());
+  }
+
+  /** Master level: silent while the host mutes us, normal otherwise. */
+  private applyMasterGain() {
+    if (!this.master || !this.ctx) return;
+    const g = platform.hostMuted() ? 0 : 0.9;
+    try {
+      this.master.gain.setTargetAtTime(g, this.ctx.currentTime, 0.03);
+    } catch {
+      this.master.gain.value = g;
+    }
   }
 
   // Create/resume the audio context. Must be called from a user gesture.
@@ -41,7 +57,7 @@ class GameAudio {
         if (!AC) return;
         this.ctx = new AC();
         this.master = this.ctx.createGain();
-        this.master.gain.value = 0.9;
+        this.master.gain.value = platform.hostMuted() ? 0 : 0.9;
         this.master.connect(this.ctx.destination);
         this.musicGain = this.ctx.createGain();
         this.musicGain.gain.value = this.musicOn ? 0.12 : 0;
@@ -56,14 +72,18 @@ class GameAudio {
     }
   }
 
+  // EFFECTIVE state, not just the stored preference: while the host mutes us these read
+  // false, so the Settings toggle shows OFF instead of claiming sound is on over silence.
+  // The player's own choice is still remembered and comes back when the host unmutes.
   get isMusicOn() {
-    return this.musicOn;
+    return this.musicOn && !platform.hostMuted();
   }
   get isSfxOn() {
-    return this.sfxOn;
+    return this.sfxOn && !platform.hostMuted();
   }
 
   setMusic(on: boolean) {
+    if (platform.hostMuted()) return; // host mute wins — don't scramble the saved choice
     this.musicOn = on;
     try {
       platform.storage.setItem("pf_music", on ? "1" : "0");
@@ -76,6 +96,7 @@ class GameAudio {
   }
 
   setSfx(on: boolean) {
+    if (platform.hostMuted()) return; // host mute wins — don't scramble the saved choice
     this.sfxOn = on;
     try {
       platform.storage.setItem("pf_sfx", on ? "1" : "0");

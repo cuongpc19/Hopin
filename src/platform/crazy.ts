@@ -26,12 +26,18 @@ const READY_BUDGET_MS = 2200;
 // Script-tag timeout on its own. An adblocked script can hang without ever firing onerror.
 const LOAD_TIMEOUT_MS = 2000;
 
+interface CrazySettings {
+  muteAudio?: boolean;
+}
 interface CrazyGame {
   loadingStart(): void;
   loadingStop(): void;
   gameplayStart(): void;
   gameplayStop(): void;
   happytime(): void;
+  settings?: CrazySettings;
+  addSettingsChangeListener?(cb: (s: CrazySettings) => void): void;
+  removeSettingsChangeListener?(cb: (s: CrazySettings) => void): void;
 }
 interface CrazySDK {
   init(): Promise<void>;
@@ -49,6 +55,43 @@ declare global {
 let sdk: CrazySDK | null = null; // non-null only once init() has fully succeeded
 let hostLocale: string | null = null;
 let gaveUp = false; // budget expired — this session stays local-only, see boot()
+
+// The site's own mute button, seeded from ?muteAudio=true so it can be exercised without
+// the SDK — that is the flag their QA uses to test this, and it also lets us check the
+// behaviour locally, where the SDK never finishes its handshake anyway.
+//
+// ⚠ Seeded LAZILY, on first read. An IIFE here would be a top-level side effect, and this
+// module must have none: with one, Rollup stops dropping the file from the web build. That
+// is not hypothetical — it happened twice today, first with the preconnect tag and then
+// with this very line, both caught only by grepping the web bundle afterwards.
+let muted = false;
+let seeded = false;
+const muteListeners: Array<() => void> = [];
+
+function readMuted(): boolean {
+  if (!seeded) {
+    seeded = true;
+    try {
+      muted = new URLSearchParams(location.search).get("muteAudio") === "true";
+    } catch {
+      /* no location — leave it off */
+    }
+  }
+  return muted;
+}
+
+function setMuted(v: boolean) {
+  seeded = true; // an explicit value from the SDK outranks the query param
+  if (v === muted) return;
+  muted = v;
+  for (const cb of muteListeners) {
+    try {
+      cb();
+    } catch {
+      /* one bad listener must not stop the others */
+    }
+  }
+}
 
 // The DNS/TLS warm-up for their CDN lives in index.html, injected at build time by the
 // `crazyPreconnect` plugin in vite.config.ts — see the note there for why it cannot live
@@ -155,6 +198,12 @@ async function boot(): Promise<void> {
     if (gaveUp) return; // the deadline already passed — see init()
     sdk = candidate;
     hostLocale = candidate.user?.systemInfo?.locale ?? null;
+
+    // Site mute: take the current value, then follow it. Both are optional in the typing
+    // because an older SDK build may not carry them, and a missing mute control must not
+    // take the game down.
+    setMuted(!!candidate.game.settings?.muteAudio);
+    candidate.game.addSettingsChangeListener?.((s) => setMuted(!!s?.muteAudio));
   } catch {
     sdk = null; // half-initialised is the same as absent
   }
@@ -193,6 +242,13 @@ export const crazyPlatform: Platform = {
   },
   gameplayStop() {
     call((g) => g.gameplayStop());
+  },
+
+  hostMuted() {
+    return readMuted();
+  },
+  onHostMuteChange(cb) {
+    muteListeners.push(cb);
   },
 
   // Confetti on the host page. Their docs say use it sparingly — level clears only.

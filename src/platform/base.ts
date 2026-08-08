@@ -62,6 +62,17 @@ export interface Platform {
   rewarded(): Promise<boolean>;
 
   // --- Policy -------------------------------------------------------------
+  /**
+   * The HOST has muted the game (the mute button on its own page, not ours).
+   *
+   * This outranks the player's in-game Sound toggle — CrazyGames require that their
+   * setting "take priority over your in-game audio settings", so an in-game toggle must
+   * never bring the sound back while this is true.
+   */
+  hostMuted(): boolean;
+  /** Called whenever hostMuted() changes. No-op on hosts that never mute. */
+  onHostMuteChange(cb: () => void): void;
+
   /** Language the host suggests; null = decide locally. Ignored when `forcedLang` is set. */
   preferredLang(): Lang | null;
   /**
@@ -120,6 +131,10 @@ export const noopPlatform: Platform = {
   async rewarded() {
     return false;
   },
+  hostMuted() {
+    return false;
+  },
+  onHostMuteChange() {},
   preferredLang() {
     return null;
   },
