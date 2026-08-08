@@ -214,13 +214,72 @@ là mất sạch tiến trình của họ.
 
 ---
 
-## Giai đoạn 5 — Nộp
+## Giai đoạn 5 — Nộp Basic Launch
 
-- [ ] Chạy Quality Assurance Tool, sửa hết cảnh báo
-- [ ] Khai orientation = portrait, có hỗ trợ mobile
-- [ ] Bật "Progress Save" nếu đã làm giai đoạn 4
-- [ ] Xác nhận `dist` vẫn **dưới 20MB**
-- [ ] Nộp Basic Launch → qua QA → xin Full Launch
+⚠ **Basic Launch KHÔNG chỉ là vòng duyệt chất lượng.** Đó là bản chạy thử **hai tuần với
+lượng người chơi giới hạn**, và trong thời gian đó đội QA của họ theo dõi **số liệu gắn kết**:
+thời lượng chơi trung bình, tỉ lệ vào được gameplay, tỉ lệ quay lại. Số liệu quyết định có
+được lên Full Launch hay không. Đây là lý do giờ chơi tự do (§3) và việc vào thẳng gameplay
+(§1.3) đáng giá hơn vẻ ngoài của chúng — chúng tác động thẳng vào đúng ba chỉ số đó.
+
+### 5.1 Làm TRƯỚC khi nộp
+
+- [ ] **Thiết lập phương thức nhận tiền** — phải xong TRƯỚC khi nộp, không phải sau
+- [ ] Tạo tài khoản ở Developer Portal
+- [ ] Chạy **Quality Assurance Tool** trong portal, sửa hết cảnh báo
+
+### 5.2 Gói build
+
+```bash
+rm -f dist/iframe-test.html          # khung test cục bộ, KHÔNG được lẫn vào gói nộp
+VITE_TARGET=crazy npm run build
+```
+Rồi nén toàn bộ **nội dung bên trong** `dist/` (không nén cả thư mục `dist`) — `index.html`
+phải nằm ở gốc file zip.
+
+Kiểm lại bốn giới hạn cứng trước khi tải lên:
+
+```bash
+find dist -type f | wc -l                  # ≤ 1500
+du -sb dist                                # ≤ 250MB
+du -cb dist/index.html dist/assets dist/fonts | tail -1   # ≤ 20MB → đủ điều kiện trang chủ mobile
+grep -oE '(src|href)="/[^"]*"' dist/index.html            # phải RỖNG: cấm đường dẫn tuyệt đối
+```
+
+Đo 2026-08-08: 98 file · 5.93 MB · tải lần đầu 2.57 MB · không có đường dẫn tuyệt đối.
+
+### 5.3 Khai trong hồ sơ
+
+- [ ] Orientation = **portrait**, có hỗ trợ mobile
+- [ ] Bật **"Progress Save"** nếu đã làm giai đoạn 4 (không bật thì module `data` bị vô hiệu)
+- [ ] Mô tả game + phần điều khiển (**bắt buộc tiếng Anh** — bản nháp ở §5.4)
+- [ ] Ảnh bìa + video. Chưa có; `public/art/hopin2.jpg` (1656×1600) là nguồn tốt để cắt.
+
+### 5.4 Bản nháp chữ cho hồ sơ
+
+**Tên:** Hop In!
+
+**Mô tả ngắn:**
+> Tap a car, send it around the track, and watch it scoop up every slime of its colour.
+
+**Mô tả dài:**
+> Cute cars circle a board of coloured slimes, peeling a hidden picture from the outside in.
+> Tap a car to send it out — but careful, launching a car locks its bay until it comes back
+> full. Every tap is a commitment. Read the queue, pick your moment, and clear the picture
+> before you run out of room.
+>
+> · 190+ hand-designed levels, each one a different picture
+> · Boosters to dig you out of trouble: Add a bay, Grab any car, Shuffle the queue, Magnet
+> · Rock walls, stacked slimes and linked twin cars keep the later levels honest
+> · One-thumb play — no timers on your first hour
+
+**Điều khiển:**
+> Tap or click a car to send it onto the track. That's it — no keyboard needed.
+
+### 5.5 Sau khi nộp
+
+Đội QA chơi thử và phản hồi thường trong **1-2 ngày**, kèm ảnh chụp chỉ đúng chỗ cần sửa.
+Sửa xong thì mất thêm khoảng **hai ngày** để họ chuẩn bị phát hành.
 
 ---
 
