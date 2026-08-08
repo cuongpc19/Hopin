@@ -31,6 +31,35 @@ for (const junk of ["Notused", "level art", "tmp"]) {
   }
 }
 
+// ---- Cars & runner slimes → power-of-two, so they finally get MIPMAPS ---------------
+//
+// Phaser only mipmaps power-of-two textures (main.ts, render.mipmapFilter). The board
+// tiles are 128x128 so they get proper minification; the cars ship at 373x420 and do not,
+// and they are drawn at ~140-184 device px — a 2-3x shrink taking ONE texel sample per
+// pixel. Detail drops out at random, which is exactly the "nhoe" the user saw: crisp tiles
+// and soft cars side by side on the same screen (2026-08-08).
+//
+// Fix: fit each into 256 (comfortably above the ~184px they are ever drawn at) and pad to
+// a transparent 256x256. GameScene.trimTexture crops the padding straight back off, so
+// nothing moves on screen — the texture is simply power-of-two now.
+//
+// dist ONLY. public/art keeps the originals at full size.
+const POT = 256;
+for (const file of [...walk(ART_DIR)]) {
+  const b = basename(file);
+  if (!/^(car|slime)-\d+\.png$/.test(b)) continue;
+  const tmp = file + ".pot.png";
+  await sharp(file)
+    .resize(POT, POT, { fit: "inside", withoutEnlargement: true })
+    .extend({ top: 0, bottom: 0, left: 0, right: 0, background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .resize(POT, POT, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .png({ palette: true, quality: 90 })
+    .toFile(tmp);
+  rmSync(file, { force: true });
+  renameSync(tmp, file);
+}
+console.log(`[optimize-art] cars/slimes padded to ${POT}x${POT} (power-of-two → mipmaps)`);
+
 function* walk(dir) {
   for (const name of readdirSync(dir)) {
     const p = join(dir, name);
