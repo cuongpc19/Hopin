@@ -523,3 +523,30 @@ bậc trung gian; quét cả chiều lớp-2 (60/100/150 ô) cũng chỉ tới �
 thắng, hỏng từ lâu, chưa ai sửa.
 
 **Việc tiếp theo:** L31-46 vẫn là bản cũ; L51 cần sửa hoặc bỏ.
+
+### 10.1 Hạ nhẹ L5/L7/L8/L9 (user 2026-08-05)
+
+User: *"kéo L5, L7-9 giảm 1 tý tẹo"*, chốt dải **82-85%**. Đo trước khi sửa: L5 94%, L7 94%,
+L8 91%, L9 92% — chín bàn đầu đều ≥91%, không còn đường cong thử thách nào.
+
+Đo lại trên file đã ghi (n=200): **L5 81% · L7 83% · L8 80% · L9 82%**.
+
+| lv | nấc | xe |
+|---|---|---|
+| L5 | cap 65, wave 3, press 0, minCar 40 | 23 |
+| L7 | cap 130, wave 1, press 0.15, minCar 40 | 11 |
+| L8 | cap 65, wave 1, press 0.15, minCar 40 | 11 |
+| L9 | cap 45, wave 3, press 0.2, minCar 40 | 10 |
+
+⚠ **`--pick` KHÔNG dùng được cho nhóm này.** Với cả bốn board, mô hình D ghim ở 98-100 ở gần
+như mọi nấc, nên `distTo = max(|B−t|, |D−t|)` bị D chi phối: nấc B=100 và nấc B=83 cho ra cùng
+một khoảng cách, bộ chọn không phân biệt nổi. Phải chốt thẳng nấc đã đo.
+
+⚠ **L9 gần như nhị phân.** Thang 48 nấc (CAPS=65,130) cho 46/48 nấc = 94%, không có bậc nào
+trong 82-88. Phải nới thang lên 300 nấc (CAPS=130,95,65,45,30 × WAVES 1,2,3,5 × PRESS
+0…0.45 × MINCAR 12,22,40) mới có 10 nấc lọt dải — và bậc mở ra ở **cap=45**, ngoài hẳn khoảng
+65-130 mà runbook §9.1 gợi ý. Board bí thì nới TRỤC CAP trước.
+
+⚠ **Quét ở N_B=30 lệch tới 7 điểm.** Nấc L9 đọc 85% lúc quét, đo lại ở N_B=200 ra 89% → phải
+lùi thêm một bậc mới về 82%. Nấc chọn ở độ phân giải thấp thì BẮT BUỘC đo lại n=200 trước khi
+báo cáo (§0.4), đừng tin số lúc quét.
