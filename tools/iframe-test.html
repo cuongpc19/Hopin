@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Hop In! — kiểm khung iframe (CrazyGames)</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0; padding: 24px; background: #14161f; color: #e8e6df;
+        font: 14px/1.5 system-ui, sans-serif;
+      }
+      h1 { font-size: 18px; margin: 0 0 4px; }
+      p.lede { margin: 0 0 20px; color: #9aa0b0; max-width: 70ch; }
+      .case { margin-bottom: 28px; }
+      .case > h2 {
+        font-size: 13px; font-weight: 600; margin: 0 0 8px;
+        display: flex; align-items: baseline; gap: 10px;
+      }
+      .case > h2 .dim { color: #8b93a7; font-weight: 400; font-variant-numeric: tabular-nums; }
+      .frame { border: 2px solid #39405a; background: #000; display: block; }
+      /* 1920x1080 shown at half scale so it fits an ordinary monitor; the game
+         inside still believes it is 1920x1080. */
+      .half { transform: scale(0.5); transform-origin: top left; }
+      .half-wrap { height: 540px; overflow: hidden; }
+      .controls { margin-bottom: 20px; display: flex; gap: 8px; flex-wrap: wrap; }
+      button {
+        background: #262c40; color: #e8e6df; border: 1px solid #39405a;
+        border-radius: 6px; padding: 6px 12px; font: inherit; cursor: pointer;
+      }
+      button:hover { background: #313852; }
+      code { background: #262c40; padding: 1px 5px; border-radius: 4px; }
+    </style>
+  </head>
+  <body>
+    <h1>Kiểm khung iframe — yêu cầu CrazyGames</h1>
+    <p class="lede">
+      Họ yêu cầu game chạy được ở nhiều cỡ khung, <strong>800×450 đến 1920×1080</strong>.
+      Chạy <code>npx vite preview</code> rồi mở file này. Nhìn từng khung: bảng chơi phải
+      nằm gọn, không bị cắt, không tràn, chữ không đè nhau. Dải hai bên phải ăn màu với
+      khung cảnh chứ không phải đen.
+    </p>
+
+    <div class="controls">
+      <button onclick="reloadAll()">Nạp lại tất cả</button>
+      <button onclick="setSrc('http://localhost:4173/')">Bản build (vite preview :4173)</button>
+      <button onclick="setSrc('http://localhost:5173/')">Bản dev (vite :5173)</button>
+      <button onclick="setSrc(base + '?level=1')">Vào thẳng màn 1</button>
+    </div>
+
+    <div class="case">
+      <h2>Nhỏ nhất được hỗ trợ <span class="dim">800 × 450 · 16:9</span></h2>
+      <iframe class="frame" width="800" height="450"></iframe>
+    </div>
+
+    <div class="case">
+      <h2>Cỡ thường gặp trên desktop <span class="dim">1280 × 720 · 16:9</span></h2>
+      <iframe class="frame" width="1280" height="720"></iframe>
+    </div>
+
+    <div class="case">
+      <h2>Lớn nhất được hỗ trợ <span class="dim">1920 × 1080 · 16:9 · hiển thị ở 50%</span></h2>
+      <div class="half-wrap">
+        <iframe class="frame half" width="1920" height="1080"></iframe>
+      </div>
+    </div>
+
+    <div class="case">
+      <h2>Điện thoại dọc <span class="dim">390 × 844 · 2.16 — không phải yêu cầu của họ, nhưng là nơi phần lớn người chơi ở</span></h2>
+      <iframe class="frame" width="390" height="844"></iframe>
+    </div>
+
+    <script>
+      let base = "http://localhost:4173/";
+      const frames = () => document.querySelectorAll("iframe");
+      function setSrc(url) {
+        if (!url.includes("?")) base = url;
+        frames().forEach((f) => (f.src = url));
+      }
+      function reloadAll() {
+        frames().forEach((f) => (f.src = f.src));
+      }
+      setSrc(base);
+    </script>
+  </body>
+</html>

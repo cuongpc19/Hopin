@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { t as tr, tf as trf, getLang, setLang, type Lang } from "../game/i18n";
-import { getLives, msToNextHeart, formatCountdown, showHeartsModal } from "../game/lives";
+import { getLives, msToNextHeart, formatCountdown, showHeartsModal, canEnterLevel } from "../game/lives";
 import { GAME_W, GAME_H, setPageBackground } from "./GameScene";
 import { levelDifficulty } from "../game/level";
 import {
@@ -222,9 +222,11 @@ export class LevelSelectScene extends Phaser.Scene {
   }
 
   // Gate every route into a level: you need a heart in the bank to play. At 0 the
-  // hearts panel opens instead (buy with Coin, or watch the refill timer).
+  // hearts panel opens instead (buy with Coin, or watch the refill timer) — unless
+  // the host grants a free-play window on first running dry, which canEnterLevel()
+  // opens for us (see lives.ts GRACE_MS).
   private canPlay(): boolean {
-    if (getLives() > 0) return true;
+    if (canEnterLevel()) return true;
     this.openHearts();
     return false;
   }

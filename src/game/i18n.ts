@@ -2,9 +2,18 @@
 // Usage: t("key") → current-language string; tf("key", {n: 5}) fills {n} templates.
 // The choice persists in localStorage("pf_lang"); switch via the Settings modal.
 
+import { platform } from "../platform";
+
 export type Lang = "vi" | "en";
 
-let lang: Lang = "vi"; // DEFAULT = Tiếng Việt (user 2026-08-02)
+// Default language, in priority order:
+//   1. what the player explicitly chose before (pf_lang) — always wins
+//   2. what the host asks for — CrazyGames requires detecting the player's language
+//      and falling back to English, so their build starts in English unless the
+//      browser actually asks for Vietnamese
+//   3. Vietnamese, the user's choice for the self-hosted and Android builds
+//      (user 2026-08-02)
+let lang: Lang = platform.preferredLang() ?? "vi";
 try {
   const saved = localStorage.getItem("pf_lang");
   if (saved === "en" || saved === "vi") lang = saved;
@@ -159,6 +168,7 @@ const S: Record<string, { vi: string; en: string }> = {
   heartsOut: { vi: 'Hết tim rồi!', en: 'Out of Hearts!' },
   heartsFull: { vi: 'Tim đã đầy — chơi thoải mái!', en: 'Hearts are full — play on!' },
   heartsNext: { vi: 'Tim tiếp theo sau {t}', en: 'Next heart in {t}' },
+  heartsFree: { vi: 'Chơi thả ga — còn {t}', en: 'Free play — {t} left' },
   heartsBuy1: { vi: 'Mua 1 tim — {n} Coin', en: 'Buy 1 heart — {n} Coin' },
   heartsBuyFull: { vi: 'Đầy 5 tim — {n} Coin', en: 'Refill 5 hearts — {n} Coin' },
 

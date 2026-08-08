@@ -26,6 +26,20 @@ function buildVersion(): { version: string; build: string } {
   }
 }
 const VERSION = buildVersion();
+
+// Which host we are building for. ONE codebase, one flag — never a second folder
+// (see CLAUDE.md "ONE version, ONE folder, ONE branch").
+//   web     — self-hosted / GitHub Pages, no ads          (default)
+//   crazy   — CrazyGames: their SDK only, English default, no third-party ads
+//   android — Capacitor APK/AAB
+// Anything unrecognised falls back to "web" rather than silently shipping the
+// wrong host's code.
+const TARGETS = ["web", "crazy", "android"] as const;
+const rawTarget = process.env.VITE_TARGET ?? "web";
+const TARGET = (TARGETS as readonly string[]).includes(rawTarget) ? rawTarget : "web";
+if (rawTarget !== TARGET) console.warn(`[build] VITE_TARGET="${rawTarget}" không hợp lệ → dùng "web"`);
+console.log(`[build] target = ${TARGET}`);
+
 const EDITOR = root + "tools/level-editor.html";
 
 // Dev-only bridge so tools/level-editor.html (opened at /editor) can save levels
@@ -134,6 +148,7 @@ export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(VERSION.version),
     __APP_BUILD__: JSON.stringify(VERSION.build),
+    __TARGET__: JSON.stringify(TARGET),
   },
   server: {
     host: true,

@@ -18,7 +18,7 @@ import { drawVoxelCube, voxelFrontOverlap, setVoxelFrontRatio } from "../render/
 import { glossyButton } from "../game/ui";
 import { Audio } from "../game/audio";
 import { t as tr, tf as trf, getLang, setLang } from "../game/i18n";
-import { getLives, spendLife, showHeartsModal } from "../game/lives";
+import { getLives, spendLife, showHeartsModal, canEnterLevel, graceMsLeft } from "../game/lives";
 import { saveRun, groupRuns, exportJsonl, clearRuns, deviceId, copyToClipboard } from "../game/playlog";
 import {
   awardClovers,
@@ -698,7 +698,14 @@ export class GameScene extends Phaser.Scene {
     const designRegion = (rows: number, pk: number) => (rows - 1) * (chest + INV_GAP_Y) + chest + pk + 8;
     const designCluster = SLOT_SIZE + gSlots + designRegion(2, designPeek) + gInv + boostH;
     const avail = GAME_H - clusterTop - margin;
-    const s = Phaser.Math.Clamp(avail / designCluster, CLUSTER_MIN_SCALE, 1); // only ever shrinks
+    // A tall phone leaves slack the queue is no longer allowed to eat (MAX_VIS_ROWS
+    // below), so let the cluster GROW into it rather than leaving a dead band above
+    // the boosters: same number of bays and cars, just bigger. Bounded by the row
+    // width so `perRow` columns still fit across a 480-wide world, and by 1.25 so a
+    // very tall screen doesn't end up with comically large cars.
+    const rowSpan = (perRow - 1) * (CAR_SIZE + INV_GAP_X) + CAR_SIZE;
+    const sMax = Phaser.Math.Clamp((GAME_W - 24) / rowSpan, 1, 1.25);
+    const s = Phaser.Math.Clamp(avail / designCluster, CLUSTER_MIN_SCALE, sMax);
     this.slotSize = Math.round(SLOT_SIZE * s);
     this.chestSize = Math.round(chest * s);
     this.invGapX = Math.round(INV_GAP_X * s);
@@ -711,12 +718,21 @@ export class GameScene extends Phaser.Scene {
     this.buildSlots(clusterTop); // zone 2
     const invTop = clusterTop + this.slotSize + gSlotsS;
     const invAvail = boosterTop - gInvS - invTop;
-    // Fill the gap with as many WHOLE rows as fit, then spend the remainder on the peek:
-    // whole rows show more cars you can actually pick than one fat sliver would.
+    // TWO full rows plus a dimmed peek of the third — on EVERY device (user 2026-08-08).
+    //
+    // This used to fill the gap with as many whole rows as fit, up to five. Measured
+    // 2026-08-08: a 16:9 frame (every CrazyGames iframe size, GAME_H=768) shows 2 rows,
+    // but a portrait phone (GAME_H≈1039) showed 5 — phone players saw 2.5x the queue,
+    // and knowing what is coming is a direct advantage. The same level was easier on a
+    // phone than on a desktop, which no winrate measurement ever modelled. Difficulty
+    // must not depend on the shape of the screen.
+    //
+    // Raise this only with a matching plan for the difficulty it hands the player.
+    const MAX_VIS_ROWS = 2;
     const rowStep = this.chestSize + this.invGapY;
     const regionOf = (rows: number, pk: number) => (rows - 1) * rowStep + this.chestSize + pk + 8;
     let vis = 1;
-    while (vis < 5 && regionOf(vis + 1, 0) <= invAvail) vis++;
+    while (vis < MAX_VIS_ROWS && regionOf(vis + 1, 0) <= invAvail) vis++;
     let peek = invAvail - regionOf(vis, 0);
     // A row that lands flush with the booster row leaves no sliver, so the player gets no
     // hint that more cars are queued below. Give the last row back in that case — two rows
@@ -784,7 +800,7 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(D + 2);
     const ok = this.add
-      .text(GAME_W / 2, y0 + ph - 34, "ĐÃ HIỂU!", {
+      .text(GAME_W / 2, y0 + ph - 34, tr("gotIt"), {
         fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "16px", color: "#ffffff",
         backgroundColor: "#3a8a3a", padding: { x: 26, y: 8 },
       })
@@ -3510,7 +3526,9 @@ export class GameScene extends Phaser.Scene {
       onClose: () => {
         if (handled) return;
         handled = true;
-        if (getLives() > 0) this.startLevel(this.levelNum);
+        // A heart bought in the panel — or a still-open free-play window — drops
+        // straight back into the level rather than bouncing to Home.
+        if (getLives() > 0 || graceMsLeft() > 0) this.startLevel(this.levelNum);
         else this.scene.start("select");
       },
       extra: { label: tr("home"), onTap: () => { handled = true; this.scene.start("select"); } },
@@ -6394,7 +6412,9 @@ export class GameScene extends Phaser.Scene {
         onConfirm: () => {
           const left = spendLife();
           closeAll();
-          if (left <= 0) { this.showOutOfHearts(); return; } // last heart — can't start again
+          // Last heart gone — unless the host opens a free-play window (canEnterLevel
+          // grants it), in which case play carries straight on instead of hitting a wall.
+          if (left <= 0 && !canEnterLevel()) { this.showOutOfHearts(); return; }
           this.startLevel(this.levelNum);
         },
       });

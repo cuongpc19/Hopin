@@ -10,15 +10,25 @@
 //     entry and offers "buy with Coin" or "wait for the refill".
 //
 // State lives in localStorage:
-//   pf_lives      — hearts currently held (0..MAX)
-//   pf_lives_next — epoch ms when the NEXT heart lands (0 = full, no timer running)
+//   pf_lives       — hearts currently held (0..MAX)
+//   pf_lives_next  — epoch ms when the NEXT heart lands (0 = full, no timer running)
+//   pf_grace_until — epoch ms the free-play window ends (0 = never opened). See GRACE_MS.
 import Phaser from "phaser";
 import { t as tr, tf as trf } from "./i18n";
+import { platform } from "../platform";
 
 export const MAX_LIVES = 5;
 export const REGEN_MS = 5 * 60 * 1000; // one heart per 5 minutes
 export const HEART_PRICE = 150; // Coin for a single heart
 export const REFILL_PRICE = 500; // Coin to top straight back up to MAX
+
+// Free-play window opened the FIRST time a player runs out of hearts, on hosts
+// that ask for it (platform.graceOnEmpty — web portals). Rationale: a drive-by web
+// player who meets "out of hearts, wait 30 minutes" closes the tab and never
+// returns, and the wall works against the one thing CrazyGames asks of a game —
+// that players land in gameplay immediately. Once only, then the normal gate applies.
+export const GRACE_MS = 60 * 60 * 1000; // one hour
+const GRACE_KEY = "pf_grace_until";
 
 function readInt(key: string, dflt: number): number {
   try {
@@ -89,6 +99,39 @@ export function spendLife(): number {
   // running clock keeps its schedule (a loss never delays the pending heart).
   write(left, lives >= MAX_LIVES ? Date.now() + REGEN_MS : nextAt);
   return left;
+}
+
+// ---- Free-play grace window ---------------------------------------------
+
+/** Milliseconds left in the free-play window; 0 when it is closed or never opened. */
+export function graceMsLeft(): number {
+  if (!platform.graceOnEmpty) return 0;
+  const until = readInt(GRACE_KEY, 0);
+  if (until <= 0) return 0;
+  return Math.max(0, until - Date.now());
+}
+
+/**
+ * Can the player start a level right now?
+ *
+ * A heart in the bank is the normal answer. On a host with `graceOnEmpty`, the
+ * FIRST time they run dry we open GRACE_MS of free play instead of showing a wall.
+ *
+ * ⚠ Calling this OPENS the window as a side effect, so call it at the gate and
+ * nowhere else — use `graceMsLeft() > 0` for read-only checks (HUD, labels).
+ */
+export function canEnterLevel(): boolean {
+  if (getLives() > 0) return true;
+  if (!platform.graceOnEmpty) return false;
+
+  const until = readInt(GRACE_KEY, 0);
+  if (until > 0) return Date.now() < until; // opened before: still good, or spent
+  try {
+    localStorage.setItem(GRACE_KEY, String(Date.now() + GRACE_MS));
+  } catch {
+    return true; // no storage — let them play rather than strand them on a wall
+  }
+  return true;
 }
 
 export function addLives(n: number): number {
@@ -176,6 +219,13 @@ export function showHeartsModal(scene: Phaser.Scene, opts: HeartsModalOpts) {
     .setDepth(D + 2);
   objs.push(info);
   const refreshInfo = () => {
+    // The free-play window takes priority: while it is open the refill timer is
+    // not what the player needs to know — they can already play.
+    const free = graceMsLeft();
+    if (free > 0) {
+      info.setText(trf("heartsFree", { t: formatCountdown(free) }));
+      return;
+    }
     const ms = msToNextHeart();
     info.setText(ms > 0 ? trf("heartsNext", { t: formatCountdown(ms) }) : tr("heartsFull"));
   };
