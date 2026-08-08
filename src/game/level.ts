@@ -86,8 +86,17 @@ export interface Level {
 // Difficulty tiers: every 5th level is HARD, every 15th is SUPER-HARD.
 export type Difficulty = "normal" | "hard" | "superhard";
 
+// Hand-picked walls (user 2026-08-08). These are tuned to ~5% on purpose, as gates:
+// levels the player is meant to grind at, opened up later if the numbers say so.
+//
+// They need an override because the rule below is purely arithmetic: L34 would come out
+// "normal" and L35 only "hard", so a player would walk into a 4% level with no warning
+// and read it as a broken game rather than a wall. Anything this hard MUST announce itself.
+const SUPER_GATES = new Set([30, 34, 35]);
+
 export function levelDifficulty(n: number): Difficulty {
   if (n >= 200 && n <= 300) return "normal"; // kid pack: all easy — no HARD/SUPER badges
+  if (SUPER_GATES.has(n)) return "superhard";
   if (n % 15 === 0) return "superhard";
   if (n % 5 === 0) return "hard";
   return "normal";

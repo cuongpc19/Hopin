@@ -187,6 +187,30 @@ L15 (2026-08-07) chỉ tìm được **đúng một** nấc có cả B lẫn D t
 
 ---
 
+### 2.4b Level ~5%: phải chứng minh CÓ ĐƯỜNG THẮNG (`check-gate.mjs`)
+
+Một level đọc 5% có thể là hai thứ khác hẳn nhau, và thước winrate **không tách được** vì
+cả hai đều đọc ~0-5%:
+
+- **khó thật** — có đường thắng, giỏi/may thì qua → đúng thứ level cổng cần;
+- **bất khả thi** — không tồn tại đường thắng → user chơi mãi không qua, kết luận game lỗi.
+
+Đây chính là cách L11/L16/L51 hỏng suốt thời gian dài mà không ai biết. `check-seats.mjs`
+bắt lỗi số ghế; `check-gate.mjs` bắt lỗi không có đường thắng.
+
+```bash
+node scripts/check-gate.mjs 30 34 35
+```
+
+Cách làm: **tìm nhân chứng**. Một ván thắng trong vài nghìn lượt mô phỏng (B 400 lượt + D
+200 lượt × 4 mức skill) là đã chứng minh đường thắng tồn tại. Không tìm ra thì **không**
+chứng minh được điều ngược lại — báo "nghi ngờ", đừng ship trước khi soi tay.
+
+⚠ **`SKILL=1` KHÔNG phải "người chơi hoàn hảo".** Bẫy đã sập 2026-08-08: nhiệt độ chọn ở
+`build-levels.mjs:1072` là `TEMP·(1−skill)·LOAD`, nên skill=1 làm bot chơi **tất định** —
+mọi ván đi đúng một đường, đường đó thua thì đọc 0%. Đo thật: **L30 ra 51% ở skill 0.75
+nhưng 0% ở skill 1.0**. Skill THẤP dò được nhiều đường hơn nên tìm nhân chứng TỐT HƠN.
+
 ### 2.5 Vân tay level — vì sao `--fit` từng nắn bằng dữ liệu lạc bản
 
 `playlog.jsonl` chỉ ghi SỐ level. Khi một level được dựng lại, các ván cũ vẫn nằm đó dưới cùng
@@ -351,6 +375,7 @@ score = |win − target|
 | Slime `?` | 2026-08-05 | bỏ |
 | Xe đôi / xe `?` | 2026-08-05 | giữ; level khó thì mật độ nhiều hơn |
 | Được đổi ảnh | 2026-08-05 | chỉ L15, L20, L25, L30 |
+| Level cổng ~5% | 2026-08-08 | L30/L34/L35 làm tường chắn; "nếu có tín hiệu tốt thì mở ra" |
 
 Target từng level lấy ở `Manythings/Design winrate/winratedesign1.csv` (cột `lvl`, `target`,
 `max màu`, `minxe`, `xedoi`), cắt trần 90.
