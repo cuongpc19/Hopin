@@ -557,11 +557,16 @@ User đặt mốc TRÊN THANG B, không phải trên winrate hiệu chuẩn — 
 | lv | B trước | mốc B | **B sau** | D sau | lệch B/D | hiệu chuẩn | xe |
 |---|---|---|---|---|---|---|---|
 | L15 | 67 | 45 | **53** | 68 | 15 | 44% | 22 |
-| L20 | 68 | 58 | **51** | 52 | **1** | 35% | 20 |
+| L20 | 68 | 58 | *(trả về bản cũ)* | 38 | 30 | 37% | 15 |
 | L25 | 50 | 35 | **38** | 45 | 7 | 27% | 19 |
 
-Lệch B/D tụt từ 39/30/32 xuống 15/1/7 — mục đích chính đạt được, ba con số này giờ đáng tin
-hơn hẳn bản cũ. Lớp 2 giữ nguyên 40 ô cả ba. Thua@ 63/65/67% (§4 lành mạnh).
+Lệch B/D của L15/L25 tụt từ 39/32 xuống 15/7 — hai con số đó giờ đáng tin hơn hẳn bản cũ.
+Lớp 2 giữ nguyên 40 ô. Thua@ 63/67% (§4 lành mạnh).
+
+⚠ **L20 ĐÃ TRẢ VỀ BẢN CŨ (user 2026-08-08 sau khi chơi thử): 15 xe, B=68/D=38.** Nấc mới
+(20 xe, B=51/D=52) đo đẹp hơn hẳn trên giấy — lệch B/D chỉ 1 so với 30 — nhưng user chơi
+thấy không hợp. Bài học: **B/D đồng thuận nói lên PHÉP ĐO đáng tin tới đâu, KHÔNG nói level
+có hay không.** Đừng lấy nó làm lý do giữ một nấc mà người chơi đã bác.
 
 ⚠ **`--scan2` KHÔNG dùng được cho L20/L25.** Nó loại thẳng mọi nấc `lay > 0` khi
 `spec(n).target > 60`, mà cả hai target 62 — trong khi `build()` mở đầu bằng `delete L.layer2`.
