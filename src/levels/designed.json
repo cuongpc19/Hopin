@@ -8630,50 +8630,87 @@
     "chests": [
       {
         "color": 15,
-        "count": 65
+        "count": 30
       },
       {
         "color": 15,
-        "count": 59
+        "count": 30
       },
       {
         "color": 15,
-        "count": 60
+        "count": 30
+      },
+      {
+        "color": 15,
+        "count": 30
       },
       {
         "color": 10,
-        "count": 89
+        "count": 30,
+        "pairId": 2
       },
       {
-        "color": 17,
-        "count": 64,
+        "color": 15,
+        "count": 34,
         "pairId": 0
       },
       {
         "color": 14,
-        "count": 43,
+        "count": 29,
+        "buried": true
+      },
+      {
+        "color": 10,
+        "count": 28,
+        "pairId": 1
+      },
+      {
+        "color": 17,
+        "count": 22,
+        "pairId": 2
+      },
+      {
+        "color": 17,
+        "count": 42,
         "pairId": 0
       },
       {
-        "color": 4,
-        "count": 7,
+        "color": 14,
+        "count": 33,
         "buried": true
       },
       {
         "color": 11,
-        "count": 57
+        "count": 22,
+        "pairId": 1
       },
       {
-        "color": 8,
+        "color": 4,
         "count": 7
       },
       {
         "color": 14,
-        "count": 45
+        "count": 26
       },
       {
         "color": 0,
         "count": 33
+      },
+      {
+        "color": 15,
+        "count": 30
+      },
+      {
+        "color": 11,
+        "count": 35
+      },
+      {
+        "color": 10,
+        "count": 31
+      },
+      {
+        "color": 8,
+        "count": 7
       }
     ],
     "slam": true,

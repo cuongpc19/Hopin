@@ -549,6 +549,33 @@ thắng, hỏng từ lâu, chưa ai sửa.
 
 **Việc tiếp theo:** L31-46 vẫn là bản cũ; L51 cần sửa hoặc bỏ.
 
+### 10.2 L10: gấp rưỡi số xe, giữ winrate (user 2026-08-08)
+
+User chơi ván thật rồi báo *"quá dễ, quá ít xe"* — L10 lúc đó 11 xe / 529 ghế (~48 slime/xe).
+Yêu cầu: ×1.5 số xe, winrate giữ nguyên 68%.
+
+Kết quả: **19 xe, 66%** (cap 30, wave 2, press 0.15, minCar 22). B=79 D=78 — đồng thuận sát
+nhất trong cả đợt, nên con số này đáng tin hơn nhóm L5-L9 (nơi D ghim ở ~100).
+
+⚠ **SỐ XE VÀ WINRATE KHÔNG ĐỘC LẬP — phải quét cả hai chiều cùng lúc.** Ba nấc đo thật:
+
+| xe | winrate n=200 |
+|---|---|
+| 17 | 60% |
+| 18 | 78% |
+| 19 | 66% |
+
+Không đơn điệu, và nấc đúng 17 xe (đúng ×1.5) lại lệch winrate 8 điểm. Đổi số xe rồi mới
+chỉnh winrate sẽ không hội tụ; phải lọc đồng thời `cars ∈ [a,b]` VÀ `win ∈ target±8`.
+
+⚠ **N_B=60 vẫn lệch 2-5 điểm so với n=200, và KHÔNG cùng chiều** (17 xe: quét 65 → thật 60;
+18 xe: quét 76 → thật 78). Không bù được bằng hằng số. Quét chỉ để khoanh vùng; nấc nào cũng
+phải đo lại n=200 trước khi báo cáo.
+
+⚠ Ván thật đầu tiên có VÂN TAY khớp board đang ship rơi vào L10 (`sig` wnb82h, thắng 96s,
+`peakBays` 5 — chạm đúng ngưỡng thua). Bản 11 xe đó nay đã bị thay, nên ván ấy lại thành
+lạc bản. Muốn có dữ liệu `--fit` sạch thì phải chơi SAU khi chốt hàng xe, không phải trước.
+
 ### 10.1 Hạ nhẹ L5/L7/L8/L9 (user 2026-08-05)
 
 User: *"kéo L5, L7-9 giảm 1 tý tẹo"*, chốt dải **82-85%**. Đo trước khi sửa: L5 94%, L7 94%,
