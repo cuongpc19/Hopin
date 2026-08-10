@@ -23,7 +23,9 @@ if (!existsSync(ART_DIR)) {
 // Drop folders the game never loads at runtime (source scraps + design references).
 // "tmp" is the art scratch folder — gitignored, but vite copies all of public/ regardless,
 // and at ~18MB it would more than double the APK if it shipped.
-for (const junk of ["Notused", "level art", "tmp"]) {
+// "newbackground" = the Gemini renders the store covers are cut from. Source material for
+// store/crazygames/, never loaded by the game — same class as the folders beside it.
+for (const junk of ["Notused", "level art", "tmp", "newbackground"]) {
   const p = join(ART_DIR, junk);
   if (existsSync(p)) {
     rmSync(p, { recursive: true, force: true });

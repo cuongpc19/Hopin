@@ -13,7 +13,10 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
-    <title>Hop In!</title>
+    <!-- "Hop in", not "Hop In!" — this has to match the logo on the store covers and the
+         title on the CrazyGames listing, which requires the title to be the same as the
+         one shown in the game (user 2026-08-10). -->
+    <title>Hop in</title>
     <!-- Fetch the splash poster in parallel with the JS bundle so it's already
          cached by the time Phaser boots — the splash then appears the instant the
          engine is ready instead of after a second round-trip. -->
@@ -114,7 +117,9 @@
   <body>
     <div id="game"></div>
     <div id="boot">
-      <div class="title">Hop In!</div>
+      <!-- The one place a player actually reads the name: it paints before the bundle
+           finishes loading. Keep it identical to the covers and the store title. -->
+      <div class="title">Hop in</div>
       <div class="dots"><span></span><span></span><span></span></div>
     </div>
     <script type="module" src="/src/main.ts"></script>
