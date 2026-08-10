@@ -1278,6 +1278,33 @@ Manythings/Design level/builder-rules.md.
   của màu đó (kể cả lớp 2). Xe chỉ rời bay khi đầy 100%. L51 hỏng bất biến từ
   trước, chưa sửa (ngoài phạm vi L2-30).
 
+36) SHUFFLE LÀM LEVEL KHÔNG THỂ THẮNG — ĐÃ SỬA (user 2026-08-08)
+────────────────────────────────────────────────────────────────────────────
+• User báo: "level 16 thiếu xe à", "sau khi shuffer thì k đủ xe".
+• LỖI: boosterRefresh gọi setCarColor() cho từng xe trong hàng chờ. Hàm đó ghi đè
+  chest.color NHƯNG GIỮ NGUYÊN chest.count — xe đỏ 47 ghế thành xe xanh 47 ghế.
+  Cả game đứng trên bất biến "tổng ghế mỗi màu = số ô màu đó" (xe chỉ rời bay khi
+  đầy 100%), nên chia lại màu trên sức chứa cố định là phá bất biến ngay.
+  L16: 9 xe từ 47..89 ghế, ba màu cần 208/192/225 → một lần Shuffle để lại
+  31-59 ô KHÔNG BAO GIỜ ăn được. Bàn còn slime mà không xe nào ăn nổi.
+• Dính MỌI level, không riêng L16 — L16 chỉ là nơi gặp đầu tiên vì Shuffle mở khoá
+  đúng ở đó (BOOSTERS unlock: 16). Lỗi có TRƯỚC commit 699b915.
+• SỬA (user chốt: "shuffle chỉ đổi chỗ xe thôi, k chia lại gì cả"): hoán vị NGUYÊN
+  XE — cặp (màu, sức chứa) đi liền nhau nên tổng ghế mỗi màu không thể đổi. Vẫn giữ
+  ý đồ "xe xếp đẹp": màu ăn được ngay lên đầu, đồng hạng thì màu còn nhiều ô hơn
+  lên trước. Xoá hẳn setCarColor để không ai tái tạo lỗi.
+• ⚠ ĐỔI TỪ "ĐỔI MÀU" SANG "ĐỔI CHỖ" SINH RA CẢ MỘT LỚP RÀNG BUỘC VỊ TRÍ MỚI:
+  - Xe đôi phải đi thành MỘT KHỐI, nếu không dây bị kéo giãn (§1.3 LEVEL-DESIGN).
+  - Xe "?" (chôn) KHÔNG được xếp hạng theo màu thật: layoutInventory lật ngửa mọi xe
+    ở đầu cột, nên đẩy nó lên đầu là vừa lộ đáp án vừa lật nó luôn. Xe "?" xếp cuối.
+  - Xe "?" ĐI CẶP với xe đôi thì CẢ CẶP xuống cuối — rankUnit lấy min sẽ để xe "?"
+    bám theo xe kia lên đầu. Có thật ở 15 level từ L109 (L122 có 4, L123 có 7).
+• KHÔNG PHẢI LỖI (đã đo, để khỏi đuổi lại): khi hàng chờ còn ≤4 xe thì mọi xe đều là
+  "đầu cột" nên xe "?" lật hết — đúng cơ chế, xảy ra cả khi không bấm Shuffle vì
+  layoutInventory chạy sau mỗi lần phóng xe.
+• Chuỗi thông báo đổi theo hành vi: "Đã đổi màu xe!" → "Đã xếp lại hàng xe!"
+  (khoá i18n recolored → reshuffled).
+
 ────────────────────────────────────────────────────────────────────────────
 GHI CHÚ CHUNG
 ────────────────────────────────────────────────────────────────────────────

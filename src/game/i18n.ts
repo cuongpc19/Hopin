@@ -99,7 +99,9 @@ const S: Record<string, { vi: string; en: string }> = {
   },
   carSent: { vi: "Xe xuất phát!", en: "Car sent!" },
   cancelled: { vi: "Đã huỷ", en: "Cancelled" },
-  recolored: { vi: "Đã đổi màu xe!", en: "Cars recolored!" },
+  // Shuffle only REORDERS the queue now (it used to repaint the cars, which broke the
+  // seats-per-colour invariant — see boosterRefresh). Wording follows the behaviour.
+  reshuffled: { vi: "Đã xếp lại hàng xe!", en: "Queue reshuffled!" },
   noSlimes: { vi: "Hết slime rồi", en: "No slimes left" },
   waitCars: { vi: "Chờ các xe đang chạy xong đã nhé!", en: "Wait for the running cars to finish!" },
   slimesGone: { vi: "Cụm slime đó không còn nữa", en: "Those slimes are gone" },

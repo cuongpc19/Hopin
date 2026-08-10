@@ -2616,8 +2616,7 @@ export class GameScene extends Phaser.Scene {
   // fits), so you can bring a colour you need to the front.
   private boosterRefresh() {
     if (this.won) return;
-    // Only recolour ordinary colour cars (leave hammer/wood cars as they are).
-    const cars = this.invColumns.flat().filter((v) => v.container.scene && (v.chest.kind ?? "color") === "color");
+    const cars = this.invColumns.flat().filter((v) => v.container.scene);
     if (cars.length === 0) {
       this.toast(tr("queueEmptyT"));
       return;
@@ -2641,47 +2640,75 @@ export class GameScene extends Phaser.Scene {
     if (!this.affordToast("refresh")) return;
     this.consumeBooster("refresh");
 
-    // Build an assignment that covers each remaining colour at least once, then fills
-    // the rest in proportion to how much of each colour is still on the board.
+    // MOVE THE CARS, DO NOT RE-DEAL THEM (user 2026-08-08: "shuffle chỉ đổi chỗ xe thôi,
+    // k chia lại gì cả").
+    //
+    // ⚠ THE OLD VERSION MADE LEVELS UNWINNABLE. It called setCarColor() on each queued car,
+    // which rewrites chest.color and leaves chest.count alone — so a 47-seat red car became
+    // a 47-seat blue one. The whole game rests on: for every colour, total seats == cells of
+    // that colour, because a car only leaves its bay at 100% full. Re-dealing colours over
+    // fixed capacities breaks that on contact. On L16 (9 cars of 47..89 seats over three
+    // colours needing 208/192/225) one Shuffle left 31-59 cells with no seat to ride in —
+    // the board simply could not be finished, which is what the user hit.
+    //
+    // Permuting whole cars cannot break it: each (colour, count) pair travels together, so
+    // the per-colour totals are identical before and after. Only the ORDER changes.
     const remainCount = new Map<number, number>();
     for (let i = 0; i < this.keys.length; i++) {
       if (!this.keys[i]) continue;
       const c = this.level.board[i];
       if (c >= 0 && c < HARD_ROCK) remainCount.set(c, (remainCount.get(c) ?? 0) + 1);
     }
-    const assign: number[] = [];
-    for (const c of left) if (assign.length < cars.length) assign.push(c);
-    const byShare = left.slice().sort((a, b) => (remainCount.get(b) ?? 0) - (remainCount.get(a) ?? 0));
-    for (let i = 0; assign.length < cars.length; i++) assign.push(byShare[i % byShare.length]);
 
-    // ORDER THE RESULT, don't scatter it (user 2026-08-08: "shuffle xong thì xe xếp
-    // đẹp, dễ chơi hơn"). The old code shuffled positions at random, so the booster
-    // could hand back a queue no better than the one it replaced — and on the level
-    // that teaches it, that made the tutorial land or miss on a coin flip.
-    // Colours a car can eat RIGHT NOW go to the front; ties break on how much of the
-    // colour is left, so the front cars are both edible and worth sending.
+    // Read the queue back in the order the player sees it (row by row, left to right) —
+    // invColumns is column-major, so flat() alone would scramble the reading order.
+    const perRow = this.invColumns.length;
+    const depth = Math.max(...this.invColumns.map((c) => c.length));
+    const visual: ChestView[] = [];
+    for (let r = 0; r < depth; r++)
+      for (let j = 0; j < perRow; j++) if (this.invColumns[j][r]) visual.push(this.invColumns[j][r]);
+
+    // Linked cars (twin/triple) move as ONE unit and keep their internal order, otherwise a
+    // shuffle could strand a pair on opposite ends of the queue and stretch its tether.
+    const units: ChestView[][] = [];
+    const placed = new Set<ChestView>();
+    for (const v of visual) {
+      if (placed.has(v)) continue;
+      const g = (v.group ?? [v]).filter((m) => visual.includes(m));
+      g.forEach((m) => placed.add(m));
+      units.push(g.length ? g : [v]);
+    }
+
+    // Sort so the cars worth sending come to the front: a colour that can be eaten RIGHT NOW
+    // outranks one that cannot, and among those, the colour with most left on the board wins.
+    // A unit is ranked by its BEST member.
+    //
+    // ⚠ BURIED "?" CARS MUST NOT BE RANKED BY THEIR COLOUR. Their whole point is that the
+    // player cannot see it yet, and layoutInventory() flips any car that reaches the front of
+    // a column face-up — so ranking one by its hidden colour would both leak the answer (a
+    // buried car promoted to the front is a buried car whose colour is edible) and physically
+    // reveal it as a side effect of pressing Shuffle. They sort to the back with the
+    // hammer/wood cars, which have no edible colour either, and reveal in normal play instead.
     this.computeReachableColors();
-    const rank = (c: number) => (this.reachableColors.has(c) ? 0 : 1) * 1e6 - (remainCount.get(c) ?? 0);
-    assign.sort((a, b) => rank(a) - rank(b));
-    // Focus the lineup area (dim around it + a glowing frame) so the player's eye
-    // goes there, then recolour the cars in a slow left-to-right "flip" wave.
-    const total = (cars.length - 1) * 90 + 440;
-    this.focusLineup(total + 350);
-    cars.forEach((v, k) => {
-      const baseX = v.container.scaleX;
-      this.tweens.add({
-        targets: v.container,
-        scaleX: 0.08, // flip edge-on...
-        duration: 200,
-        delay: k * 90,
-        ease: "Cubic.in",
-        onComplete: () => {
-          this.setCarColor(v, assign[k]); // ...swap the colour at the thin point...
-          this.tweens.add({ targets: v.container, scaleX: baseX, duration: 240, ease: "Back.out" }); // ...flip back
-        },
-      });
-    });
-    this.time.delayedCall(total + 120, () => this.toast(tr("recolored")));
+    const rankOne = (v: ChestView) => {
+      if (v.chest.buried || (v.chest.kind ?? "color") !== "color") return 2e6;
+      return (this.reachableColors.has(v.chest.color) ? 0 : 1) * 1e6 - (remainCount.get(v.chest.color) ?? 0);
+    };
+    // A group is ranked by its BEST member — EXCEPT that one buried member sends the whole
+    // group to the back. Linked cars move together, so ranking a twin on its face-up partner
+    // would drag its buried sibling to the front and flip it (levels L109+ pair a "?" car
+    // with an ordinary one, so this is reachable in play, not theoretical).
+    const rankUnit = (u: ChestView[]) =>
+      u.some((v) => v.chest.buried) ? 2e6 : Math.min(...u.map(rankOne));
+    units.sort((a, b) => rankUnit(a) - rankUnit(b));
+
+    // Re-emit row by row, exactly as buildInventory fills the columns.
+    this.invColumns = Array.from({ length: perRow }, () => [] as ChestView[]);
+    units.flat().forEach((v, i) => this.invColumns[i % perRow].push(v));
+
+    this.focusLineup(900);
+    this.layoutInventory(true); // slides every car to its new seat
+    this.time.delayedCall(320, () => this.toast(tr("reshuffled")));
   }
 
   // Briefly dim everything EXCEPT the lineup queue (zone 3), with a pulsing frame, so
@@ -2724,15 +2751,10 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  // Recolour a car view to a colour id (swaps its sprite + updates its data).
-  private setCarColor(view: ChestView, color: number) {
-    view.chest.color = color;
-    const key = `car-${color}`;
-    const frame = this.textures.get(key).has("trim") ? "trim" : undefined;
-    if (frame) view.carImg.setTexture(key, frame);
-    else view.carImg.setTexture(key);
-    view.carImg.setScale((this.chestSize * 1.15) / (view.carImg.height || this.chestSize));
-  }
+  // (setCarColor removed 2026-08-08 — see the note in boosterRefresh. Rewriting a queued
+  // car's colour while keeping its seat count breaks "seats per colour == cells per colour"
+  // and can leave a board unfinishable. If some future feature really must repaint a car,
+  // it has to move the capacity with the colour.)
 
   // "Magnet": open a ZOOMED copy of the board — flat colour swatches at ~1.3× the
   // live cell size — so picking a cluster is easy on a phone (live tiles are fiddly,
