@@ -69,3 +69,6 @@ public/art/tmp/
 
 # Goi nop CrazyGames — dung lai tu dist/ bat cu luc nao, khong can theo doi
 hopin-crazygames.zip
+
+# Video preview (dung lai tu ban quay man hinh bat cu luc nao)
+store/crazygames/*.mp4
