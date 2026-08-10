@@ -19,7 +19,11 @@ export class SplashScene extends Phaser.Scene {
   }
 
   preload() {
-    this.load.image("splash", "art/hopin2.jpg"); // poster mới (user 2026-08-01)
+    // Cut from the same render as the store covers, so the first screen a player sees is
+    // the picture they just clicked on CrazyGames. The old hopin2.jpg also spelled the name
+    // "Hop-in" straight into the artwork, which no longer matched anything else.
+    // It stays in public/art untouched if this ever needs reverting.
+    this.load.image("splash", "art/splash-hopin.jpg");
   }
 
   create() {

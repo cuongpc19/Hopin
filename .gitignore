@@ -72,3 +72,10 @@ hopin-crazygames.zip
 
 # Video preview (dung lai tu ban quay man hinh bat cu luc nao)
 store/crazygames/*.mp4
+
+# Firebase CLI deploy cache
+.firebase/
+
+# Anh Gemini goc de cat ra anh bia — 24MB, chi la nguyen lieu.
+# Ba tam bia thanh pham trong store/crazygames/ VAN duoc theo doi.
+public/art/newbackground/
