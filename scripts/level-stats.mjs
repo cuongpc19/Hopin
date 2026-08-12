@@ -2,9 +2,16 @@
 //
 //   node scripts/level-stats.mjs --file runs.json            # từ bản Export JSON của Firebase console
 //   FB_SECRET=<khoá> node scripts/level-stats.mjs            # hoặc đọc thẳng, cần khoá
-//   … --days 7    # đổi khung ngày (mặc định 2)
-//   … --all       # tính cả localhost (ván mình tự test)
-//   … --json      # xuất JSON để dùng tiếp
+//   … --days 7          # đổi khung ngày (mặc định 2)
+//   … --all             # tính cả localhost (ván mình tự test)
+//   … --skip M-3536,…   # loại đích danh vài thiết bị
+//   … --json            # xuất JSON để dùng tiếp
+//
+// Vì sao cần `--skip`: bộ lọc nguồn chỉ bắt được ván test chạy trên localhost/mạng LAN. Ván
+// ta tự chơi trên CHÍNH trang CrazyGames thì mang đúng tên máy chủ như người chơi thật, và
+// `pf_device` lưu trong localStorage theo từng origin nên mã máy ở đó KHÔNG trùng mã máy ở
+// localhost — không có cách nào tự nhận ra. Lấy mã bằng tay (DevTools → Local Storage →
+// pf_device, ngay trên trang CrazyGames) rồi truyền vào đây.
 //
 // Có `--file` vì lấy khoá đọc phiền hơn hẳn việc bấm Export JSON trong console, mà hai đường
 // cho ra đúng một thứ: RTDB export ra chính cái JSON mà REST trả về.
@@ -61,7 +68,13 @@ const since = midnight.getTime() - (DAYS - 1) * 86400000;
 // trên máy dev và bản `web` deploy thật đều mang host = "web".
 const isLocal = (r) => /^(localhost|127\.|0\.0\.0\.0|\[::1\]|192\.168\.|10\.)/.test(String(r.from ?? ""));
 
-const rows = all.filter((r) => Number.isFinite(r.at) && r.at >= since && (ALL || !isLocal(r)));
+const SKIP = new Set(
+  (argv.includes("--skip") ? argv[argv.indexOf("--skip") + 1] ?? "" : "").split(",").map((s) => s.trim()).filter(Boolean),
+);
+
+const rows = all.filter(
+  (r) => Number.isFinite(r.at) && r.at >= since && (ALL || !isLocal(r)) && !SKIP.has(r.dev),
+);
 
 if (!rows.length) {
   console.log(`Khong co van nao trong ${DAYS} ngay gan nhat${ALL ? "" : " (tu nguoi choi that)"}.`);
@@ -105,6 +118,11 @@ if (JSON_OUT) {
 const players = new Set(rows.map((r) => r.dev ?? "?")).size;
 const from = new Date(since).toLocaleDateString("vi-VN");
 console.log(`${DAYS} ngay gan nhat (tu ${from}) — ${rows.length} van, ${players} nguoi choi${ALL ? " (KE CA localhost)" : ""}`);
+// `pf_device` chi co 16 bit (65536 ma) nen hai may co the trung ma. So ma trung ky vong la
+// N²/(2·65536) — voi vai tram nguoi thi khoang 1-2 nguoi bi dem thieu, khong dang ke, nhung
+// neu co ngay chuc nghin nguoi thi con so "nguoi choi" bat dau lech that.
+const dup = (players * players) / 131072;
+if (dup >= 1) console.log(`(ma may 16-bit: uoc tinh ~${dup.toFixed(0)} nguoi bi dem trung, so "nguoi choi" hoi thap hon that)`);
 const srcs = {};
 for (const r of rows) srcs[`${r.host ?? "?"}@${r.from ?? "?"}`] = (srcs[`${r.host ?? "?"}@${r.from ?? "?"}`] ?? 0) + 1;
 console.log("Nguon:", Object.entries(srcs).map(([k, v]) => `${k}=${v}`).join("  "));
