@@ -62,11 +62,18 @@ const spec = (n) => {
 // đang nói chuyện trên thang bot, phải quy đổi trước khi so với target thiết kế.
 const RAWTGT = Object.fromEntries((process.env.RAWTGT || "").split(",").filter(Boolean)
   .map((s) => s.split(":").map(Number)));
+// DẢI, không phải một điểm:  BAND="80:10,35:5,25:5"  → khoá là GIÁ TRỊ TARGET, không phải số
+// level. User 2026-08-13: "nhóm 80% khó đạt thì cứ đẩy về 70 hoặc 90%, dao động 10%" — nghĩa là
+// rơi đâu trong dải cũng tính đạt, và khi đã đạt thì tiêu chí còn lại (ít xe, vị trí thua) mới
+// là thứ quyết định. Không có BAND thì giữ nguyên nết cũ: khoảng cách tới đúng một điểm.
+const BAND = Object.fromEntries((process.env.BAND || "").split(",").filter(Boolean)
+  .map((s) => s.split(":").map(Number)));
+const offBand = (win, t) => Math.max(0, Math.abs(win - t) - (BAND[t] ?? 0));
 const distTo = (r, n) => {
   const rt = RAWTGT[n];
-  if (rt == null) return Math.abs(r.win - spec(n).target);
-  if (r.b == null || r.d == null) return Math.abs(r.win - rt);   // bảng quét cũ, chưa có b/d
-  return Math.max(Math.abs(r.b - rt), Math.abs(r.d - rt));
+  if (rt == null) return offBand(r.win, spec(n).target);
+  if (r.b == null || r.d == null) return offBand(r.win, rt);   // bảng quét cũ, chưa có b/d
+  return Math.max(offBand(r.b, rt), offBand(r.d, rt));
 };
 
 // SỐ XE là MỘT CHIỀU CỦA THANG, không phải hằng số. Guide §2e đã cảnh báo và đo 2026-08-05
@@ -173,8 +180,11 @@ export function build(src, n, rung) {
 const score = (dist, win, lossAt, t) => dist + (t >= 90 || win >= 90 ? 0 : positionPenalty(lossAt));
 
 const d = readD();
+// Dải level quét. Trước đây khoá cứng 2-46 vì bộ này chỉ dựng chừng đó; từ 2026-08-13 cả bộ
+// 165 level dùng chung một đường cong nên phải nới ra:  RANGE="4-165"
+const [R0, R1] = (process.env.RANGE || "2-46").split("-").map(Number);
 const nums = [];
-for (let n = 2; n <= 46; n++) if (d[n] && (!ONLY || ONLY.has(n))) nums.push(n);
+for (let n = R0; n <= R1; n++) if (d[n] && (!ONLY || ONLY.has(n))) nums.push(n);
 
 // ---- QUÉT HAI CHẶNG ----------------------------------------------------------------------
 // Lưới đều tay 32 phương án × 45 level = 1440 phép đo là LÃNG PHÍ (user 2026-08-05 bắt đúng):
