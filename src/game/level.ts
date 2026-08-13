@@ -20,6 +20,17 @@ export interface Chest {
 //   90 = hard rock (1×1) · 95 = hard rock (2×2)  — never removable
 //   92 = wood (1×1)      · 97 = wood (2×2)        — needs a wood car
 //   soft rock carries HP in the ones digit: 1×1 = 100+hp (101..104), 2×2 = 200+hp (201..204)
+/**
+ * Level cuối CÓ THIẾT KẾ TAY. Số nào lớn hơn vẫn chơi được nhưng rơi vào bản dựng tự động.
+ *
+ * Ở đây chứ không ở `LevelSelectScene` vì `GameScene` cũng cần (sau ván thắng nó đi thẳng
+ * sang level kế, và phải biết chỗ dừng), mà `LevelSelectScene` thì đã import từ `GameScene`
+ * — nhập ngược lại là thành vòng.
+ *
+ * L1-165. Trước 2026-08-13 là 185, rồi 20 board ở L40-59 bị bỏ và mọi thứ từ L60 lùi 20 bậc.
+ */
+export const LEVEL_COUNT = 165;
+
 export const HARD_ROCK = 90;
 export const BIG_HARD = 95;
 export const WOOD = 92;

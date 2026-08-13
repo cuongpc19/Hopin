@@ -10,6 +10,7 @@ import {
   softHp,
   isRemovable,
   levelFingerprint,
+  LEVEL_COUNT,
   type Chest,
   type Level,
   type TrackKind,
@@ -309,6 +310,11 @@ const BOOSTERS: BoosterDef[] = [
   },
 ];
 const FREE_GIFT = 2; // free copies granted the first time you reach a booster's unlock level
+
+// Hoạt cảnh chuyển màn sau ván thắng. Trước là 1500ms, và chú thích ngay cạnh đã tự nhận
+// "level build đồng bộ nên có sẵn ngay" — tức chữ "Loading..." đó là GIẢ, màn kế đã sẵn sàng
+// từ đầu. Rút còn 600ms (user 2026-08-13): đủ để hoạt cảnh đọc được mà không bắt chờ không.
+const TRANSITION_MS = 600;
 
 // Textures for obstacle tiles + special cars; placeholder-drawn until real PNGs exist.
 const OBSTACLE_ART_KEYS = ["rock-hard", "rock-soft", "rock-soft-cracked", "wood", "car-hammer", "car-wood"];
@@ -6663,8 +6669,10 @@ export class GameScene extends Phaser.Scene {
       this.addGold(reward);
       setWallet(this.gold);
     };
-    // FLOW (user 2026-08-01): bấm CLAIM → đàn xu bay → xu vào ví xong chờ 1s → đi tiếp.
-    // Đi đâu: L1-9 → level kế; L10 trở lên → về Home.
+    // FLOW (user 2026-08-13): KHÔNG phải bấm CLAIM nữa — thắng là xu bay vào ví ngay, rồi đi
+    // thẳng sang level kế. Trước đây phải bấm CLAIM, và từ L10 trở lên còn bị đá về Home:
+    // mỗi ván thắng mất thêm một màn hình và hai cú bấm, đúng chỗ người chơi dễ bỏ nhất.
+    // Nút CLAIM giữ lại làm nút BỎ QUA — bấm là sang luôn, không phải chờ hoạt cảnh.
     let claiming = false;
     const finishAndGo = () => {
       if (closed) return;
@@ -6672,7 +6680,8 @@ export class GameScene extends Phaser.Scene {
       applyReward(); // bảo hiểm — bình thường xu cuối đã cộng rồi
       for (const t of timers) t.remove();
       for (const o of objs) { this.tweens.killTweensOf(o); o.destroy(); }
-      if (this.levelNum < 10) this.startLevel(nextLevel);
+      // Hết level thiết kế thì mới về Home — chơi tiếp sẽ rơi vào level dựng tự động.
+      if (nextLevel <= LEVEL_COUNT) this.startLevel(nextLevel);
       else this.scene.start("select");
     };
     const claim = () => {
@@ -6787,7 +6796,7 @@ export class GameScene extends Phaser.Scene {
       );
       // ~1.5s rồi sang màn (user 2026-08-02: chuyển level nhanh hơn; level build đồng bộ nên
       // đây thuần là màn ngắm slime — sau này load level nặng sẽ chạy theo tiến độ thực).
-      timers.push(this.time.delayedCall(1500, finishAndGo));
+      timers.push(this.time.delayedCall(TRANSITION_MS, finishAndGo));
     };
 
     // nền: LEVEL đang chơi chỉ còn THẤP THOÁNG sau lớp phủ tối 97% (user 2026-08-01
@@ -7123,8 +7132,16 @@ export class GameScene extends Phaser.Scene {
     objs.push(cText);
     this.tweens.add({ targets: cText, scale: 1.08, duration: 620, yoyo: true, repeat: -1, ease: "Sine.inOut" });
     const hit = this.add.rectangle(cx, claimY, cbw, 50, 0xffffff, 0.001).setDepth(404).setInteractive({ useHandCursor: true });
-    hit.on("pointerdown", claim);
+    // Bấm vào nút = BỎ QUA, sang màn kế ngay, không chờ hết hoạt cảnh. (`finishAndGo` tự gọi
+    // `applyReward` nên bấm sớm cỡ nào cũng không mất xu.)
+    hit.on("pointerdown", finishAndGo);
     objs.push(hit);
+
+    // TỰ NHẬN THƯỞNG (user 2026-08-13: "thắng xong là được thêm coin luôn"). Trước đây phải
+    // bấm CLAIM mới có xu và mới đi tiếp — một cú bấm bắt buộc sau MỌI ván thắng, nằm đúng
+    // chỗ người chơi dễ rời đi nhất. Đàn xu vẫn bay như cũ vì đó là phần thưởng nhìn thấy
+    // được, chỉ khác là không phải xin phép nữa.
+    claim();
   }
 
   // Placeholder XU VÀNG (chưa có art thật public/art/coin.png): xu tròn vàng bóng, mặt

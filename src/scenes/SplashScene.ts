@@ -97,9 +97,11 @@ export class SplashScene extends Phaser.Scene {
     // there — unlike the APK, where it hides real engine start-up — so that build leaves
     // as soon as the Home art is actually ready (user 2026-08-08: "cho thấp nhất có thể").
     //
-    // FLOOR is the shortest the poster may show. Not zero: a splash that appears and
-    // vanishes within a frame or two reads as a glitch, not as speed.
-    const FLOOR_MS = __TARGET__ === "crazy" ? 300 : 3000;
+    // FLOOR là thời gian TỐI THIỂU tấm poster được phép nằm đó. Bằng 0 trên web/CrazyGames
+    // (user 2026-08-13: "vừa vào game cũng k cần Loading giả") — đi ngay khi thật sự tải xong,
+    // không giữ lại một mili-giây nào để làm dáng. Bản APK vẫn giữ 3s vì ở đó poster che
+    // đúng lúc engine khởi động thật.
+    const FLOOR_MS = __TARGET__ === "android" ? 3000 : 0;
     // Hard stop, so a slow network cannot strand the player on the poster. Matches the old
     // behaviour exactly — 3s and then go, ready or not.
     // ⚠ Kept ABOVE the host's whole handshake budget (crazy.ts READY_BUDGET_MS = 2200) so
@@ -155,32 +157,60 @@ export class SplashScene extends Phaser.Scene {
       maybeGo();
     });
 
-    const goHome = () => {
+    // NGƯỜI CHƠI MỚI VÀO THẲNG LEVEL 1, không nhìn thấy Home (user 2026-08-13). Chỉ đọc được
+    // sau khi `init()` xong trên bản CrazyGames — kho dữ liệu của họ nạp lúc đó; đọc sớm hơn
+    // là đọc bản cục bộ và có thể ghi đè mất tiến độ thật.
+    const isNewPlayer = () => {
+      try {
+        const p = platform.storage.getItem("pf_progress");
+        const c = platform.storage.getItem("pf_current");
+        return (!p || p === "1") && (!c || c === "1");
+      } catch {
+        return false; // không đọc được kho → cứ về Home như cũ, an toàn hơn
+      }
+    };
+
+    const go = () => {
       if (went) return;
       went = true;
       prog.v = 1; drawBar(); // đầy 100% trước khi chuyển
       platform.loadingStop();
+      const straightToPlay = isNewPlayer();
       this.cameras.main.fadeOut(350, 244, 239, 224);
-      this.cameras.main.once("camerafadeoutcomplete", () => this.scene.start("select"));
+      this.cameras.main.once("camerafadeoutcomplete", () =>
+        straightToPlay ? this.scene.start("game", { level: 1 }) : this.scene.start("select"));
     };
+    const goHome = go; // các chỗ gọi cũ (backstop, chạm màn hình) giữ nguyên tên
 
-    // Preload the Home (level picker) art here so switching to it is instant and this
-    // screen genuinely reflects "loading the levels". Phaser skips already-cached keys.
-    this.load.image("background2", "art/background2.jpg");
-    this.load.image("avatar", "art/slime-3.png");
+    // Art của Home. `star-icon` và bốn icon booster thì GameScene cũng cần nên nạp luôn;
+    // ba tấm CHỈ Home dùng (nền + hai mascot, ~190 KB) để `maybeGo` quyết sau, vì người chơi
+    // mới đi thẳng vào màn chơi thì tải chúng là tải phí đúng vào lúc mạng eo hẹp nhất.
     this.load.image("star-icon", "art/star.png");
-    this.load.image("start-slime", "art/slime-3.png");
     for (const b of ["add", "hand", "refresh", "magnet"]) this.load.image(`booster-${b}`, `art/booster-${b}.png`);
+    let homeArtQueued = false;
+    const queueHomeArt = () => {
+      if (homeArtQueued) return;
+      homeArtQueued = true;
+      this.load.image("background2", "art/background2.jpg");
+      this.load.image("avatar", "art/slime-3.png");
+      this.load.image("start-slime", "art/slime-3.png");
+      this.load.start(); // Phaser cho phép nối thêm vào hàng đợi rồi chạy tiếp
+    };
     // Leave as soon as BOTH the Home art and the saved progress are ready, but never
     // before FLOOR_MS. On a warm cache with a healthy SDK that is a few hundred ms, versus
     // the old flat 3 seconds.
     const maybeGo = () => {
       if (went || !loadDone || !storageReady) return;
+      // Giờ mới đọc được kho: người chơi cũ thì phải có art của Home trước khi sang, người
+      // chơi mới thì bỏ qua hẳn — `loadDone` sẽ được bật lại khi mẻ art đó xong.
+      if (!isNewPlayer() && !homeArtQueued) { loadDone = false; queueHomeArt(); return; }
       const left = FLOOR_MS - (this.time.now - t0);
-      if (left <= 0) goHome();
-      else this.time.delayedCall(left, goHome);
+      if (left <= 0) go();
+      else this.time.delayedCall(left, go);
     };
-    this.load.once("complete", () => {
+    // `on`, KHÔNG phải `once`: hàng đợi được khởi động hai lần khi người chơi cũ cần thêm art
+    // của Home, và với `once` thì mẻ thứ hai không ai nghe → kẹt tới tận backstop 3 giây.
+    this.load.on("complete", () => {
       loadDone = true;
       maybeGo();
     });
