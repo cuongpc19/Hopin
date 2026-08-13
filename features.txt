@@ -1305,6 +1305,72 @@ Manythings/Design level/builder-rules.md.
 • Chuỗi thông báo đổi theo hành vi: "Đã đổi màu xe!" → "Đã xếp lại hàng xe!"
   (khoá i18n recolored → reshuffled).
 
+37) CHƯỚNG NGẠI MỚI: HỘP SOCOLA (user 2026-08-13)
+────────────────────────────────────────────────────────────────────────────
+LÀ GÌ. Một tấm socola vuông n×n đặt ĐÈ LÊN n² slime và giấu chúng đi (3×3 giấu 9,
+5×5 giấu 25). Mặt hộp có hai dải ruy băng bắt chéo và một mặt đồng hồ tròn màu kem
+in một con số.
+
+LUẬT. Con số = số slime phải ăn để hộp vỡ; mỗi lần ăn một slime HỢP LỆ, số giảm 1.
+Về 0 là hộp vỡ NGAY tại cú ăn đó và cả n² slime nhập vào bàn đúng các ô nó chiếm.
+Ruy băng quyết định slime nào được tính, và nó là LUẬT chứ không phải trang trí —
+là thứ dễ đọc thứ hai trên hộp, ngay sau con số:
+  • ruy băng MỘT MÀU   → chỉ slime đúng màu đó trừ số
+  • ruy băng CẦU VỒNG  → slime màu nào cũng trừ số  (ChocoBox.ribbon = RAINBOW = -1)
+Lúc còn đóng, cả n² ô cứng như thùng gỗ: CHẶN TIA và không bao giờ ngắm được, kể cả
+khi màu thật bên dưới trùng màu xe.
+
+DỮ LIỆU (src/game/level.ts). `Level.boxes: ChocoBox[]`, mỗi hộp `{at, n, count, ribbon}`
+với `at` = board index của ô TRÊN-TRÁI. Ô dưới hộp VẪN GIỮ MÀU THẬT trong `board` —
+hộp chỉ giấu chứ không xoá — nên:
+  • bất biến ghế=ô KHÔNG đổi: slime dưới hộp vẫn phải có xe chở (check-seats vẫn đúng)
+  • keysRemaining vẫn đếm chúng: hộp còn đóng thì không thể thắng
+  • ⚠ makeLevel() sao chép SÂU `boxes` — `count` bị đếm ngược trong lúc chơi, dùng chung
+    object thì vào lại level đó lần hai sẽ thấy hộp đã mở sẵn.
+
+THÔNG SỐ + LUẬT ĐẶT (kiểm bằng `node scripts/check-choco.mjs`):
+  • n LẺ, chỉ 3 hoặc 5 — để hai dải ruy băng cắt nhau đúng Ô GIỮA, và mặt đồng hồ
+    ngồi lên đúng ô đó. Không co giãn sau khi đặt.
+  • Vị trí: đủ chỗ cho cả n×n, không đè đá/gỗ/ô trống, không chồng hộp khác, không
+    tràn mép bàn.
+  • Bàn phải RỘNG HƠN hộp ít nhất 2 ô mỗi chiều (5×5 cần bàn từ 7×7). Bàn đúng bằng
+    hộp là hộp chiếm sạch, không còn slime nào ngoài để mở nó → chết.
+  • count ≈ 1/4..1/3 số slime nó giấu (3×3 → 3-4, 5×5 → 6-8). Mở hộp 5×5 bằng 3 cú
+    là cho không 25 slime; mở bằng 20 cú thì hộp thành bức tường chứ không phải câu đố.
+  • ⚠ CÁI CHẾT THẦM LẶNG: hộp ruy băng xanh số 50 thì bàn phải có ÍT NHẤT 50 slime
+    xanh NẰM NGOÀI hộp — slime xanh trong hộp không tự mở được hộp đang giấu nó.
+    check-seats KHÔNG bắt được lỗi này (ghế vẫn khớp ô); chỉ check-choco bắt.
+    Nhiều hộp cùng màu ruy băng thì ăn CHUNG một nguồn (một con slime trừ số cho mọi
+    hộp hợp lệ cùng lúc), nên chỉ cần đủ cho cái đòi nhiều nhất, không phải tổng.
+
+CÀI ĐẶT (GameScene). `boxAt: Map<ô, hộp>` là cửa duy nhất — mọi chỗ hỏi "ô này ăn/ngắm
+được không" đều phải hỏi nó, y hệt hiddenSet: findLosTargets · computeReachableColors ·
+connectedSameColor (Magnet) · picker Magnet · revealHiddenAround. Đếm số nằm ở
+noteChocoCollect, gọi từ ĐÚNG MỘT CHỖ (fireTo) nên mọi đường ăn slime — tia, Magnet,
+đường ăn nhanh lúc đông — đều tính như nhau. Đá và gỗ KHÔNG tính (hitSoftRock/collectWood
+không đi qua fireTo).
+  • revealHiddenAround PHẢI bỏ qua ô dưới hộp: keys[] của ô đó trỏ vào container hộp,
+    không chặn là đi setTexture slime lên chính tấm socola. Hộp vỡ mới chạy lại vòng
+    lộ "?" cho các ô ấy (ô kề hộp có thể đã bị ăn sạch từ lâu).
+  • Vỡ hộp: keys[] gán NGAY cho cả n² ô (không đợi tween) để tia và ô trống không lệch
+    nhau dù một khung hình; boardSeq++ để xoá dấu "chuyến vừa rồi ăn 0" của mọi xe.
+  • ĐỔ DỒN LÚC VỠ: 5×5 là 25 slime ập xuống một lúc, xếp kín đặc — chỉ vòng ngoài cùng
+    bấm được ngay, lõi phải bóc dần từ ngoài vào. Đây là chỗ màn dễ kẹt nhất; kiểm kỹ
+    khoảnh khắc NGAY SAU khi hộp vỡ (ngăn chứa/đường ray có đủ chỗ không).
+  • Hiệu ứng vỡ: quầng sáng + tia từ tâm, rồi slime hiện LAN TỪ TÂM RA NGOÀI theo vòng
+    Chebyshev (75ms/vòng) — bật cùng lúc 25 con thì đọc thành giật hình.
+
+CHƯA LÀM (cố ý — user 2026-08-13 "tạm thời chỉ build cơ chế, chưa thêm nó vào level"):
+  • chưa có level thật nào dùng `boxes` (0/165)
+  • chưa có modal giới thiệu lúc gặp hộp lần đầu (kiểu maybeShowHardRockIntro)
+  • level editor chưa vẽ/đặt được hộp
+  • bộ đo winrate (simcore2.mjs, build-levels.mjs) CHƯA mô hình hoá hộp → đừng tin số
+    winrate của level có hộp cho tới khi làm. Bộ giải trong game (gợi ý từng bước) thì
+    đã chặn an toàn: ô dưới hộp thành mã chặn + cộng vào `remaining`, nên nó không bao
+    giờ tuyên bố thắng khi hộp còn đóng, chỉ rơi về gợi ý tham lam.
+  • XEM THỬ: mở ?level=998 — bàn 15×15 có một hộp 5×5 ruy băng XANH (số 7) và một hộp
+    3×3 ruy băng CẦU VỒNG (số 3) cạnh nhau để so hai luật.
+
 ────────────────────────────────────────────────────────────────────────────
 GHI CHÚ CHUNG
 ────────────────────────────────────────────────────────────────────────────
@@ -1313,4 +1379,5 @@ GHI CHÚ CHUNG
 • Chạy dev:            npm run dev
 • Đóng gói APK:        npm run apk
 • Level đặc biệt test obstacle: mở ?level=999
+• Level đặc biệt test HỘP SOCOLA: mở ?level=998   (kiểm luật đặt: node scripts/check-choco.mjs)
 ================================================================================

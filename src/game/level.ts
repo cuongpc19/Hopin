@@ -39,6 +39,29 @@ export type ObstacleKind = "hard" | "soft" | "wood";
 // Build a soft-rock code: hp = hits to break (1..4), big = the 2×2 variant.
 export const softRock = (hp: number, big = false) => (big ? 200 : 100) + Math.max(1, Math.min(4, hp));
 
+// ---- HỘP SOCOLA (chocolate box) ------------------------------------------------------------
+// Một tấm socola N×N ĐÈ LÊN N² slime và giấu chúng đi. Mặt hộp có hai dải ruy băng bắt chéo
+// (ngang + dọc, cắt nhau đúng Ô GIỮA vì N lẻ) và một mặt đồng hồ tròn màu kem in con số.
+//
+// LUẬT: con số = số slime phải ăn để hộp vỡ. Ruy băng quyết định slime nào được TÍNH —
+// ruy băng một màu thì chỉ slime đúng màu đó trừ số, ruy băng CẦU VỒNG thì màu nào cũng trừ.
+// Về 0 là hộp vỡ NGAY tại cú ăn đó, cả N² slime bên trong nhập vào bàn đúng ô nó đang chiếm.
+//
+// ⚠ Ô dưới hộp vẫn giữ MÀU THẬT trong `board` (hộp vỡ là lộ ra ngay, không phải sinh mới) —
+// giống hệt cách `hidden` làm. Cái chặn tia + chặn ăn là `GameScene.boxAt`, KHÔNG phải mã ô.
+// Nghĩa là bất biến ghế=ô KHÔNG đổi: slime dưới hộp vẫn phải có xe chở.
+export const RAINBOW = -1; // ChocoBox.ribbon: mọi màu đều tính
+export interface ChocoBox {
+  /** board index của ô TRÊN-TRÁI. Cả khối n×n tính từ đây. */
+  at: number;
+  /** cạnh hộp, LẺ (3 hoặc 5) để hai dải ruy băng cắt nhau đúng ô giữa. */
+  n: number;
+  /** số slime hợp lệ còn phải ăn để vỡ hộp. */
+  count: number;
+  /** màu id được tính, hoặc RAINBOW (-1) = mọi màu. */
+  ribbon: number;
+}
+
 export const isObstacle = (v: number) => v >= HARD_ROCK;
 export const isSoftRock = (v: number) => (v >= 101 && v <= 104) || (v >= 201 && v <= 204);
 export const softHp = (v: number) => v % 10; // hits-to-break of a soft rock (1..4)
@@ -92,6 +115,8 @@ export interface Level {
   // Number of waiting slots (bays). Default 5. Fewer = tighter = harder (a slam difficulty
   // lever — the tuner sets this per level to hit the target winrate).
   bays?: number;
+  // HỘP SOCOLA: tấm n×n đè lên n² slime cho tới khi ăn đủ `count` slime hợp lệ. Xem ChocoBox.
+  boxes?: ChocoBox[];
 }
 
 // Difficulty tiers: every 5th level is HARD, every 15th is SUPER-HARD.
@@ -204,8 +229,36 @@ function obstacleDemo(): Level {
   };
 }
 
+// Isolated HỘP SOCOLA test level (mở bằng ?level=998). Một hộp 5×5 ruy băng XANH (chỉ slime
+// xanh trừ số) và một hộp 3×3 ruy băng CẦU VỒNG (màu nào cũng trừ) trên cùng một bàn, để so
+// hai luật cạnh nhau. Không đụng gì tới level thật.
+function chocoDemo(): Level {
+  const N = 15;
+  const PAL = [0, 3, 5, 7]; // đỏ / lá / xanh dương / hồng — 4 màu, mỗi màu ~56 ô
+  const board: number[] = [];
+  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) board.push(PAL[(r * 2 + c) % PAL.length]);
+
+  // count ≈ 1/4..1/3 số slime hộp giấu: 5×5 giấu 25 → 7 ; 3×3 giấu 9 → 3.
+  const boxes: ChocoBox[] = [
+    { at: 2 * N + 2, n: 5, count: 7, ribbon: 5 },
+    { at: 10 * N + 9, n: 3, count: 3, ribbon: RAINBOW },
+  ];
+
+  // Ghế = ô, ĐÚNG BẰNG (xe chỉ rời bãi khi đầy 100%). Slime dưới hộp vẫn tính — hộp giấu chứ
+  // không xoá — nên mọi màu đều đếm trên CẢ bàn.
+  const counts = new Map<number, number>();
+  for (const id of board) counts.set(id, (counts.get(id) ?? 0) + 1);
+  const chests: Chest[] = [];
+  for (const [color, total] of counts) {
+    let left = total;
+    while (left > 0) { const take = Math.min(left, 8); chests.push({ color, count: take }); left -= take; }
+  }
+  return { cols: N, rows: N, board, chests, track: "square", boxes };
+}
+
 export function makeLevel(levelNum = 1): Level {
   if (levelNum === 999) return obstacleDemo();
+  if (levelNum === 998) return chocoDemo();
 
   // Every level uses the SQUARE ring road now (U/arch/line shapes were dropped);
   // a designed level's own `track` still overrides this if it ever sets one.
@@ -229,6 +282,9 @@ export function makeLevel(levelNum = 1): Level {
       lightBoard: designed.lightBoard,
       slam: designed.slam,
       bays: designed.bays,
+      // Bản sao SÂU: `count` bị đếm ngược trong lúc chơi, dùng chung object thì chơi lại
+      // level đó lần hai sẽ thấy hộp đã mở sẵn.
+      boxes: designed.boxes ? designed.boxes.map((b) => ({ ...b })) : undefined,
     };
   }
 

@@ -11,7 +11,9 @@ import {
   isRemovable,
   levelFingerprint,
   LEVEL_COUNT,
+  RAINBOW,
   type Chest,
+  type ChocoBox,
   type Level,
   type TrackKind,
 } from "../game/level";
@@ -127,6 +129,22 @@ interface Runner {
   ty: number;
   nice?: boolean; // rare "Nice!" slime: fills a car's last seat, grows bigger, pops a banner
 }
+
+// HỘP SOCOLA đang nằm trên bàn. `def` là dữ liệu level (đã sao chép sâu trong makeLevel), nên
+// đếm ngược thẳng vào `def.count` là an toàn — chơi lại level sẽ dựng lại từ designed.json.
+interface LiveBox {
+  def: ChocoBox;
+  cells: number[]; // mọi board index nó phủ (n² ô)
+  cont: Phaser.GameObjects.Container;
+  num: Phaser.GameObjects.Text; // con số trên mặt đồng hồ
+  broken: boolean;
+}
+
+// HỘP SOCOLA — bán kính mặt đồng hồ, tính bằng TỈ LỆ của cạnh hộp. Có sàn theo cỡ Ô BÀN CỜ
+// (cạnh hộp = n ô, nên 0.62/n) vì nếu để thuần theo cạnh thì hộp 3×3 sẽ mang con số bé hơn hộp
+// 5×5 — mà con số là thứ dễ đọc nhất trên hộp, không được co theo cỡ hộp.
+// Mặt kem NƯỚNG vào texture còn con SỐ là Text thật, hai bên phải dùng chung công thức này.
+const CHOCO_DIAL = (n: number) => Math.max(0.16, 0.62 / n);
 
 const SLOT_COUNT = 5;
 // DESIGN sizes for the bottom cluster (bays → queue → boosters). The BOARD is fixed on
@@ -337,6 +355,11 @@ export class GameScene extends Phaser.Scene {
   // Cells whose slime is still a hidden "?" (real colour unknown to the player, in
   // level.hidden). Untargetable until a 4-neighbour opens, then revealed.
   private hiddenSet = new Set<number>();
+  // HỘP SOCOLA còn đóng. `boxAt` là tra cứu ô → hộp: mọi chỗ hỏi "ô này có ăn/ngắm được không"
+  // đều phải hỏi nó, y như hiddenSet. Ô dưới hộp vẫn CHẶN TIA (keys[] trỏ vào container hộp)
+  // nhưng KHÔNG BAO GIỜ là mục tiêu, kể cả khi màu trùng xe.
+  private boxes: LiveBox[] = [];
+  private boxAt = new Map<number, LiveBox>();
 
   private track: TrackNode[] = [];
   private startIndex = 0;
@@ -711,6 +734,10 @@ export class GameScene extends Phaser.Scene {
     // "?" slimes start hidden (scene restart safe — rebuilt from the level data).
     this.hiddenSet.clear();
     if (this.level.hidden) this.level.hidden.forEach((v, i) => { if (v >= 0) this.hiddenSet.add(i); });
+    // HỘP SOCOLA: chốt ô nào bị phủ TRƯỚC buildBoard, vì buildBoard đọc boxAt để biết ô nào
+    // vẽ tile, ô nào để hộp chiếm. Ô dưới hộp vẫn nằm trong keysRemaining ở trên — hộp chỉ
+    // GIẤU slime chứ không xoá, nên vẫn phải ăn hết mới thắng.
+    this.registerBoxes();
 
     // Top HUD (like the real Pixel Flow): settings (left) · level pill (center) ·
     // gold (right).
@@ -1311,7 +1338,16 @@ export class GameScene extends Phaser.Scene {
         const id = board[idx];
         if (id < 0) continue;
         const { x, y } = this.cellCenter(r, c);
-        if (isBigObstacle(id) && r + 1 < rows && c + 1 < cols) {
+        const box = this.boxAt.get(idx);
+        if (box) {
+          // HỘP SOCOLA: dựng ở ô TRÊN-TRÁI (ô đầu tiên của hộp mà vòng lặp row-major gặp),
+          // rồi trỏ CẢ n² ô vào cùng một container — tia dừng ở hộp từ mọi hướng.
+          const nn = box.def.n;
+          const bx = this.gridX + (c + nn / 2) * this.cell;
+          const by = this.gridY + (r + nn / 2) * this.cell;
+          this.buildChocoBox(box, bx, by, nn * this.cell);
+          for (const ci of box.cells) this.keys[ci] = box.cont;
+        } else if (isBigObstacle(id) && r + 1 < rows && c + 1 < cols) {
           // 2×2: the same code fills all four cells (for line-of-sight + matching);
           // one big sprite centred on the block; every cell points at the same object.
           const cells = [idx, idx + 1, idx + cols, idx + cols + 1];
@@ -1606,7 +1642,9 @@ export class GameScene extends Phaser.Scene {
         c < cols - 1 ? idx + 1 : -1,
       ];
       for (const j of nb) {
-        if (j < 0 || !this.hiddenSet.has(j) || !this.keys[j]) continue;
+        // boxAt: keys[j] của ô dưới hộp trỏ vào CONTAINER HỘP, nên bỏ qua kiểm tra này là
+        // đi setTexture lên chính tấm socola. Hộp vỡ mới chạy lại vòng lộ "?" cho các ô đó.
+        if (j < 0 || !this.hiddenSet.has(j) || !this.keys[j] || this.boxAt.has(j)) continue;
         this.hiddenSet.delete(j);
         const tile = this.keys[j]!;
         const color = this.level.board[j];
@@ -1679,6 +1717,257 @@ export class GameScene extends Phaser.Scene {
       c.add(t);
     }
     return c;
+  }
+
+  // ---- HỘP SOCOLA -----------------------------------------------------------------------
+  // Tấm socola n×n đè lên n² slime. Con số trên mặt đồng hồ = số slime HỢP LỆ còn phải ăn;
+  // ruy băng nói slime nào hợp lệ (một màu → đúng màu đó; cầu vồng → màu nào cũng được).
+  // Về 0 là vỡ NGAY tại cú ăn đó và cả n² slime nhập vào bàn đúng ô nó đang chiếm.
+  //
+  // Lúc còn đóng, n² ô CỨNG NHƯ THÙNG GỖ: chặn tia (keys[] trỏ vào container hộp) và không
+  // bao giờ ngắm được (boxAt chặn ở findLosTargets / computeReachableColors / các picker).
+
+  /** Đọc level.boxes → dựng bảng tra ô→hộp. Hộp sai vị trí bị BỎ QUA, không làm hỏng ván. */
+  private registerBoxes() {
+    this.boxes = [];
+    this.boxAt.clear();
+    const defs = this.level.boxes;
+    if (!defs || defs.length === 0) return;
+    const { cols, rows, board } = this.level;
+    for (const def of defs) {
+      const n = def.n;
+      const r0 = Math.floor(def.at / cols), c0 = def.at % cols;
+      // Luật đặt hộp (scripts/check-choco.mjs kiểm cùng bộ này lúc build level). Ở đây chỉ là
+      // lưới an toàn lúc chạy: thà mất cái hộp còn hơn vỡ cả level.
+      if (n < 3 || n % 2 === 0) continue;              // phải LẺ để ruy băng cắt đúng ô giữa
+      if (r0 + n > rows || c0 + n > cols) continue;    // tràn mép bàn
+      if (def.count < 1) continue;
+      const cells: number[] = [];
+      let ok = true;
+      for (let r = r0; r < r0 + n && ok; r++)
+        for (let c = c0; c < c0 + n; c++) {
+          const i = r * cols + c;
+          // Chỉ đè lên slime thường: không đè đá/gỗ, không đè ô trống, không chồng hộp khác.
+          if (board[i] < 0 || isObstacle(board[i]) || this.boxAt.has(i)) { ok = false; break; }
+          cells.push(i);
+        }
+      if (!ok) continue;
+      const live: LiveBox = { def, cells, cont: undefined!, num: undefined!, broken: false };
+      this.boxes.push(live);
+      for (const i of cells) this.boxAt.set(i, live);
+    }
+  }
+
+  /**
+   * Vẽ tấm socola: gờ nổi, n×n ô vuông chìm (một ô cho mỗi slime bên dưới), hai dải ruy băng
+   * satin bắt chéo mang màu của LUẬT, mặt đồng hồ tròn màu kem in số ở chính giữa.
+   *
+   * Thứ tự đọc mà bản vẽ phải giữ: SỐ trước, RUY BĂNG ngay sau, khuôn socola chỉ là nền.
+   */
+  private buildChocoBox(box: LiveBox, x: number, y: number, S: number) {
+    const n = box.def.n;
+    // BAKE, đừng vẽ trực tiếp: một Graphics là hình học nộp lại MỖI KHUNG HÌNH, mà tấm 5×5 là
+    // ~75 rounded-rect + hai dải + mặt đồng hồ. Nướng thành texture một lần rồi dán Image thì
+    // hộp chỉ còn đúng một sprite — cùng cách makeTileTexture làm với ô bàn cờ.
+    //
+    // Nướng ở ĐỘ PHÂN GIẢI CỐ ĐỊNH (96px cho mỗi ô khuôn) chứ không theo S, nên texture giống
+    // hệt nhau ở mọi level và dùng lại được; mọi kích thước bên dưới đều là TỈ LỆ của cạnh.
+    const key = `choco-${n}-${box.def.ribbon}`;
+    const T = 96 * n;
+    if (!this.textures.exists(key)) this.bakeChocoTexture(key, n, box.def.ribbon, T);
+    const img = this.add.image(0, 0, key).setDisplaySize(S, S);
+
+    // Bán kính mặt đồng hồ = TỈ LỆ của cạnh, giống hệt công thức trong bakeChocoTexture, để
+    // con số (một Text thật, luôn nét) rơi đúng vào giữa mặt kem đã nướng sẵn.
+    const R = S * CHOCO_DIAL(n);
+    const digits = String(Math.max(1, box.def.count)).length;
+    const num = this.add
+      .text(0, 0, String(box.def.count), {
+        fontFamily: "Arial, sans-serif", fontStyle: "bold",
+        fontSize: `${Math.round(R * (digits >= 3 ? 0.78 : digits === 2 ? 1.0 : 1.15))}px`,
+        color: "#4a2a16",
+      })
+      .setOrigin(0.5);
+
+    const cont = this.add.container(x, y, [img, num]);
+    cont.setSize(S, S);
+    cont.setData("choco", true);
+    box.cont = cont;
+    box.num = num;
+  }
+
+  /** Nướng mặt tấm socola vào một texture vuông cạnh `T`. Mọi số đo là tỉ lệ của T. */
+  private bakeChocoTexture(key: string, n: number, ribbon: number, T: number) {
+    const g = this.make.graphics({ x: 0, y: 0 }, false);
+    const S = T;
+    const rr = S * 0.055;
+
+    // Thân socola PHỦ KÍN 0..S — tấm đè đúng n² ô, không chừa lề, nên không có chỗ cho bóng đổ
+    // ra ngoài. Chiều sâu lấy từ chính cái viền: cạnh sẫm lộ ra ~3% quanh mặt trên, thêm một
+    // vệt sáng mảnh ở mép trên cho ra khối.
+    g.fillStyle(0x3a2113, 1);
+    g.fillRoundedRect(0, 0, S, S, rr);
+    g.fillStyle(0xffffff, 0.1);
+    g.fillRoundedRect(S * 0.02, S * 0.012, S * 0.96, S * 0.03, rr * 0.4);
+    const inset = S * 0.03;
+    const fx = inset, fw = S - inset * 2;
+    g.fillStyle(0x4a2a16, 1); // màu RÃNH giữa các ô — mặt ô sẽ nổi lên trên nền này
+    g.fillRoundedRect(fx, fx, fw, fw, rr * 0.8);
+
+    // n² ô vuông chìm — đúng một ô cho mỗi slime bên dưới, nên người chơi đọc được cỡ hộp
+    const u = fw / n;
+    const pad = u * 0.085;
+    for (let r = 0; r < n; r++) {
+      for (let c = 0; c < n; c++) {
+        const x0 = fx + c * u + pad, y0 = fx + r * u + pad, w = u - pad * 2;
+        g.fillStyle(0x69401f, 1);
+        g.fillRoundedRect(x0, y0, w, w, u * 0.14);
+        g.fillStyle(0x804f28, 1); // mặt ô nổi (lệch lên trên-trái = ánh sáng từ trên xuống)
+        g.fillRoundedRect(x0 + w * 0.07, y0 + w * 0.05, w * 0.86, w * 0.82, u * 0.12);
+        g.fillStyle(0xffffff, 0.09);
+        g.fillRoundedRect(x0 + w * 0.14, y0 + w * 0.12, w * 0.6, w * 0.24, u * 0.09);
+      }
+    }
+
+    // ---- ruy băng: một dải NGANG + một dải DỌC, mỗi dải rộng đúng MỘT ô khuôn. n lẻ nên
+    // chỗ hai dải cắt nhau rơi đúng ô giữa, và mặt đồng hồ ngồi lên ô đó.
+    const mid = (n - 1) / 2;
+    const bw = u * 1.02; // hơi tràn mép ô một chút cho ra dáng dải vải phủ lên
+    const b0 = fx + mid * u - (bw - u) / 2;
+    const rainbow = ribbon === RAINBOW;
+    const ribCol = rainbow ? 0xffffff : (COLORS[ribbon] ?? 0xffffff);
+    // Dải cầu vồng CHẠY QUA MỌI MÀU — vẽ thành từng đoạn màu kế tiếp nhau dọc theo dải.
+    // ⚠ QUANG PHỔ PHẢI LẶP LẠI 2 LẦN: mặt đồng hồ che mất khúc giữa, nên nếu trải một lần
+    // trên cả dải thì mỗi CÁNH chỉ còn 3-4 màu — đọc ra "hộp hai màu" chứ không ra cầu vồng.
+    // Lặp 2 lần thì mỗi cánh vẫn quét đủ đỏ→hồng, và luật "màu nào cũng tính" hiện rõ.
+    const HUES = [0, 1, 2, 3, 4, 5, 6, 7]; // đỏ→cam→vàng→lá→ngọc→lam→tím→hồng
+    const SEG = HUES.length * 2;
+    const band = (bx: number, by: number, w: number, h: number, horiz: boolean) => {
+      if (!rainbow) { g.fillStyle(ribCol, 1); g.fillRect(bx, by, w, h); }
+      else for (let i = 0; i < SEG; i++) {
+        g.fillStyle(COLORS[HUES[i % HUES.length]], 1);
+        if (horiz) g.fillRect(bx + (w * i) / SEG, by, w / SEG + 0.6, h);
+        else g.fillRect(bx, by + (h * i) / SEG, w, h / SEG + 0.6);
+      }
+      // satin: một vệt sáng chạy dọc thân dải + hai mép sẫm
+      g.fillStyle(0xffffff, 0.26);
+      if (horiz) g.fillRect(bx, by + h * 0.16, w, h * 0.26);
+      else g.fillRect(bx + w * 0.16, by, w * 0.26, h);
+      g.fillStyle(0x000000, 0.22);
+      if (horiz) { g.fillRect(bx, by, w, h * 0.07); g.fillRect(bx, by + h * 0.93, w, h * 0.07); }
+      else { g.fillRect(bx, by, w * 0.07, h); g.fillRect(bx + w * 0.93, by, w * 0.07, h); }
+    };
+    band(fx, b0, fw, bw, true);   // ngang
+    g.fillStyle(0x000000, 0.18);  // bóng của dải dọc hắt xuống dải ngang ở chỗ giao nhau
+    g.fillRect(b0 - bw * 0.06, b0, bw * 1.12, bw);
+    band(b0, fx, bw, fw, false);  // dọc (nằm trên, như nút thắt thật)
+
+    // ---- mặt đồng hồ kem. Con số KHÔNG nướng vào đây (nó đếm ngược) — buildChocoBox đặt một
+    // Text lên đúng tâm này, dùng CHUNG công thức bán kính CHOCO_DIAL.
+    const R = S * CHOCO_DIAL(n);
+    const mx = S / 2;
+    g.fillStyle(0x000000, 0.25);
+    g.fillCircle(mx, mx + R * 0.1, R * 1.03);
+    g.fillStyle(0xe0b055, 1);
+    g.fillCircle(mx, mx, R); // vành vàng
+    g.fillStyle(0xf7ecd2, 1);
+    g.fillCircle(mx, mx, R * 0.88); // mặt kem
+    g.fillStyle(0xc9a06a, 0.55);
+    for (let i = 0; i < 12; i++) { // vạch giờ — đủ để đọc ra "mặt đồng hồ", chưa tới mức rối
+      const a = (Math.PI * 2 * i) / 12;
+      g.fillCircle(mx + Math.sin(a) * R * 0.72, mx - Math.cos(a) * R * 0.72, R * 0.045);
+    }
+
+    g.generateTexture(key, T, T);
+    g.destroy();
+  }
+
+  /**
+   * Một slime vừa rời bàn → trừ số cho MỌI hộp mà nó hợp lệ. Gọi từ đúng một chỗ (fireTo),
+   * tức là mọi đường ăn slime — tia, Magnet, đường ăn nhanh — đều tính như nhau.
+   *
+   * KHÔNG tính đá và gỗ: luật nói "slime". hitSoftRock/collectWood không đi qua đây.
+   */
+  private noteChocoCollect(color: number, sx: number, sy: number) {
+    if (this.boxes.length === 0) return;
+    for (const box of [...this.boxes]) {
+      if (box.broken || !box.cont) continue; // !cont = đăng ký được nhưng buildBoard chưa dựng
+      if (box.def.ribbon !== RAINBOW && box.def.ribbon !== color) continue;
+      box.def.count -= 1;
+      // Vệt bay từ con slime vừa ăn tới mặt đồng hồ: cho thấy CON NÀY vừa trừ hộp KIA — nếu
+      // không, người chơi thấy số tụt mà không biết vì cú ăn nào.
+      this.aimBeam(sx, sy, box.cont.x, box.cont.y, box.def.ribbon === RAINBOW ? 0xffffff : COLORS[color]);
+      if (box.def.count <= 0) { this.breakChocoBox(box); continue; }
+      box.num.setText(String(box.def.count));
+      box.num.setScale(1.35);
+      this.tweens.add({ targets: box.num, scale: 1, duration: 180, ease: "Back.out" });
+    }
+  }
+
+  /** Hộp vỡ: quầng sáng + tia bắn ra từ tâm, rồi n² slime hiện LAN TỪ TÂM RA NGOÀI. */
+  private breakChocoBox(box: LiveBox) {
+    if (box.broken || !box.cont) return;
+    box.broken = true;
+    this.boxes.splice(this.boxes.indexOf(box), 1);
+    const { cols } = this.level;
+    const n = box.def.n;
+    const cx = box.cont.x, cy = box.cont.y;
+    const S = n * this.cell;
+
+    // quầng sáng + tia từ tâm
+    const glow = this.add.circle(cx, cy, S * 0.34, 0xffe9b0, 0.6).setDepth(DEPTH_RUNNER + 2);
+    this.tweens.add({ targets: glow, scale: 2.1, alpha: 0, duration: 300, ease: "Quad.out", onComplete: () => glow.destroy() });
+    for (let i = 0; i < 12; i++) {
+      const a = (Math.PI * 2 * i) / 12;
+      const ray = this.add.rectangle(cx, cy, S * 0.06, S * 0.5, 0xfff2c8, 0.85)
+        .setOrigin(0.5, 1).setRotation(a).setDepth(DEPTH_RUNNER + 1);
+      this.tweens.add({ targets: ray, scaleY: 1.7, scaleX: 0.2, alpha: 0, duration: 280, ease: "Quad.out", onComplete: () => ray.destroy() });
+    }
+    this.explode(cx, cy, S * 0.5, 14, 0x69401f, Math.max(4, Math.round(this.cell * 0.32)));
+    this.tweens.add({ targets: box.cont, scale: 1.12, alpha: 0, duration: 200, ease: "Quad.out", onComplete: () => box.cont.destroy() });
+    Audio.board();
+
+    // Slime nhập vào bàn. keys[] được gán NGAY (không đợi tween) để tia và ô trống không
+    // lệch nhau dù chỉ một khung hình; cái chạy theo nhịp chỉ là hiệu ứng hiện lên.
+    const r0 = Math.floor(box.cells[0] / cols), c0 = box.cells[0] % cols;
+    const mid = (n - 1) / 2;
+    for (const ci of box.cells) {
+      this.boxAt.delete(ci);
+      const r = Math.floor(ci / cols), c = ci % cols;
+      const { x, y } = this.cellCenter(r, c);
+      const tile = this.hiddenSet.has(ci)
+        ? this.makeHiddenKey(x, y, this.cell, this.level.board[ci], ci)
+        : this.makeKey(this.level.board[ci], x, y, this.cell);
+      if (!this.hiddenSet.has(ci) && this.level.layer2 && this.level.layer2[ci] >= 0) this.markTwoLayer(tile, this.cell);
+      this.keys[ci] = tile;
+      tile.setScale(0.1).setAlpha(0);
+      // Cỡ 5×5 là 25 con ập xuống một nhịp — bật cùng lúc thì đọc thành GIẬT HÌNH. Cho hiện
+      // lan theo vòng tính từ tâm (Chebyshev) để mắt đi theo chúng chui ra từ đống vụn.
+      const ring = Math.max(Math.abs(r - (r0 + mid)), Math.abs(c - (c0 + mid)));
+      this.tweens.add({
+        targets: tile, scale: 1, alpha: 1, duration: 210, delay: 60 + ring * 75, ease: "Back.out",
+        onStart: () => this.sparkle(x, y, COLORS[this.level.board[ci]] ?? 0xffffff),
+      });
+    }
+
+    // Ô kề hộp có thể đã bị ăn sạch từ trước → slime "?" vừa lộ ra phải được mở ngay, đúng
+    // như khi một ô cạnh nó bị dọn (revealHiddenAround bỏ qua ô còn nằm dưới hộp).
+    if (this.hiddenSet.size) {
+      const around: number[] = [];
+      for (const ci of box.cells) {
+        const r = Math.floor(ci / cols), c = ci % cols;
+        for (const [rr2, cc2] of [[r - 1, c], [r + 1, c], [r, c - 1], [r, c + 1]] as const) {
+          if (rr2 < 0 || cc2 < 0 || rr2 >= this.level.rows || cc2 >= cols) continue;
+          const j = rr2 * cols + cc2;
+          if (!this.keys[j]) around.push(j);
+        }
+      }
+      if (around.length) this.revealHiddenAround(around);
+    }
+
+    // Bàn vừa đổi: xoá dấu "chuyến vừa rồi ăn được 0" của mọi xe và bắt auto-drive tính lại,
+    // nếu không một xe đang chờ đúng màu vừa lộ ra vẫn bị coi là kẹt.
+    this.boardSeq++;
   }
 
   // Build the ring of track nodes following the ROUNDED road (straight edges +
@@ -2847,7 +3136,10 @@ export class GameScene extends Phaser.Scene {
         const idx = r * cols + c;
         if (!this.keys[idx]) continue;
         const code = board[idx];
-        const fill = isObstacle(code) ? 0x565b6e : this.hiddenSet.has(idx) ? 0x9aa0ad : (COLORS[code] ?? 0x888888);
+        // Hộp socola vẽ nâu socola (không lộ màu bên dưới), y như đá vẽ xám: không chọn được.
+        const fill = this.boxAt.has(idx)
+          ? 0x69401f
+          : isObstacle(code) ? 0x565b6e : this.hiddenSet.has(idx) ? 0x9aa0ad : (COLORS[code] ?? 0x888888);
         cellsG.fillStyle(fill, 1);
         cellsG.fillRect(bx + c * zc + 0.5, by + r * zc + 0.5, Math.max(1, zc - 1), Math.max(1, zc - 1));
       }
@@ -2914,7 +3206,7 @@ export class GameScene extends Phaser.Scene {
         for (let c = c0 - 1; c <= c0 + 1; c++) {
           if (c < 0 || c >= cols || r < 0 || r >= rows) continue;
           const idx = r * cols + c;
-          if (!this.keys[idx] || isObstacle(board[idx]) || this.hiddenSet.has(idx)) continue;
+          if (!this.keys[idx] || isObstacle(board[idx]) || this.hiddenSet.has(idx) || this.boxAt.has(idx)) continue;
           const dx = wx - (bx + c * zc + zc / 2);
           const dy = wy - (by + r * zc + zc / 2);
           const d = dx * dx + dy * dy;
@@ -2978,6 +3270,7 @@ export class GameScene extends Phaser.Scene {
     const { cols, rows } = this.level;
     const color = this.level.board[startIdx];
     if (color < 0 || !this.keys[startIdx] || isObstacle(color)) return [];
+    if (this.boxAt.has(startIdx)) return []; // dưới hộp socola — Magnet không hút xuyên hộp
     const seen = new Set<number>([startIdx]);
     const stack = [startIdx];
     const out: number[] = [];
@@ -2994,7 +3287,7 @@ export class GameScene extends Phaser.Scene {
       ];
       for (const n of neigh) {
         if (n < 0 || seen.has(n)) continue;
-        if (this.keys[n] && this.level.board[n] === color) {
+        if (this.keys[n] && !this.boxAt.has(n) && this.level.board[n] === color) {
           seen.add(n);
           stack.push(n);
         }
@@ -4677,6 +4970,7 @@ export class GameScene extends Phaser.Scene {
     const addHit = (hit: { idx: number; steps: number } | null) => {
       if (!hit) return;
       if (this.hiddenSet.has(hit.idx)) return; // a "?" slime isn't collectable yet
+      if (this.boxAt.has(hit.idx)) return; // dưới hộp socola còn đóng — chưa với tới được
       const code = board[hit.idx];
       if (code >= 0 && code < HARD_ROCK) {
         this.reachableColors.add(code); // exposed slime
@@ -4855,16 +5149,22 @@ export class GameScene extends Phaser.Scene {
   private captureSimState() {
     const cols = this.level.cols, rows = this.level.rows;
     const occ = new Array(cols * rows).fill(-1);
+    let boxed = 0;
     for (let i = 0; i < cols * rows; i++) {
       const k = this.keys[i];
       if (k && k.scene) occ[i] = this.level.board[i];
+      // HỘP SOCOLA: bộ giải KHÔNG mô hình hoá việc mở hộp. Cho ô dưới hộp thành mã chặn để
+      // nó không ăn xuyên hộp, và đếm riêng số ô ấy vào `remaining` để nó không bao giờ tuyên
+      // bố THẮNG khi hộp còn đóng. Hệ quả: trên level có hộp, gợi ý từng bước rơi về tham lam
+      // thay vì đi theo một ván thắng mô phỏng — đúng hơn là đưa lời khuyên dựa trên luật sai.
+      if (this.boxAt.has(i)) { occ[i] = HARD_ROCK; boxed++; }
     }
     // level.board/layer2 are mutated in place as tops are eaten (board[i] becomes the revealed
     // bottom, layer2[i] flips to -1) — so board+layer2 already ARE the current truth.
     const lay = this.level.layer2 ? this.level.layer2.map((v, i) => (v >= 0 && this.keys[i] && this.keys[i]!.scene ? v : -1)) : null;
     const queue = this.invColumns.map((col) => col.filter((v) => v.container.scene).map((v) => ({ color: v.chest.color, cap: Math.max(0, v.chest.count - v.inFlight), pid: v.chest.pairId ?? null })));
     const parked = this.slots.map((v) => (v ? { color: v.chest.color, cap: Math.max(0, v.chest.count - v.inFlight), pid: v.chest.pairId ?? null } : null));
-    return { cols, rows, occ, lay, queue, parked, hid: [...this.hiddenSet] };
+    return { cols, rows, occ, lay, queue, parked, hid: [...this.hiddenSet], boxed };
   }
 
   // Greedy playout from a solver-form state; returns true if it clears the board. Mirrors the
@@ -4882,7 +5182,7 @@ export class GameScene extends Phaser.Scene {
   // vị trí xe, tia bắn lại sau mỗi con, ≤14 con/lượt-qua-lane), cuối vòng auto-continue nếu màu
   // còn reachable. Slam 2-hop: xe chiếm slot trống đầu NGAY khi phóng.
   private simRollout(
-    s: { cols: number; rows: number; occ: number[]; lay: number[] | null; queue: { color: number; cap: number; pid: number | null }[][]; parked: ({ color: number; cap: number; pid: number | null } | null)[]; hid?: number[] },
+    s: { cols: number; rows: number; occ: number[]; lay: number[] | null; queue: { color: number; cap: number; pid: number | null }[][]; parked: ({ color: number; cap: number; pid: number | null } | null)[]; hid?: number[]; boxed?: number },
     seed: number,
     forceFirst?: string,
     natural = false, // lối NGƯỜI: gần như không phá cách, trong nhóm chọn nước ăn nhiều nhất
@@ -4898,7 +5198,9 @@ export class GameScene extends Phaser.Scene {
     // slime "?" ẨN: chặn tia + không target được tới khi 1 ô kề 4-hướng bị ăn (hiddenSet thật).
     // `h` nằm TRONG Cell state (không phải closure chung) — các ước lượng trên CLONE không được
     // làm lộ "?" của dòng chính (bug 2026-07-31).
-    let remaining = occ.reduce((a, v) => a + (isC(v) ? 1 : 0), 0) + (lay ? lay.reduce((a, v) => a + (v >= 0 ? 1 : 0), 0) : 0);
+    // `s.boxed` = ô đang nằm dưới hộp socola: đã bị che thành mã chặn trong occ, nhưng vẫn là
+    // slime phải ăn, nên cộng vào đây — bộ giải không mở được hộp thì cũng không được thắng.
+    let remaining = occ.reduce((a, v) => a + (isC(v) ? 1 : 0), 0) + (lay ? lay.reduce((a, v) => a + (v >= 0 ? 1 : 0), 0) : 0) + (s.boxed ?? 0);
     type Cell = { o: number[]; l: number[] | null; h: Set<number> };
     const clearCell = (st: Cell, i: number) => {
       if (st.l && st.l[i] >= 0) { st.o[i] = st.l[i]; st.l[i] = -1; } else st.o[i] = -1;
@@ -5562,7 +5864,10 @@ export class GameScene extends Phaser.Scene {
     for (const ray of rays) {
       const hit = this.rayHit(ray.r, ray.c, ray.dr, ray.dc);
       // A still-hidden "?" slime can never be targeted (its colour is unknown).
-      if (hit && !this.hiddenSet.has(hit.idx) && this.chestWants(chest, this.level.board[hit.idx]) && !seen.has(hit.idx)) {
+      // Ô dưới HỘP SOCOLA còn đóng: tia dừng ở đó (hộp chặn như thùng gỗ) nhưng không bao giờ
+      // là mục tiêu — dù màu thật bên dưới có trùng màu xe.
+      if (hit && !this.hiddenSet.has(hit.idx) && !this.boxAt.has(hit.idx)
+          && this.chestWants(chest, this.level.board[hit.idx]) && !seen.has(hit.idx)) {
         seen.add(hit.idx);
         hits.push(hit);
       }
@@ -5714,6 +6019,9 @@ export class GameScene extends Phaser.Scene {
     this.keysRemaining -= 1;
     this.boardSeq++;
     this.revealHiddenAround(cells); // an opened side reveals any adjacent "?" slime
+    // HỘP SOCOLA: một slime vừa rời bàn → trừ số cho mọi hộp mà nó hợp lệ (có thể làm vỡ hộp
+    // ngay tại đây). Đọc board TRƯỚC đoạn 2-lớp bên dưới, vì đó mới là màu vừa bị ăn.
+    this.noteChocoCollect(this.level.board[cellIdx], key.x, key.y);
     view.inFlight += 1; // reserve a seat so the car won't over-collect while this one runs
 
     // Rare treat: the slime that fills this car's LAST seat (count → 0) has a

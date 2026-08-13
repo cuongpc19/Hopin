@@ -115,9 +115,18 @@ chấm điểm hình dạng: 3 = dọc (an toàn nhất), 2 = ngang liền kề,
 | đá cứng | `board[i]` ≥ 90 | dừng | không bao giờ |
 | ô lớp 2 | `layer2[i]` = màu nằm DƯỚI | — | lộ ra sau khi ô trên bị ăn |
 | slime `?` | `hidden[i]` | chặn | chỉ sau khi 1 ô kề bị ăn |
+| hộp socola | `boxes[]` (n×n đè lên n² ô) | chặn | sau khi ăn đủ `count` slime hợp lệ ở NGOÀI hộp |
 
 `clearCell` tự đôn `layer2[i]` lên `board[i]`. **Đừng cộng ô lớp 2 vào tổng ghế lần thứ hai** —
 xem lỗi 8.6.
+
+**Hộp socola** (2026-08-13, FEATURES §37): ô dưới hộp vẫn giữ **màu thật** trong `board`, nên
+`check-seats` vẫn đúng và không cần đụng vào tổng ghế. Nhưng nó đẻ ra một cách chết mà
+`check-seats` **không bắt được**: hộp ruy băng màu X số N cần ít nhất N slime màu X nằm NGOÀI
+mọi hộp, không thì bàn tắc mà mọi con số đều khớp. Chạy `node scripts/check-choco.mjs` sau mỗi
+lần đụng vào `boxes`. ⚠ Bộ đo winrate (`simcore2.mjs`, `build-levels.mjs`) **chưa mô hình hoá
+hộp** — số winrate của level có hộp hiện chưa đáng tin, phải làm phần đó trước khi gắn hộp vào
+level thật.
 
 Slime `?` (`hidden`) đã bị user bỏ từ 2026-08-05; `build()` xoá nó đi.
 
