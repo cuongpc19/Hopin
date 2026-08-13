@@ -128641,21 +128641,23 @@
       },
       {
         "color": 6,
-        "count": 136
+        "count": 136,
+        "pairId": 0
       },
       {
         "color": 10,
-        "count": 100
+        "count": 100,
+        "pairId": 0
       },
       {
         "color": 15,
         "count": 103,
-        "pairId": 0
+        "pairId": 1
       },
       {
         "color": 4,
         "count": 32,
-        "pairId": 0
+        "pairId": 1
       },
       {
         "color": 1,
@@ -145689,8 +145691,7 @@
       },
       {
         "color": 1,
-        "count": 12,
-        "pairId": 1
+        "count": 12
       },
       {
         "color": 11,
@@ -145708,8 +145709,7 @@
       },
       {
         "color": 10,
-        "count": 18,
-        "pairId": 1
+        "count": 18
       },
       {
         "color": 10,
