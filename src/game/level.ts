@@ -27,9 +27,13 @@ export interface Chest {
  * sang level kế, và phải biết chỗ dừng), mà `LevelSelectScene` thì đã import từ `GameScene`
  * — nhập ngược lại là thành vòng.
  *
- * L1-165. Trước 2026-08-13 là 185, rồi 20 board ở L40-59 bị bỏ và mọi thứ từ L60 lùi 20 bậc.
+ * L1-286 (user 2026-08-14: "mở hết đến 286"). Trước đó là 185, rồi 20 board ở L40-59 bị bỏ và
+ * mọi thứ từ L60 lùi 20 bậc thành 165 — nhưng đợt art thay 201 board từ L86 đã đưa dữ liệu lên
+ * 286 level, và 121 level cuối nằm im ngoài tầm với cho tới khi con số này được nới ra.
+ * Hàng xe của L36-286 dựng ở commit "Rebuild every queue from level 36" (mốc B 30-50 cho level
+ * chia hết cho 5, 60-100 cho phần còn lại).
  */
-export const LEVEL_COUNT = 165;
+export const LEVEL_COUNT = 286;
 
 export const HARD_ROCK = 90;
 export const BIG_HARD = 95;
@@ -133,8 +137,13 @@ export type Difficulty = "normal" | "hard" | "superhard";
 // được 4% và nằm trong dải L1-39 user giữ nguyên, nên nó vẫn cần lời cảnh báo.
 const SUPER_GATES = new Set([35]);
 
+// ⚠ Ở ĐÂY TỪNG CÓ: `if (n >= 200 && n <= 300) return "normal"` — "kid pack: all easy".
+// Bộ level dễ đó không còn: đợt art 2026-08-13 thay toàn bộ board từ L86 bằng 201 board emoji,
+// và đợt tune 2026-08-14 dựng mọi level chia hết cho 5 tới L285 về mốc B 30-50, có cả lớp-2 và
+// slime "?". Giữ dòng đó thì 17 level HARD và 6 level SUPER HARD trong dải 200-286 đi ra không
+// mang nhãn nào — đúng cái mà chú thích SUPER_GATES bên trên gọi là "người chơi đọc thành game
+// hỏng chứ không phải level khó".
 export function levelDifficulty(n: number): Difficulty {
-  if (n >= 200 && n <= 300) return "normal"; // kid pack: all easy — no HARD/SUPER badges
   if (SUPER_GATES.has(n)) return "superhard";
   if (n % 15 === 0) return "superhard";
   // "chia hết cho 5, TRÊN level 15" (user 2026-08-13) — L5 và L10 nằm trong khúc mở đầu,
