@@ -21,6 +21,9 @@ const D = "public/art/level art/emoji";
 const CAND = process.env.CAND || "cand.txt";
 const POOL = process.env.POOL || "pool.json";
 const SHEETPFX = process.env.SHEETPFX || "pool";
+// SIZES=25,31 — cỡ board cần dựng. Board CÀNG TO thì tỉ lệ qua rule viền càng cao, vì viền
+// tính theo % board: cùng một chủ thể trượt ở 25 vẫn có thể đạt ở 35.
+const SIZES = (process.env.SIZES || "25,31").split(",").map(Number);
 const ALL = fs.readFileSync(`${D}/${CAND}`, "utf8").trim().split("\n")
   .map((l) => l.trim().split(/\s+/)).filter((r) => r.length >= 3).map((r) => [r[1], r[2]]);
 
@@ -66,7 +69,7 @@ const pool = {};
 for (let s = 0; s < sheets.length; s++) {
   for (let i = 0; i < sheets[s].length; i++) {
     const [name, theme] = sheets[s][i];
-    for (const size of [25, 31]) {
+    for (const size of SIZES) {
       try {
         fs.writeFileSync(SCRATCH, "{}");
         execFileSync(process.execPath, ["scripts/build-one.mjs", `${D}/${SHEETPFX}${s}.png`, String(i), "900", "11", String(size)],
