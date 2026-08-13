@@ -17,7 +17,12 @@ import {
   type EventReward,
 } from "../game/cloverEvent";
 
-const LEVEL_COUNT = 185; // L1-185 (kid pack L200-300 + rock-wall/logic L301-330 removed 2026-07-30)
+// L1-165. Was 185 until 2026-08-13, when the twenty boards at L40-59 were dropped and
+// everything from L60 up slid down twenty places to close the gap (user: "bỏ level từ 40-59,
+// bộ level 60-115 đẩy lùi về 40-95").
+// ⚠ Saved progress is a LEVEL NUMBER, so every player already past L40 now sits on different
+// artwork than they left off on. Nothing to migrate — the number is all we ever stored.
+const LEVEL_COUNT = 165;
 
 // Home screen (redesign 2026-08-01, user): BỎ bản đồ dây-level cuộn — nền là bức tranh
 // background2 (xe vàng + slime giữa rừng), dưới xe có Ô LEVEL hiển thị level hiện tại
