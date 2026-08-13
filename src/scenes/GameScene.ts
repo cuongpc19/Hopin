@@ -3219,6 +3219,11 @@ export class GameScene extends Phaser.Scene {
     // Level pill — DỒN SANG TRÁI (user 2026-08-13), không còn canh giữa. Neo theo MÉP TRÁI cố
     // định chứ không theo tâm: bề rộng pill đổi theo số chữ số của level, canh tâm thì mép
     // phải xê dịch và cái tag HARD/SUPER bên cạnh sẽ nhảy theo từng màn.
+    // CHỈ dồn sang trái khi có tag HARD/SUPER cần chỗ (user 2026-08-13); level thường thì
+    // giữ nguyên canh giữa như cũ. Khi dồn thì neo theo MÉP TRÁI cố định chứ không theo tâm:
+    // bề rộng ô đổi theo số chữ số của level, canh tâm thì mép phải xê dịch và tag bên cạnh
+    // sẽ nhảy chỗ mỗi màn.
+    const tier = levelDifficulty(levelNum);
     const LVL_X0 = 68; // ngay sau nút bánh răng (tâm 30, bán kính 20 → hết ở x≈50)
     const lph = 34;
     const ly0 = y - lph / 2;
@@ -3232,7 +3237,7 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(D + 2);
     const lpw = lvlText.width + 40;
-    const lx0 = LVL_X0;
+    const lx0 = tier === "normal" ? GAME_W / 2 - lpw / 2 : LVL_X0;
     lvlText.setX(lx0 + lpw / 2);
     const lpill = this.add.graphics().setDepth(D + 1);
     lpill.fillStyle(0xdb524d, 1); // đỏ coral như ảnh (user 2026-08-02)
@@ -3245,7 +3250,6 @@ export class GameScene extends Phaser.Scene {
     // Tag HARD / SUPER HARD ngay cạnh ô LEVEL — đứng thường trực chứ không chỉ loé 1.5s như
     // banner lúc vào màn, để người chơi nhìn lại lúc nào cũng biết mình đang ở mức nào.
     // Luật ở `levelDifficulty`: chia hết 15 → siêu khó, chia hết 5 và trên L15 → khó.
-    const tier = levelDifficulty(levelNum);
     if (tier !== "normal") {
       const isSuper = tier === "superhard";
       const tTx = this.add
@@ -7152,6 +7156,13 @@ export class GameScene extends Phaser.Scene {
 
     // ---- nút CLAIM xanh — BÉ lại như ảnh mẫu (2026-08-01) ----
     const cbw = Math.min(GAME_W - 180, 190);
+    void claimY; void cbw; // hai biến chỉ còn khối CLAIM bên dưới dùng — xem chú thích
+    /* ===== NÚT CLAIM — TẠM ẨN (user 2026-08-13: "user k cần claim thì tạm ẩn button Claim đi")
+       Thưởng đã tự cộng ngay khi thắng (lời gọi `claim()` ở cuối hàm), nên nút này không còn
+       việc gì để làm. Giữ nguyên code trong khối chú thích chứ không xoá, để bật lại là một
+       thao tác — cùng cách đã làm với dải nút debug ở trên.
+       Bỏ nút cũng bỏ luôn đường "bấm để bỏ qua"; chuyển cảnh giờ chỉ còn 600ms nên không đáng
+       đánh đổi lấy nguy cơ chạm nhầm làm mất luôn hoạt cảnh xu bay.
     const claimBtn = this.add.graphics().setDepth(402);
     claimBtn.fillStyle(0x35c04a, 1);
     claimBtn.fillRoundedRect(cx - cbw / 2, claimY - 25, cbw, 50, 24);
@@ -7171,6 +7182,7 @@ export class GameScene extends Phaser.Scene {
     // `applyReward` nên bấm sớm cỡ nào cũng không mất xu.)
     hit.on("pointerdown", finishAndGo);
     objs.push(hit);
+    ===== END NÚT CLAIM ================================================== */
 
     // TỰ NHẬN THƯỞNG (user 2026-08-13: "thắng xong là được thêm coin luôn"). Trước đây phải
     // bấm CLAIM mới có xu và mới đi tiếp — một cú bấm bắt buộc sau MỌI ván thắng, nằm đúng
