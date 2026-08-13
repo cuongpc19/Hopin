@@ -12,8 +12,20 @@ const ART_DIR = "dist/art";
 
 // Longest-side cap per file. Splash + background fill the screen so they get more
 // pixels; everything else is a sprite/icon shown small, 512 is generous (retina-safe).
-const CAPS = { "hopin.png": 900, "background.png": 900 };
+//
+// ⚠ Hai khoá cũ ở đây — "hopin.png" và "background.png" — KHÔNG KHỚP tên file nào: hai ảnh
+// nền thật tên là splash-hopin.jpg và background2.jpg. Mà vòng tối ưu bên dưới lại bỏ qua mọi
+// file không phải .png, nên suốt thời gian qua CẢ HAI ảnh nặng nhất chưa từng được đụng tới:
+// 274 KB + 270 KB tải nguyên bản, gấp đôi cả bundle JS sau khi gzip (2026-08-13).
+const CAPS = {
+  // Icon booster: ảnh gốc 512² nhưng trong game vẽ ở 52px thiết kế (60px ở popup tutorial),
+  // tức tối đa ~240px thật ở dpr 4. 256 vừa đủ VÀ là luỹ thừa 2 nên vẫn được mipmap.
+  "booster-add.png": 256, "booster-hand.png": 256,
+  "booster-refresh.png": 256, "booster-magnet.png": 256,
+};
 const DEFAULT_CAP = 512;
+// Ảnh nền phủ kín màn: giữ nguyên cỡ (thu nhỏ là thấy ngay ở màn hình đầu tiên), chỉ nén lại.
+const JPEG_QUALITY = 78;
 
 if (!existsSync(ART_DIR)) {
   console.log("[optimize-art] no dist/art — did vite build run? skipping");
@@ -68,6 +80,28 @@ function* walk(dir) {
     if (statSync(p).isDirectory()) yield* walk(p);
     else yield p;
   }
+}
+
+// ---- JPEG: nén lại, GIỮ NGUYÊN kích thước ------------------------------------------------
+// Chúng phủ kín màn hình nên thu nhỏ là thấy ngay ở màn đầu tiên; nhưng chúng chưa từng qua
+// một bước nén nào, nên chỉ mã hoá lại ở q78 (mozjpeg) đã đủ.
+{
+  let b4 = 0, af = 0, k = 0;
+  for (const file of walk(ART_DIR)) {
+    if (!/\.jpe?g$/i.test(file)) continue;
+    const orig = statSync(file).size;
+    const tmp = file + ".tmp";
+    try {
+      await sharp(file).jpeg({ quality: JPEG_QUALITY, mozjpeg: true }).toFile(tmp);
+      const now = statSync(tmp).size;
+      if (now < orig) { rmSync(file); renameSync(tmp, file); b4 += orig; af += now; k++; }
+      else rmSync(tmp);
+    } catch (e) {
+      if (existsSync(tmp)) rmSync(tmp);
+      console.warn(`[optimize-art] bo qua ${file}: ${e.message}`);
+    }
+  }
+  if (k) console.log(`[optimize-art] nen lai ${k} JPEG: ${(b4 / 1048576).toFixed(2)}MB -> ${(af / 1048576).toFixed(2)}MB`);
 }
 
 let before = 0, after = 0, n = 0;
