@@ -57,6 +57,7 @@ let hostLocale: string | null = null;
 let gaveUp = false; // budget expired — this session stays local-only, see boot()
 let loadingPending = false; // loadingStart() was asked for before the SDK existed
 let loadingDone = false; // …and whether loadingStop() has already been through
+let playing = false; // host's view of gameplayStart/Stop — xem chú thích ở gameplayStart
 
 // The site's own mute button, seeded from ?muteAudio=true so it can be exercised without
 // the SDK — that is the flag their QA uses to test this, and it also lets us check the
@@ -259,10 +260,18 @@ export const crazyPlatform: Platform = {
   // Not decoration: this pair is how the host knows when it may interrupt with an
   // ad. Every pause, modal and menu must be bracketed by gameplayStop/Start, or ads
   // land in the middle of a turn.
+  // CHỐNG LẶP ở đây chứ không ở nơi gọi: có tới mười chỗ bật/tắt cặp này, và từ 2026-08-13
+  // lúc vào màn gọi gameplayStart trước rồi modal mở màn có thể gọi tiếp — hai lần liên tiếp
+  // cùng trạng thái là vô nghĩa với host. Giữ trạng thái tại một chỗ thì không nơi gọi nào
+  // phải nhớ luật này.
   gameplayStart() {
+    if (playing) return;
+    playing = true;
     call((g) => g.gameplayStart());
   },
   gameplayStop() {
+    if (!playing) return;
+    playing = false;
     call((g) => g.gameplayStop());
   },
 

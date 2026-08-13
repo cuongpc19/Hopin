@@ -793,15 +793,21 @@ export class GameScene extends Phaser.Scene {
     // Gift + tutorialise any booster whose unlock level this level reaches.
     this.checkBoosterUnlocks(levelNum);
 
+    // BÁO "ĐANG CHƠI" TRƯỚC MỌI MODAL MỞ MÀN. Chỉ số "gameplay conversion" của CrazyGames đếm
+    // phiên nào từng gọi gameplayStart, mà tutorial L1 bật ngay lúc vào màn và đặt tutPaused —
+    // nên người chơi mới bỏ giữa tutorial trước đây KHÔNG BAO GIỜ được tính, dù họ đã vào tới
+    // bàn chơi. Đo 2026-08-13: conversion mobile 34.78% (điểm 1/5) so với desktop 60.29%.
+    // Gọi ở đây rồi để setter tutPaused lập tức gameplayStop lại — ad vẫn được phép rơi vào
+    // lúc modal đang mở đúng như cũ, chỉ khác là lượt vào màn được tính.
+    platform.gameplayStart();
     if (levelNum === 1) this.startTutorial(); // gentle intro guidance
     else if (this.maybeShowHardRockIntro()) { /* first hard-rock level → explain the rock */ }
     else this.maybeShowTwinIntro(); // first level with a twin pair → explain twin cars
     // Cảnh báo tier khi VÀO level khó (user 2026-08-01): banner 🔥HARD/💀SUPER ~1.5s.
     if (levelDifficulty(levelNum) !== "normal") this.showTierBanner(levelDifficulty(levelNum) === "superhard");
 
-    // Play is live from here. Told to the host LAST, after every intro modal above has
-    // had its chance to set tutPaused — otherwise we would announce "playing" and the
-    // setter would immediately have to take it back.
+    // Không modal mở màn nào bật → ván sống thật từ đây. (Có modal thì setter tutPaused đã
+    // gameplayStop ngay sau lời gọi ở trên, và sẽ tự gameplayStart lại lúc người chơi đóng nó.)
     if (!this.tutPaused) platform.gameplayStart();
   }
 
