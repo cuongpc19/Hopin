@@ -1371,6 +1371,51 @@ CHƯA LÀM (cố ý — user 2026-08-13 "tạm thời chỉ build cơ chế, ch�
   • XEM THỬ: mở ?level=998 — bàn 15×15 có một hộp 5×5 ruy băng XANH (số 7) và một hộp
     3×3 ruy băng CẦU VỒNG (số 3) cạnh nhau để so hai luật.
 
+38) KHO 300 ẢNH MỚI + BỘ LỌC TRÙNG CÓ NGƯỠNG GIỐNG (user 2026-08-13)
+────────────────────────────────────────────────────────────────────────────
+Yêu cầu: 300 ảnh nữa, ưu tiên 31x31/35x35, 20% có >10 màu, đa dạng.
+
+⚠ KHO NOTO EMOJI ĐÃ CẠN — con số phải biết trước khi hứa lô sau:
+  • 3731 file trong noto-emoji. Bỏ nhóm mặt cười / người / cờ (vàng khè hoặc sọc phẳng,
+    không ra tranh) và bỏ chữ-số/hình học/mũi tên → chỉ còn 322 mã CHƯA TỪNG THỬ.
+  • Dựng cả 322 ở 31+35: qua được 183 chủ thể (57%). Tỉ lệ này THẤP HƠN các lô trước
+    (526 mã → 378 chủ thể = 72%) vì đây đúng là phần thừa lại sau khi đã hớt phần ngon.
+  • Dựng LẠI 205 chủ thể từng trượt, ở cỡ TO hơn (35): chỉ cứu được 31. Tài liệu nói
+    "bàn to qua rule viền dễ hơn" là đúng nhưng KHÔNG cứu được nhiều — phần lớn trượt vì
+    lý do thật (thân trắng bị bộ tách nền ăn mất, chủ thể quá thưa), không phải vì cỡ.
+  • => LẤY MỚI ĐƯỢC 214 chủ thể, không phải 300. Muốn thêm chủ thể MỚI thì phải đổi
+    nguồn art, mà mọi bộ emoji đều vẽ CÙNG MỘT DANH SÁCH chủ thể → chỉ được kiểu vẽ mới
+    chứ gần như không được chủ thể mới. Bộ dùng thương mại được: Fluent Emoji (MIT),
+    Twemoji (CC-BY). OpenMoji vẫn CẤM (CC BY-SA lây share-alike sang cả game).
+  • Đủ 300 là nhờ gộp thêm 159 chủ thể ĐÃ DỰNG TỪ CÁC PHIÊN TRƯỚC mà chưa từng lên level.
+
+BỘ CHỌN MỚI: scripts/emoji-pick.mjs (POOL=a.json,b.json TAKE=300 RICH=0.2).
+Trước đó bộ lọc trùng đã sai BA lần; file này gom cả ba bài học:
+  1. Lọc theo TÊN không đủ — 46 mã emoji mang nhiều tên khác nhau giữa các file ứng viên.
+  2. So chữ ký board vỡ trên level CÓ ĐÁ — đá đè lên một ô màu. Cách đúng: bỏ qua đúng
+     những vị trí ≥90 ở CẢ HAI phía.
+  3. ⚠ TRÙNG KHÔNG-Y-HỆT: 8 biển cấm vòng đỏ (nosmoking/nobicycles/nolittering/…) lọt
+     hết vào một lô. ĐO ĐƯỢC chúng giống nhau 78-88.5%, nên ngưỡng phải là 0.86 chứ không
+     phải 0.92. Đừng đoán ngưỡng — đo cụ thể trên đúng cái họ ảnh đang lọt.
+  Thêm MINCOL=5: bàn ≤4 màu ra hình quá trống (cái cửa = một hình chữ nhật nâu, quả trứng
+  = một vệt be). Sàn này cắt 45 chủ thể.
+  Trong một họ gần giống, GIỮ BẢN ĐIỂM CAO NHẤT (duyệt theo điểm giảm dần).
+
+BƯỚC BẮT BUỘC TRƯỚC KHI CHỐT: scripts/board-sheet.mjs vẽ cả lô ra ảnh ghép, xếp theo số
+màu giảm dần → nhìn tấm CUỐI là thấy ngay phần đuôi yếu. Điểm "đẹp" (màu×3 + liền mảng×40
++ độ phủ×20) KHÔNG nhìn ra chuyện 8 biển cấm giống hệt nhau; chỉ mắt người nhìn ra.
+
+KẾT QUẢ (public/art/level art/emoji/pool-pick.json + .txt):
+  300 bàn · 194 cỡ 35x35 + 106 cỡ 31x31 · 68 bàn >10 màu (23%) · 60 chủ đề
+  còn 439→398 bàn sạch trong kho, tức còn dư ~98 bàn chưa dùng tới.
+  CÒN SÓT: 5-6 pha mặt trăng (giống nhau tối đa 78%, dưới ngưỡng nên lọt) — muốn bỏ thì
+  loại tay, đừng hạ SIM xuống dưới 0.86 vì sẽ cắt nhầm ảnh khác.
+
+⚠ CÒN 121 BÀN "MỒ CÔI": designed.json có 286 level nhưng LEVEL_COUNT=165, nên L166-286
+nằm trong dữ liệu mà người chơi không bao giờ tới. Đã kiểm: 121 bàn đó KHÔNG trùng nhau và
+không trùng L1-165 (49 cỡ 25, 48 cỡ 31, 24 cỡ 35; 47 bàn >10 màu). Đây là kho ảnh đã dựng
+xong, chưa ai thấy — dùng trước khi đi kiếm ảnh mới.
+
 ────────────────────────────────────────────────────────────────────────────
 GHI CHÚ CHUNG
 ────────────────────────────────────────────────────────────────────────────

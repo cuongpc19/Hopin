@@ -64,7 +64,10 @@ function beauty(L) {
            score: +(colours * 3 + clean * 40 + cover * 20).toFixed(1) };
 }
 
-const SCRATCH = "scripts/_pool-one.json";
+// File nháp DÙNG CHUNG cho mọi lượt dựng — nên hai lượt emoji-pool chạy CÙNG LÚC sẽ ghi đè
+// lên nhau. SCRATCH=<file> để chạy song song hai danh sách ứng viên (nhớ đặt cả POOL/SHEETPFX
+// khác nhau nữa).
+const SCRATCH = process.env.SCRATCH || "scripts/_pool-one.json";
 const pool = {};
 for (let s = 0; s < sheets.length; s++) {
   for (let i = 0; i < sheets[s].length; i++) {
