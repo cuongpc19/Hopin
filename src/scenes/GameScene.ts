@@ -289,22 +289,22 @@ interface BoosterDef {
 }
 const BOOSTERS: BoosterDef[] = [
   {
-    key: "add", img: "booster-add", label: "Add", cost: 450, unlock: 6,
+    key: "add", img: "booster-add", label: "Add", cost: 150, unlock: 6,
     title: "New Booster: Add!",
     desc: "Adds an extra waiting bay, so one more car can park at a time.",
   },
   {
-    key: "hand", img: "booster-hand", label: "Grab", cost: 750, unlock: 11,
+    key: "hand", img: "booster-hand", label: "Grab", cost: 250, unlock: 11,
     title: "New Booster: Grab!",
     desc: "Instantly send out ANY car from the queue — skip the front-only rule.",
   },
   {
-    key: "refresh", img: "booster-refresh", label: "Shuffle", cost: 900, unlock: 16,
+    key: "refresh", img: "booster-refresh", label: "Shuffle", cost: 300, unlock: 16,
     title: "New Booster: Shuffle!",
     desc: "Re-rolls the colors of the queued cars, bringing up a color you need.",
   },
   {
-    key: "magnet", img: "booster-magnet", label: "Magnet", cost: 900, unlock: 21,
+    key: "magnet", img: "booster-magnet", label: "Magnet", cost: 300, unlock: 21,
     title: "New Booster: Magnet!",
     desc: "Tap a slime and a VIP car reels in the whole connected cluster of that color.",
   },
@@ -3315,7 +3315,7 @@ export class GameScene extends Phaser.Scene {
     /* ---- buy "+" button: hidden for submission ---------------------------
     // COMMENTED OUT 2026-08-08. This one was LIVE, not decorative like the pill on Home:
     // every tap handed out 5000 free Coin with no limit and no purchase behind it. Shipping
-    // that would make Coin meaningless — Revive costs 900 — and it is exactly the kind of
+    // that would make Coin meaningless — Revive costs 300 — and it is exactly the kind of
     // leftover test control a QA pass rejects. Restore when a real shop exists.
     //
     // nút xanh BÓNG như ảnh (user 2026-08-02): đế xanh đậm + thân + đốm gloss + viền trắng
@@ -6490,7 +6490,7 @@ export class GameScene extends Phaser.Scene {
 
   private showLoseModal(pending?: ActiveChest) {
     platform.gameplayStop(); // play is over — a legal ad moment for the host
-    const REVIVE_COST = 900;
+    const REVIVE_COST = 300;
     const canAfford = this.gold >= REVIVE_COST;
     const cx = GAME_W / 2;
     const cy = GAME_H / 2;

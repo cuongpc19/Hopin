@@ -186,7 +186,7 @@ const S: Record<string, { vi: string; en: string }> = {
   reviveBtn: { vi: "REVIVE   {n} 🪙", en: "REVIVE   {n} 🪙" },
   reviveNeed: { vi: "Cần {n} 🪙 để Revive", en: "Need {n} 🪙 to revive" },
   // What Revive ACTUALLY does — one extra bay, nothing is cleared. Without this line a big
-  // green button on a jammed board reads as "undo the jam", and the player pays 900 Coin
+  // green button on a jammed board reads as "undo the jam", and the player pays 300 Coin
   // expecting a rescue (user 2026-08-08).
   reviveDesc: { vi: "Thêm 1 ô chờ — bàn giữ nguyên", en: "Adds 1 more bay — board stays as it is" },
   // "|"-joined praise words for the rare big slime — split before use.
