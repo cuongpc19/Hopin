@@ -85,8 +85,26 @@ if (!rows.length) {
   process.exit(0);
 }
 
-const byLevel = new Map();
+// GỘP LƯỢT ĐÃ REVIVE. `lose()` gửi dòng "lose" NGAY, trước khi người chơi thấy nút Revive —
+// nên một lượt revive rồi thắng để lại hai dòng, và đếm thẳng thì vừa dư một ván vừa dư một
+// lần thua. Các dòng cùng một lượt mang cùng `run`; dòng có `revives` lớn nhất là kết quả thật.
+// Dòng cũ (trước 2026-08-13) không có `run` — giữ nguyên, không đoán.
+const byRun = new Map();
 for (const r of rows) {
+  if (!r.run) continue;
+  const k = r.dev + "|" + r.run;
+  const cur = byRun.get(k);
+  if (!cur || (r.revives ?? 0) > (cur.revives ?? 0)) byRun.set(k, r);
+}
+// So SÁNH THAM CHIẾU: byRun giữ đúng một đối tượng cho mỗi lượt, nên phép này giữ lại
+// đúng dòng đó dù nó đứng ở đâu trong mảng (lọc theo "đã gặp khoá này chưa" thì sai — dòng
+// thua đứng trước sẽ chiếm chỗ và dòng thắng bị vứt).
+const merged = rows.filter((r) => !r.run || byRun.get(r.dev + "|" + r.run) === r);
+const collapsed = rows.length - merged.length;
+if (collapsed) console.log(`(gop ${collapsed} dong cua cac luot da Revive vao luot goc)`);
+
+const byLevel = new Map();
+for (const r of merged) {
   const lv = Number(r.lvl);
   if (!Number.isFinite(lv)) continue;
   let b = byLevel.get(lv);
@@ -137,3 +155,35 @@ for (const r of out) {
   );
 }
 if (out.some((r) => r.runs < 5)) console.log("\n* = duoi 5 van, con so chi la nhieu, dung dung de chinh level.");
+
+// ---- Booster + Revive -------------------------------------------------------
+// Chỉ có ở ván chơi trên bản 2026-08-13 trở đi; ván cũ không mang trường này nên không đếm.
+const withB = merged.filter((r) => r.boost || r.revives != null);
+if (!withB.length) {
+  console.log("\n(Chua co van nao ghi booster/revive — can ban game tu 2026-08-13 tro di.)");
+} else {
+  const tot = {}, lvlB = new Map();
+  let revRuns = 0, revTotal = 0;
+  for (const r of withB) {
+    for (const [k, n] of Object.entries(r.boost ?? {})) tot[k] = (tot[k] ?? 0) + n;
+    if (r.revives > 0) { revRuns++; revTotal += r.revives; }
+    if (r.boost || r.revives > 0) {
+      const b = lvlB.get(r.lvl) ?? { n: 0, rev: 0, use: {} };
+      b.n++; if (r.revives > 0) b.rev++;
+      for (const [k, n] of Object.entries(r.boost ?? {})) b.use[k] = (b.use[k] ?? 0) + n;
+      lvlB.set(r.lvl, b);
+    }
+  }
+  console.log(`\n=== Booster & Revive (${withB.length} van co ghi) ===`);
+  console.log("Tong luot dung booster: " + (Object.keys(tot).length
+    ? Object.entries(tot).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k}=${v}`).join("  ") : "khong co"));
+  console.log(`Revive: ${revRuns} van (${Math.round(100 * revRuns / withB.length)}%), tong ${revTotal} lan`);
+  if (lvlB.size) {
+    console.log("\n| Level | Van dung ho tro | Revive | Booster |");
+    console.log("|------:|----------------:|-------:|:--------|");
+    for (const lv of [...lvlB.keys()].sort((a, b) => a - b)) {
+      const b = lvlB.get(lv);
+      console.log(`| L${lv} | ${b.n} | ${b.rev} | ${Object.entries(b.use).map(([k, v]) => `${k}×${v}`).join(", ") || "-"} |`);
+    }
+  }
+}

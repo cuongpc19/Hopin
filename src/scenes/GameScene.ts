@@ -367,6 +367,16 @@ export class GameScene extends Phaser.Scene {
   private playStart = 0;
   private levelSig = "";
   private peakUsed = 0;
+  // Booster nào đã tiêu trong LƯỢT này, đếm theo key ("add"/"hand"/"refresh"/"magnet").
+  private boosterUse: Record<string, number> = {};
+  // Số lần Revive trong lượt này. Cũng là thứ vá một lỗi ĐO: `lose()` gửi dòng "lose" TRƯỚC
+  // khi hiện nút Revive, nên ai revive rồi thắng sẽ đẻ ra hai dòng (một thua, một thắng) cho
+  // cùng một lượt — bảng winrate đếm dư số thua. Không dời chỗ gửi được: người bỏ ngang sau
+  // màn thua thì phải còn dòng đó, nếu không thì mất luôn ván khó nhất.
+  private reviveCount = 0;
+  // Mã ngẫu nhiên cho mỗi LƯỢT chơi: mọi dòng của cùng một lượt (kể cả các dòng thua trước
+  // khi revive) mang cùng mã, nên lúc phân tích gộp lại được — dòng cuối cùng mới là kết quả.
+  private runId = "";
   // TRAY_BATCH: a batch (the whole set of bay cars) is currently out circling the ray.
   // While true the bays are locked (no staging) and the GO button is disabled; flips back
   // to false once every batch car has left the ray (leaving or returning to its bay).
@@ -629,6 +639,8 @@ export class GameScene extends Phaser.Scene {
     // Home picker features THIS level, not the max unlocked one (user 2026-07-31).
     try { platform.storage.setItem("pf_current", String(levelNum)); } catch { /* storage unavailable */ }
     this.playLog = []; this.playStart = (typeof performance !== "undefined" ? performance.now() : 0); this.peakUsed = 0;
+    this.boosterUse = {}; this.reviveCount = 0;
+    this.runId = Math.random().toString(36).slice(2, 10);
     this.boardSeq = 0; this.lastStuckProbe = 0; // fresh board → fresh futility bookkeeping
     try { this.guideMode = platform.storage.getItem("hopin_guide") === "1"; } catch { this.guideMode = false; }
     this.guideKey = ""; this.guideHand = undefined; this.guideRing = undefined; this.guidePlan = null; this.guidePlanWinning = false; this.guidePlanNonce = 0;
@@ -2401,6 +2413,7 @@ export class GameScene extends Phaser.Scene {
   private consumeBooster(key: string) {
     if ((this.boosterCounts[key] ?? 0) > 0) {
       this.boosterCounts[key] -= 1;
+      this.boosterUse[key] = (this.boosterUse[key] ?? 0) + 1; // telemetry: booster nào thật sự được dùng
       this.saveBoosterCounts();
     }
     this.drawBoosters();
@@ -6397,7 +6410,15 @@ export class GameScene extends Phaser.Scene {
     this.notePeak();
     const ms = Math.round((typeof performance !== "undefined" ? performance.now() : 0) - this.playStart);
     const launches = this.playLog.filter((e) => e.ev === "launch").length;
-    const summary = { lvl: this.levelNum, sig: this.levelSig, result, ms, launches, peakBays: this.peakUsed, bays: this.slots.length };
+    // `boost` bỏ hẳn khi không dùng booster nào (phần lớn ván) để dòng gửi đi khỏi phình.
+    const boost = Object.keys(this.boosterUse).length ? this.boosterUse : undefined;
+    const summary = {
+      lvl: this.levelNum, sig: this.levelSig, result, ms, launches,
+      peakBays: this.peakUsed, bays: this.slots.length,
+      run: this.runId,          // gộp các dòng của cùng một lượt (xem chú thích ở reviveCount)
+      revives: this.reviveCount, // 0 = chưa revive lần nào
+      ...(boost ? { boost } : {}),
+    };
     this.postLog({ ev: "result", ...summary }); // dòng tổng kết (postLog gom nốt vào playLog)
     saveRun(this.levelNum, result, ms, this.playLog.slice() as never); // cất lại để chép ra sau
     sendRun(summary); // …và gửi về Firebase, thứ duy nhất đến được tay ta từ người chơi thật
@@ -6494,6 +6515,7 @@ export class GameScene extends Phaser.Scene {
       if (this.gold < REVIVE_COST) return;
       this.addGold(-REVIVE_COST);
       this.lost = false;
+      this.reviveCount += 1; // lượt này chưa kết thúc — dòng kết quả sau sẽ mang số này
       closeAll();
       this.slotCount += 1;
       this.slots.push(null);
