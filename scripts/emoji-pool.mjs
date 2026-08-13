@@ -16,15 +16,13 @@ import fs from "node:fs";
 import { execFileSync } from "node:child_process";
 
 const D = "public/art/level art/emoji";
-const OLD = [ // 20 chủ thể đã dùng ở L61-80, kèm chủ đề
-  ["apple","traicay"],["tangerine","traicay"],["strawberry","traicay"],["watermelon","traicay"],
-  ["tomato","traicay"],["avocado","traicay"],["fish","bien"],["octopus","bien"],
-  ["butterfly","contrung"],["bee","contrung"],["frog","hoangda"],["cat","thucung"],["dog","thucung"],
-  ["rocket","vutru"],["car","xecom"],["burger","doan"],["pumpkin","doan"],["gift","dovat"],
-  ["basketball","thethao"],["rainbow","thiennhien"],
-];
-const NEW = fs.readFileSync(D + "/cand.txt", "utf8").trim().split("\n").map((l) => l.trim().split(/\s+/)).map((r) => [r[1], r[2]]);
-const ALL = [...OLD, ...NEW];
+// CAND=<file> chọn danh sách ứng viên; POOL=<file> chọn nơi ghi kho.
+// Mỗi dòng: "<mã hex noto> <tên> <chủ đề>". Ảnh phải nằm sẵn ở <tên>.png trong D.
+const CAND = process.env.CAND || "cand.txt";
+const POOL = process.env.POOL || "pool.json";
+const SHEETPFX = process.env.SHEETPFX || "pool";
+const ALL = fs.readFileSync(`${D}/${CAND}`, "utf8").trim().split("\n")
+  .map((l) => l.trim().split(/\s+/)).filter((r) => r.length >= 3).map((r) => [r[1], r[2]]);
 
 const CELL = 512;
 const sheets = [];
@@ -37,7 +35,7 @@ for (let s = 0; s < sheets.length; s++) {
     layers.push({ input: buf, left: (i % 5) * CELL, top: Math.floor(i / 5) * CELL });
   }
   await sharp({ create: { width: CELL * 5, height: CELL * 2, channels: 3, background: { r: 255, g: 255, b: 255 } } })
-    .composite(layers).png().toFile(`${D}/pool${s}.png`);
+    .composite(layers).png().toFile(`${D}/${SHEETPFX}${s}.png`);
 }
 
 // "đẹp" = giàu màu + phủ rộng + LIỀN MẢNG (ít đốm lẻ). Đốm lẻ vừa làm tranh lấm tấm
@@ -71,7 +69,7 @@ for (let s = 0; s < sheets.length; s++) {
     for (const size of [25, 31]) {
       try {
         fs.writeFileSync(SCRATCH, "{}");
-        execFileSync(process.execPath, ["scripts/build-one.mjs", `${D}/pool${s}.png`, String(i), "900", "11", String(size)],
+        execFileSync(process.execPath, ["scripts/build-one.mjs", `${D}/${SHEETPFX}${s}.png`, String(i), "900", "11", String(size)],
           { env: { ...process.env, KEEPDARK: "1", OUTFILE: SCRATCH }, encoding: "utf8", stdio: "pipe" });
         const L = JSON.parse(fs.readFileSync(SCRATCH, "utf8"))[900];
         pool[`${name}@${size}`] = { name, theme, size, level: L, ...beauty(L) };
@@ -79,6 +77,6 @@ for (let s = 0; s < sheets.length; s++) {
     }
   }
 }
-fs.writeFileSync(D + "/pool.json", JSON.stringify(pool));
+fs.writeFileSync(`${D}/${POOL}`, JSON.stringify(pool));
 const names = new Set(Object.values(pool).map((p) => p.name));
 console.log(`kho: ${Object.keys(pool).length} bản dựng, ${names.size} chủ thể dùng được / ${ALL.length}`);

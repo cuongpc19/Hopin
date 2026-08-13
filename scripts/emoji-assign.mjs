@@ -7,9 +7,12 @@
 //   3. cỡ xen kẽ 25/31
 // Ba ràng buộc này cãi nhau, nên: neo theo (1), rồi hoán vị CỤC BỘ để gỡ (2) và (3) —
 // đổi chỗ hai slot gần nhau thì thứ tự đẹp gần như không xê dịch.
+//
+// POOL=<file> START=<level đầu> COUNT=<số bàn> WIPEFROM=<level> node scripts/emoji-assign.mjs
+// WIPEFROM xoá mọi level từ số đó trở lên TRƯỚC khi ghi — dùng khi thay nguyên một dải.
 import fs from "node:fs";
 const D = "public/art/level art/emoji";
-const pool = JSON.parse(fs.readFileSync(D + "/pool.json", "utf8"));
+const pool = JSON.parse(fs.readFileSync(`${D}/${process.env.POOL || "pool.json"}`, "utf8"));
 
 const by = {};
 for (const v of Object.values(pool)) {
@@ -17,7 +20,8 @@ for (const v of Object.values(pool)) {
   o.sizes.push(v.size); o.score = Math.max(o.score, v.score);
 }
 const all = Object.values(by).sort((a, b) => a.score - b.score);
-const START = 61, N = 60;
+const START = Number(process.env.START || 61), N = Number(process.env.COUNT || 60);
+if (all.length < N) { console.error(`kho chỉ có ${all.length} chủ thể, cần ${N}`); process.exit(1); }
 const chosen = all.slice(all.length - N);           // bỏ những cái điểm thấp nhất
 chosen.sort((a, b) => a.score - b.score);           // đẹp dần lên
 
@@ -58,6 +62,12 @@ const badSize = [];
 for (let i = 0; i < N; i++) if (!canT(chosen[i], i)) badSize.push(START + i);
 
 const d = JSON.parse(fs.readFileSync("src/levels/designed.json", "utf8"));
+if (process.env.WIPEFROM) {
+  const from = Number(process.env.WIPEFROM);
+  const gone = Object.keys(d).map(Number).filter((k) => k >= from);
+  for (const k of gone) delete d[k];
+  console.log(`xoá ${gone.length} level cũ từ L${from} trở lên`);
+}
 const table = [];
 for (let i = 0; i < N; i++) {
   const o = chosen[i], size = o.sizes.includes(sizeAt(i)) ? sizeAt(i) : o.sizes[0];
