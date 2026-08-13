@@ -3216,9 +3216,14 @@ export class GameScene extends Phaser.Scene {
     dbgBtn(148, "NEXT", 0x3f7fd6, () => this.startLevel(this.levelNum + 1));
     ===== END DEBUG STRIP ================================================== */
 
-    // Level pill (center): red rounded pill with bold white text.
+    // Level pill — DỒN SANG TRÁI (user 2026-08-13), không còn canh giữa. Neo theo MÉP TRÁI cố
+    // định chứ không theo tâm: bề rộng pill đổi theo số chữ số của level, canh tâm thì mép
+    // phải xê dịch và cái tag HARD/SUPER bên cạnh sẽ nhảy theo từng màn.
+    const LVL_X0 = 68; // ngay sau nút bánh răng (tâm 30, bán kính 20 → hết ở x≈50)
+    const lph = 34;
+    const ly0 = y - lph / 2;
     const lvlText = this.add
-      .text(GAME_W / 2, y, `LEVEL ${levelNum}`, {
+      .text(0, y, `LEVEL ${levelNum}`, {
         fontFamily: "Arial, sans-serif",
         fontStyle: "bold",
         fontSize: "18px",
@@ -3227,8 +3232,8 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(D + 2);
     const lpw = lvlText.width + 40;
-    const lph = 34;
-    const lx0 = GAME_W / 2 - lpw / 2, ly0 = y - lph / 2;
+    const lx0 = LVL_X0;
+    lvlText.setX(lx0 + lpw / 2);
     const lpill = this.add.graphics().setDepth(D + 1);
     lpill.fillStyle(0xdb524d, 1); // đỏ coral như ảnh (user 2026-08-02)
     lpill.fillRoundedRect(lx0, ly0, lpw, lph, lph / 2);
@@ -3236,6 +3241,36 @@ export class GameScene extends Phaser.Scene {
     lpill.strokeRoundedRect(lx0, ly0, lpw, lph, lph / 2);
     lpill.lineStyle(1.5, 0xffc9c2, 0.9); // viền HỒNG nhạt bên trong (tạo khối mềm)
     lpill.strokeRoundedRect(lx0 + 3, ly0 + 3, lpw - 6, lph - 6, (lph - 6) / 2);
+
+    // Tag HARD / SUPER HARD ngay cạnh ô LEVEL — đứng thường trực chứ không chỉ loé 1.5s như
+    // banner lúc vào màn, để người chơi nhìn lại lúc nào cũng biết mình đang ở mức nào.
+    // Luật ở `levelDifficulty`: chia hết 15 → siêu khó, chia hết 5 và trên L15 → khó.
+    const tier = levelDifficulty(levelNum);
+    if (tier !== "normal") {
+      const isSuper = tier === "superhard";
+      const tTx = this.add
+        .text(0, y, isSuper ? tr("tagSuper") : tr("tagHard"), {
+          fontFamily: "Arial, sans-serif", fontStyle: "bold",
+          fontSize: isSuper ? "11px" : "12px", color: "#ffffff",
+        })
+        .setOrigin(0.5)
+        .setDepth(D + 2);
+      const tw = tTx.width + 18, th = 22;
+      // Bề rộng chữ chỉ biết được lúc chạy (còn phụ thuộc emoji của từng máy). Nếu tag không
+      // lọt vào khoảng trống trước ô vàng (mép trái x≈342) thì tụt xuống DƯỚI ô LEVEL — thà
+      // xuống dòng còn hơn đè lên số xu.
+      const GOLD_LEFT = GAME_W - 138;
+      const sideX = lx0 + lpw + 8;
+      const fits = sideX + tw <= GOLD_LEFT - 8;
+      const tx0 = fits ? sideX : lx0;
+      const ty = fits ? y : y + lph / 2 + th / 2 + 2;
+      tTx.setX(tx0 + tw / 2).setY(ty);
+      const tg = this.add.graphics().setDepth(D + 1);
+      tg.fillStyle(isSuper ? 0xd11e5e : 0xe06a12, 1); // cùng màu với tag ở Home
+      tg.fillRoundedRect(tx0, ty - th / 2, tw, th, th / 2);
+      tg.lineStyle(2, 0xffffff, 0.9);
+      tg.strokeRoundedRect(tx0, ty - th / 2, tw, th, th / 2);
+    }
 
     // Gold cluster (right): [coin  amount  (+)] — nút "+" nằm TRONG pill gỗ luôn (user 2026-08-02)
     const plusR = 12;

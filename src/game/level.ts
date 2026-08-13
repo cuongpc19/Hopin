@@ -103,13 +103,18 @@ export type Difficulty = "normal" | "hard" | "superhard";
 // They need an override because the rule below is purely arithmetic: L34 would come out
 // "normal" and L35 only "hard", so a player would walk into a 4% level with no warning
 // and read it as a broken game rather than a wall. Anything this hard MUST announce itself.
-const SUPER_GATES = new Set([30, 34, 35]);
+// Rút còn L35, đo 2026-08-13. L34 đã được mở từ tường 13% lên 94% nên gắn nhãn siêu khó là
+// nói dối người chơi; L30 giờ chia hết 15 nên luật số học bên dưới đã lo. Riêng L35 vẫn đo
+// được 4% và nằm trong dải L1-39 user giữ nguyên, nên nó vẫn cần lời cảnh báo.
+const SUPER_GATES = new Set([35]);
 
 export function levelDifficulty(n: number): Difficulty {
   if (n >= 200 && n <= 300) return "normal"; // kid pack: all easy — no HARD/SUPER badges
   if (SUPER_GATES.has(n)) return "superhard";
   if (n % 15 === 0) return "superhard";
-  if (n % 5 === 0) return "hard";
+  // "chia hết cho 5, TRÊN level 15" (user 2026-08-13) — L5 và L10 nằm trong khúc mở đầu,
+  // dán nhãn HARD lên đó là doạ người chơi ở đúng chỗ họ hay bỏ nhất.
+  if (n % 5 === 0 && n > 15) return "hard";
   return "normal";
 }
 
