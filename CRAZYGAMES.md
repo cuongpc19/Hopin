@@ -277,8 +277,12 @@ thời lượng chơi trung bình, tỉ lệ vào được gameplay, tỉ lệ q
 rm -f dist/iframe-test.html          # khung test cục bộ, KHÔNG được lẫn vào gói nộp
 VITE_TARGET=crazy npm run build
 ```
-Rồi nén toàn bộ **nội dung bên trong** `dist/` (không nén cả thư mục `dist`) — `index.html`
-phải nằm ở gốc file zip.
+⚠ **KHÔNG nén.** Ô tải lên của họ từ chối file nén — báo đúng chữ *"Archive files are not
+supported, please drag and drop the files directly in the upload zone"*. Kéo thẳng thư mục
+`dist/` vào ô đó; trình duyệt giữ nguyên cây thư mục con.
+
+Mục này trước đây hướng dẫn nén và đã làm mất công hai lần (2026-08-10 và 2026-08-13).
+`npm run zip` vẫn giữ lại vì bản Android/tự host còn dùng, chỉ là không dùng cho CrazyGames.
 
 Kiểm lại bốn giới hạn cứng trước khi tải lên:
 
