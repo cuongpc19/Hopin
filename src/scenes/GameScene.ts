@@ -1823,22 +1823,59 @@ export class GameScene extends Phaser.Scene {
     box.num = num;
   }
 
+  /**
+   * Bốn tông thân hộp, lấy từ MÀU RUY BĂNG (user 2026-08-14: "socola bên ngoài cũng nên cùng
+   * màu, nhạt hơn chút so với ruy băng"). Cả hộp mang màu của luật, ruy băng là bản đậm nhất
+   * nên vẫn nổi lên trên.
+   *
+   * "Nhạt" ở đây là GIẢM BÃO HOÀ, không phải làm sáng lên. Hai ruy băng đang dùng — bé id14 và
+   * xanh trời id15 — vốn đã rất sáng; làm sáng thêm nữa là ra gần trắng và ruy băng biến mất
+   * trên chính cái nền cùng màu của nó. Giảm bão hoà thì hợp với cả ruy băng sáng lẫn tối.
+   *
+   * Thứ tự sáng-tối giữ nguyên (face sáng nhất → rim tối nhất) để hộp vẫn ra khối.
+   * Màu gần xám (bão hoà < 0.12) không có tông màu để mượn → trả về nâu socola gốc.
+   */
+  private chocoTones(ribbon: number) {
+    const BROWN = { rim: 0x3a2113, groove: 0x4a2a16, base: 0x69401f, face: 0x804f28 };
+    if (ribbon < 0 || !COLORS[ribbon]) return BROWN; // cầu vồng: không có một màu để mượn
+    const c = COLORS[ribbon];
+    const r = ((c >> 16) & 0xff) / 255, gg = ((c >> 8) & 0xff) / 255, b = (c & 0xff) / 255;
+    const mx = Math.max(r, gg, b), mn = Math.min(r, gg, b), dl = mx - mn;
+    if (mx < 0.001 || dl / mx < 0.12) return BROWN; // trắng / xám / đen
+    let h = 0;
+    if (dl > 0) {
+      if (mx === r) h = ((gg - b) / dl + 6) % 6;
+      else if (mx === gg) h = (b - r) / dl + 2;
+      else h = (r - gg) / dl + 4;
+      h *= 60;
+    }
+    const sat = (dl / mx) * 0.5; // NHẠT: chỉ còn một nửa độ bão hoà của ruy băng
+    const hsv = (v: number) => {
+      const cc = v * sat, x = cc * (1 - Math.abs(((h / 60) % 2) - 1)), m = v - cc;
+      const [rr2, gg2, bb2] = h < 60 ? [cc, x, 0] : h < 120 ? [x, cc, 0] : h < 180 ? [0, cc, x]
+        : h < 240 ? [0, x, cc] : h < 300 ? [x, 0, cc] : [cc, 0, x];
+      return (Math.round((rr2 + m) * 255) << 16) | (Math.round((gg2 + m) * 255) << 8) | Math.round((bb2 + m) * 255);
+    };
+    return { rim: hsv(0.34), groove: hsv(0.46), base: hsv(0.62), face: hsv(0.76) };
+  }
+
   /** Nướng mặt tấm socola vào một texture vuông cạnh `T`. Mọi số đo là tỉ lệ của T. */
   private bakeChocoTexture(key: string, n: number, ribbon: number, T: number) {
     const g = this.make.graphics({ x: 0, y: 0 }, false);
     const S = T;
     const rr = S * 0.055;
+    const tone = this.chocoTones(ribbon);
 
     // Thân socola PHỦ KÍN 0..S — tấm đè đúng n² ô, không chừa lề, nên không có chỗ cho bóng đổ
     // ra ngoài. Chiều sâu lấy từ chính cái viền: cạnh sẫm lộ ra ~3% quanh mặt trên, thêm một
     // vệt sáng mảnh ở mép trên cho ra khối.
-    g.fillStyle(0x3a2113, 1);
+    g.fillStyle(tone.rim, 1);
     g.fillRoundedRect(0, 0, S, S, rr);
     g.fillStyle(0xffffff, 0.1);
     g.fillRoundedRect(S * 0.02, S * 0.012, S * 0.96, S * 0.03, rr * 0.4);
     const inset = S * 0.03;
     const fx = inset, fw = S - inset * 2;
-    g.fillStyle(0x4a2a16, 1); // màu RÃNH giữa các ô — mặt ô sẽ nổi lên trên nền này
+    g.fillStyle(tone.groove, 1); // màu RÃNH giữa các ô — mặt ô sẽ nổi lên trên nền này
     g.fillRoundedRect(fx, fx, fw, fw, rr * 0.8);
 
     // n² ô vuông chìm — đúng một ô cho mỗi slime bên dưới, nên người chơi đọc được cỡ hộp
@@ -1847,9 +1884,9 @@ export class GameScene extends Phaser.Scene {
     for (let r = 0; r < n; r++) {
       for (let c = 0; c < n; c++) {
         const x0 = fx + c * u + pad, y0 = fx + r * u + pad, w = u - pad * 2;
-        g.fillStyle(0x69401f, 1);
+        g.fillStyle(tone.base, 1);
         g.fillRoundedRect(x0, y0, w, w, u * 0.14);
-        g.fillStyle(0x804f28, 1); // mặt ô nổi (lệch lên trên-trái = ánh sáng từ trên xuống)
+        g.fillStyle(tone.face, 1); // mặt ô nổi (lệch lên trên-trái = ánh sáng từ trên xuống)
         g.fillRoundedRect(x0 + w * 0.07, y0 + w * 0.05, w * 0.86, w * 0.82, u * 0.12);
         g.fillStyle(0xffffff, 0.09);
         g.fillRoundedRect(x0 + w * 0.14, y0 + w * 0.12, w * 0.6, w * 0.24, u * 0.09);
