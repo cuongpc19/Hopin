@@ -1884,10 +1884,35 @@ export class GameScene extends Phaser.Scene {
       if (horiz) { g.fillRect(bx, by, w, h * 0.07); g.fillRect(bx, by + h * 0.93, w, h * 0.07); }
       else { g.fillRect(bx, by, w * 0.07, h); g.fillRect(bx + w * 0.93, by, w * 0.07, h); }
     };
+    // ---- BÓNG MỜ trên nền socola, TRƯỚC khi vẽ ruy băng.
+    // Vì sao cần: màu nâu socola nằm ngay cạnh màu nâu id11 của bảng màu, nên tấm hộp dễ bị
+    // đọc nhầm thành "một mảng slime nâu phải ăn" (user 2026-08-14). Ô bàn cờ là mặt PHẲNG mờ;
+    // cho hộp một lớp bóng cong phủ ngang thì mắt phân loại ngay là VẬT THỂ BỌC KÍN, không phải
+    // ô ăn được — phân biệt bằng CHẤT BỀ MẶT, không phải bằng màu, nên không phải đổi tông nâu.
+    // Vẽ trước ruy băng để dải ruy băng giữ nguyên độ tươi (nó là LUẬT, phải đọc rõ nhất).
+    //
+    // ⚠ PHẢI CHỒNG NHIỀU LỚP, ĐỪNG VẼ MỘT HÌNH BẦU DỤC. Graphics không có gradient, nên một
+    // fillEllipse alpha 0.10 ra một vệt VIỀN SẮC — nhìn như dán sticker chứ không ra mặt bóng
+    // (đã dựng thử và thấy tận mắt). Chồng ~16 lớp alpha rất nhỏ, to dần ra ngoài, thì rìa tự
+    // tan và mới thành quầng sáng. Nướng một lần nên số lớp không tốn gì lúc chạy.
+    const soften = (cx: number, cy: number, w: number, h: number, col: number, steps = 16) => {
+      for (let i = steps; i >= 1; i--) {
+        const k = i / steps;
+        g.fillStyle(col, 0.014);
+        g.fillEllipse(cx, cy, w * k, h * k);
+      }
+    };
+    soften(S * 0.38, S * 0.27, S * 1.0, S * 0.52, 0xffffff);  // quầng sáng vắt ngang nửa trên
+    soften(S * 0.62, S * 0.82, S * 0.95, S * 0.44, 0x000000); // nửa dưới chìm → mặt cong
+
     band(fx, b0, fw, bw, true);   // ngang
     g.fillStyle(0x000000, 0.18);  // bóng của dải dọc hắt xuống dải ngang ở chỗ giao nhau
     g.fillRect(b0 - bw * 0.06, b0, bw * 1.12, bw);
     band(b0, fx, bw, fw, false);  // dọc (nằm trên, như nút thắt thật)
+
+    // Vệt bóng mảnh vắt qua CẢ ruy băng — thứ khiến toàn bộ hộp trông như có một lớp bọc bóng
+    // phủ lên trên, thay vì socola và ruy băng là hai miếng dán rời nhau.
+    soften(S * 0.32, S * 0.17, S * 0.78, S * 0.17, 0xffffff, 12);
 
     // ---- mặt đồng hồ kem. Con số KHÔNG nướng vào đây (nó đếm ngược) — buildChocoBox đặt một
     // Text lên đúng tâm này, dùng CHUNG công thức bán kính CHOCO_DIAL.
@@ -1915,15 +1940,16 @@ export class GameScene extends Phaser.Scene {
    *
    * KHÔNG tính đá và gỗ: luật nói "slime". hitSoftRock/collectWood không đi qua đây.
    */
-  private noteChocoCollect(color: number, sx: number, sy: number) {
+  private noteChocoCollect(color: number) {
     if (this.boxes.length === 0) return;
     for (const box of [...this.boxes]) {
       if (box.broken || !box.cont) continue; // !cont = đăng ký được nhưng buildBoard chưa dựng
       if (box.def.ribbon !== RAINBOW && box.def.ribbon !== color) continue;
       box.def.count -= 1;
-      // Vệt bay từ con slime vừa ăn tới mặt đồng hồ: cho thấy CON NÀY vừa trừ hộp KIA — nếu
-      // không, người chơi thấy số tụt mà không biết vì cú ăn nào.
-      this.aimBeam(sx, sy, box.cont.x, box.cont.y, box.def.ribbon === RAINBOW ? 0xffffff : COLORS[color]);
+      // KHÔNG vẽ vệt từ con slime vừa ăn tới hộp. Bản đầu có, để cho thấy CON NÀY trừ hộp KIA,
+      // nhưng vệt đó trùng hệt vệt "xe bắn tia ăn slime" nên người chơi đọc thành XE ĐANG ĂN CẢ
+      // TẤM SOCOLA (user 2026-08-14). Con số trên mặt đồng hồ nảy lên một cái là đủ phản hồi,
+      // và nó nằm ngay trên hộp nên không thể hiểu nhầm sang xe.
       if (box.def.count <= 0) { this.breakChocoBox(box); continue; }
       box.num.setText(String(box.def.count));
       box.num.setScale(1.35);
@@ -6048,7 +6074,7 @@ export class GameScene extends Phaser.Scene {
     this.revealHiddenAround(cells); // an opened side reveals any adjacent "?" slime
     // HỘP SOCOLA: một slime vừa rời bàn → trừ số cho mọi hộp mà nó hợp lệ (có thể làm vỡ hộp
     // ngay tại đây). Đọc board TRƯỚC đoạn 2-lớp bên dưới, vì đó mới là màu vừa bị ăn.
-    this.noteChocoCollect(this.level.board[cellIdx], key.x, key.y);
+    this.noteChocoCollect(this.level.board[cellIdx]);
     view.inFlight += 1; // reserve a seat so the car won't over-collect while this one runs
 
     // Rare treat: the slime that fills this car's LAST seat (count → 0) has a

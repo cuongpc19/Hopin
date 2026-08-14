@@ -31,7 +31,13 @@ const RAINBOW = -1;
 // Màu cũ của L502 (id9 xám nhạt) chỉ có 25 ô — không đủ cho count 45, bàn sẽ tắc vĩnh viễn.
 const PLAN = [
   { n: 501, size: 11, ribbon: RAINBOW, count: 55 },
-  { n: 502, size: 11, ribbon: 11, count: 45 },  // nâu — 77 ô trên bàn
+  // ⚠ KHÔNG dùng id11 NÂU cho L502 dù nó đủ ô (77). Ruy băng nâu nằm trên tấm socola nâu thì
+  // vừa khó đọc, vừa đúng cái nhầm user đang lo: hộp màu nâu mà luật cũng bảo "ăn màu nâu".
+  // Ruy băng là LUẬT, phải là thứ dễ đọc thứ hai sau con số — nên nó BẮT BUỘC tương phản với
+  // socola. id14 bé sáng hơn hẳn nền socola, 76 ô (gấp 1.7 lần count).
+  // Cũng không lấy id13 lam đậm dù có 406 ô: đó là màu NỀN của bàn, ruy băng màu nền thì hộp
+  // mở gần như tức thì vì màu nền lúc nào cũng với tới được.
+  { n: 502, size: 11, ribbon: 14, count: 45 },  // bé — 76 ô ngoài hộp
   { n: 503, size: 7, ribbon: 15, count: 40 },   // xanh trời — 129 ô trên bàn
 ];
 
