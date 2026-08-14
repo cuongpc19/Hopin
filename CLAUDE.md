@@ -7,6 +7,11 @@ mosaic picture made of coloured tiles, outside-in. User designs, Claude builds.
 - **Full feature log: `FEATURES.txt`** (Vietnamese, numbered sections). Read it before
   touching levels, mechanics, or visuals. Windows note: `features.txt` == `FEATURES.txt`
   (case-insensitive filesystem — same file).
+- **Numbers about real players: `ANALYTICS.md`.** Two sources, and picking the wrong one gives
+  a confident wrong answer — Firebase Analytics for who is playing and from where, the private
+  dashboard at `hop-n-7d1af.web.app/stats.html` for winrate and drop-off (it is the only one
+  that knows a level's fingerprint, so it is the only one that will not average two designs
+  of the same level together).
 - **Building or retuning levels? Read `LEVEL-DESIGN.md` FIRST — all of it.** It holds the
   four hard invariants (art is frozen at `6627197`; car seats must equal board cells; every
   change must be measured; never report an unmeasured number), the four-step generator, the
