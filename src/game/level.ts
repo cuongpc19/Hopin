@@ -27,13 +27,13 @@ export interface Chest {
  * sang level kế, và phải biết chỗ dừng), mà `LevelSelectScene` thì đã import từ `GameScene`
  * — nhập ngược lại là thành vòng.
  *
- * L1-286 (user 2026-08-14: "mở hết đến 286"). Trước đó là 185, rồi 20 board ở L40-59 bị bỏ và
- * mọi thứ từ L60 lùi 20 bậc thành 165 — nhưng đợt art thay 201 board từ L86 đã đưa dữ liệu lên
- * 286 level, và 121 level cuối nằm im ngoài tầm với cho tới khi con số này được nới ra.
- * Hàng xe của L36-286 dựng ở commit "Rebuild every queue from level 36" (mốc B 30-50 cho level
- * chia hết cho 5, 60-100 cho phần còn lại).
+ * L1-586. Đường đi của con số này: 185 → 165 (bỏ 20 board ở L40-59, mọi thứ từ L60 lùi 20 bậc)
+ * → 286 (đợt art thay 201 board từ L86 đã đưa dữ liệu lên 286 mà con số vẫn kẹt ở 165, 121 level
+ * cuối nằm ngoài tầm với) → 586 (user 2026-08-14: 300 bàn emoji mới xếp vào L287-586).
+ * Hàng xe của L36-586 dựng theo cùng một luật: mốc B 30-50 cho level chia hết cho 5, 60-100 cho
+ * phần còn lại — xem hai commit "Rebuild every queue from level 36" và "Add 300 levels".
  */
-export const LEVEL_COUNT = 286;
+export const LEVEL_COUNT = 586;
 
 export const HARD_ROCK = 90;
 export const BIG_HARD = 95;

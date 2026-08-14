@@ -25,7 +25,25 @@ if (all.length < N) { console.error(`kho chỉ có ${all.length} chủ thể, c�
 const chosen = all.slice(all.length - N);           // bỏ những cái điểm thấp nhất
 chosen.sort((a, b) => a.score - b.score);           // đẹp dần lên
 
-const sizeAt = (i) => (i % 2 === 0 ? 25 : 31);
+// NHỊP CỠ BÀN. Mặc định giữ nết cũ: 25/31 xen kẽ một-một.
+//
+// SIZES="31,35" chuyển sang nhịp THEO TỈ LỆ CÓ THẬT trong pool. Lô 2026-08-14 có 194 bàn cỡ 35
+// và 106 bàn cỡ 31, mà mỗi chủ thể chỉ dựng được ĐÚNG một cỡ — ép xen kẽ một-một thì 88 slot
+// không thể khớp và vòng hoán vị bên dưới chạy vô ích. Rải theo tỉ lệ (Bresenham) thì cỡ nhỏ
+// nằm rải đều khắp dải thay vì dồn một cục, và gần như mọi slot đều khớp được.
+const SIZES = (process.env.SIZES || "").split(",").map(Number).filter(Boolean);
+let sizeAt;
+if (SIZES.length === 2) {
+  const cnt = {};
+  for (const o of chosen) for (const s of o.sizes) cnt[s] = (cnt[s] || 0) + 1;
+  const [A, B] = SIZES;                       // A = cỡ nhỏ, rải xen vào giữa cỡ B
+  const nA = Math.min(cnt[A] || 0, N);
+  const pat = [];
+  for (let i = 0; i < N; i++) pat.push(Math.floor(((i + 1) * nA) / N) > Math.floor((i * nA) / N) ? A : B);
+  sizeAt = (i) => pat[i];
+} else {
+  sizeAt = (i) => (i % 2 === 0 ? 25 : 31);
+}
 const canT = (o, i) => o.sizes.includes(sizeAt(i));
 
 // gỡ ràng buộc CỠ trước: chủ thể chỉ dựng được một cỡ phải rơi đúng slot cùng chẵn/lẻ
