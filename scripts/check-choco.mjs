@@ -29,17 +29,23 @@ for (const n of Object.keys(d).map(Number).sort((a, b) => a - b)) {
     const r0 = Math.floor(b.at / W), c0 = b.at % W;
     const tag = `hop${bi} (${N}x${N} @r${r0}c${c0})`;
     // N LẺ: hai dải ruy băng phải cắt nhau đúng Ô GIỮA, N chẵn thì không có ô giữa.
-    if (N !== 3 && N !== 5) err.push(`${tag}: n=${N}, chi cho phep 3 hoac 5`);
+    // 3-11 (user 2026-08-14 cho gấp đôi cỡ cũ 3/5 → làm tròn lên số lẻ thành 7/11).
+    if (N % 2 === 0 || N < 3 || N > 11) err.push(`${tag}: n=${N}, phai LE va trong 3-11`);
     // Bàn phải RỘNG HƠN hộp ít nhất 2 ô mỗi chiều: bàn đúng bằng hộp là không còn slime nào
     // ngoài để mở nó → chết ngay từ lúc thiết kế.
     if (W < N + 2 || H < N + 2) err.push(`${tag}: ban ${W}x${H} qua nho, can it nhat ${N + 2}x${N + 2}`);
     if (r0 + N > H || c0 + N > W) { err.push(`${tag}: tran qua mep ban`); return; }
     if (!(b.count >= 1)) err.push(`${tag}: count=${b.count}, phai >= 1`);
     if (b.ribbon !== RAINBOW && !(b.ribbon >= 0 && b.ribbon <= 18)) err.push(`${tag}: ribbon=${b.ribbon} khong hop le`);
-    // count nên tỉ lệ với N² — 1/4..1/3 số slime nó giấu. Mở hộp 5×5 bằng 3 cú là cho không
-    // 25 slime; mở bằng 20 cú thì hộp thành bức tường chứ không phải câu đố.
-    const lo = Math.round((N * N) / 4), hi = Math.round((N * N) / 3);
+    // count nên tỉ lệ với N² — 1/4..1/2 số slime nó giấu. Mở hộp 5×5 bằng 3 cú là cho không
+    // 25 slime. Trần nới từ 1/3 lên 1/2 sau khi ĐO 2026-08-14: hộp 5×5 số 7-8 làm winrate tụt
+    // 0-7 điểm, tức gần như miễn phí — con số phải nặng hơn nhiều thì hộp mới là chướng ngại
+    // thật (user chốt khoảng 40-60).
+    const lo = Math.round((N * N) / 4), hi = Math.round((N * N) / 2);
     if (b.count < lo || b.count > hi) wrn.push(`${tag}: count=${b.count} ngoai khoang de nghi ${lo}-${hi}`);
+    // Mở hộp không được TỐN HƠN phần thưởng: ăn 40 con để lộ ra 25 con là lỗ, người chơi dọn
+    // gần sạch bàn trước khi hộp kịp mở và cái hộp thành vô nghĩa.
+    if (b.count >= N * N) err.push(`${tag}: count=${b.count} >= ${N * N} o hop giau — mo hop lo hon phan thuong`);
 
     for (let r = r0; r < r0 + N; r++)
       for (let c = c0; c < c0 + N; c++) {

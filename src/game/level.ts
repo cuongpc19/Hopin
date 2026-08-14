@@ -58,7 +58,11 @@ export const RAINBOW = -1; // ChocoBox.ribbon: mọi màu đều tính
 export interface ChocoBox {
   /** board index của ô TRÊN-TRÁI. Cả khối n×n tính từ đây. */
   at: number;
-  /** cạnh hộp, LẺ (3 hoặc 5) để hai dải ruy băng cắt nhau đúng ô giữa. */
+  /**
+   * Cạnh hộp, PHẢI LẺ để hai dải ruy băng cắt nhau đúng ô giữa và mặt đồng hồ ngồi lên ô đó.
+   * 3-11. User 2026-08-14 cho gấp đôi cỡ cũ; 3 và 5 nhân đôi ra 6 và 10 đều CHẴN nên làm tròn
+   * LÊN số lẻ → 7 và 11.
+   */
   n: number;
   /** số slime hợp lệ còn phải ăn để vỡ hộp. */
   count: number;

@@ -20,11 +20,19 @@ import { readD, writeD, isC } from "./genlib.mjs";
 import { measure2 } from "./simcore2.mjs";
 
 const RAINBOW = -1;
-// ribbon: id màu, hoặc RAINBOW. count theo đúng khoảng khuyến nghị n²/4..n²/3.
+// User 2026-08-14 vòng 2: "socola kích thước lớn gấp đôi hiện tại, số count slime nên trong
+// khoảng 40-60". Cỡ cũ 3 và 5 nhân đôi ra 6 và 10 — đều CHẴN, mà N phải LẺ thì hai dải ruy
+// băng mới cắt đúng ô giữa. Làm tròn LÊN số lẻ: 3→7, 5→11.
+//
+// Con số nặng hơn nhiều là ĐÚNG HƯỚNG: đo vòng 1 cho thấy hộp 5×5 số 7-8 chỉ tốn 0-7 điểm
+// winrate, tức gần như miễn phí. 40-60 mới biến nó thành chướng ngại thật.
+//
+// ⚠ MÀU RUY BĂNG PHẢI ĐỔI THEO. Luật: cần ít nhất `count` slime đúng màu ấy NẰM NGOÀI hộp.
+// Màu cũ của L502 (id9 xám nhạt) chỉ có 25 ô — không đủ cho count 45, bàn sẽ tắc vĩnh viễn.
 const PLAN = [
-  { n: 501, size: 5, ribbon: RAINBOW, count: 8 },
-  { n: 502, size: 5, ribbon: 9, count: 7 },   // xám nhạt — 25 ô ngoài hộp, gấp 3.6 lần số cần
-  { n: 503, size: 3, ribbon: 2, count: 3 },   // vàng — 58 ô ngoài hộp
+  { n: 501, size: 11, ribbon: RAINBOW, count: 55 },
+  { n: 502, size: 11, ribbon: 11, count: 45 },  // nâu — 77 ô trên bàn
+  { n: 503, size: 7, ribbon: 15, count: 40 },   // xanh trời — 129 ô trên bàn
 ];
 
 const d = readD();
@@ -57,11 +65,17 @@ for (const p of PLAN) {
   let outside = 0;
   L.board.forEach((v, i) => { if (isC(v) && !inBox.has(i) && (p.ribbon === RAINBOW || v === p.ribbon)) outside++; });
 
-  const before = measure2(JSON.parse(JSON.stringify({ ...L, boxes: undefined })), NF);
-  const after = measure2(JSON.parse(JSON.stringify({ ...L, boxes: [box] })), NF);
+  // MEASURE=1 mới đo winrate (user 2026-08-14: "k cần đo winrate" cho vòng đổi cỡ này).
+  // Nhưng số `outside` thì LUÔN tính: nó không phải chuyện độ khó mà là chuyện ĐÚNG/SAI —
+  // thiếu slime đúng màu ở ngoài thì hộp không bao giờ mở được và bàn tắc vĩnh viễn.
+  const M = process.env.MEASURE === "1";
+  const before = M ? measure2(JSON.parse(JSON.stringify({ ...L, boxes: undefined })), NF) : "-";
+  const after = M ? measure2(JSON.parse(JSON.stringify({ ...L, boxes: [box] })), NF) : "-";
   const rib = p.ribbon === RAINBOW ? "CAU VONG" : `mot mau id${p.ribbon}`;
+  const room = p.ribbon === RAINBOW ? "moi mau" : `${outside} o`;
   console.log(`L${String(p.n).padEnd(4)}| ${p.size}x${p.size} r${sp[0].r}c${sp[0].c}`.padEnd(24)
-    + `| ${rib.padEnd(15)} | ${String(p.count).padStart(2)} | ${String(before).padStart(11)} | ${String(after).padStart(8)} | ${outside}`);
+    + `| ${rib.padEnd(15)} | ${String(p.count).padStart(2)} | ${String(before).padStart(11)} | ${String(after).padStart(8)} | ${room}`
+    + (outside < p.count ? "  << THIEU, ban se TAC" : ""));
   applied.push({ n: p.n, box, outside });
 }
 

@@ -672,7 +672,26 @@ export class GameScene extends Phaser.Scene {
     this.boosterUse = {}; this.reviveCount = 0;
     this.runId = Math.random().toString(36).slice(2, 10);
     this.boardSeq = 0; this.lastStuckProbe = 0; // fresh board → fresh futility bookkeeping
-    try { this.guideMode = platform.storage.getItem("hopin_guide") === "1"; } catch { this.guideMode = false; }
+    // CHỈ DẪN TỪNG BƯỚC — CHỈ BẬT BẰNG ?guide=1, KHÔNG ĐỌC CỜ ĐÃ LƯU.
+    //
+    // Nút bật/tắt nằm trong khối đã comment ở openSettings ("hidden for submission"). Suốt
+    // thời gian đó startLevel vẫn đọc cờ `hopin_guide` từ localStorage, nên ai lỡ bật lúc còn
+    // nút thì mắc kẹt với bàn tay nhấp nháy và KHÔNG CÒN CÁCH NÀO TẮT từ trong game. User bật
+    // thử 2026-08-08 rồi dính đúng cái đó; nhật ký cho thấy nó vẫn vẽ tay trên 19 level, tới
+    // tận build 3279533 ngày 2026-08-14.
+    //
+    // Lần sửa đầu tôi chỉ thêm ?guide=0 làm lối thoát — KHÔNG ĐỦ: mở URL bình thường thì cờ cũ
+    // vẫn còn và tay vẫn hiện, người dùng phải tự biết mà gõ tham số. Một tính năng đã bị gỡ UI
+    // thì mặc định phải là TẮT, không phải "tắt được nếu bạn biết cách".
+    //
+    // ⚠ LUẬT CHUNG: ẩn UI của một cài đặt thì phải NGỪNG ĐỌC cờ của nó cùng lúc. Để lại đường
+    // đọc là tạo ra một trạng thái không lối thoát mà chẳng ai kiểm thử bao giờ.
+    // Khôi phục hàng trong Settings thì đổi lại thành đọc storage như cũ.
+    try {
+      const q = typeof location !== "undefined" ? new URLSearchParams(location.search).get("guide") : null;
+      this.guideMode = q === "1";
+      if (!this.guideMode) platform.storage.removeItem("hopin_guide"); // dọn cờ cũ còn sót
+    } catch { this.guideMode = false; }
     this.guideKey = ""; this.guideHand = undefined; this.guideRing = undefined; this.guidePlan = null; this.guidePlanWinning = false; this.guidePlanNonce = 0;
     if (typeof window !== "undefined") { (window as any).hopLog = () => console.log(platform.storage.getItem("hopin_playlog") || "[]"); (window as any).hopLogClear = () => platform.storage.removeItem("hopin_playlog"); }
     // "start" streams AFTER makeLevel below (needs this.level); see the postLog("start") call there.
@@ -1779,7 +1798,9 @@ export class GameScene extends Phaser.Scene {
     // Nướng ở ĐỘ PHÂN GIẢI CỐ ĐỊNH (96px cho mỗi ô khuôn) chứ không theo S, nên texture giống
     // hệt nhau ở mọi level và dùng lại được; mọi kích thước bên dưới đều là TỈ LỆ của cạnh.
     const key = `choco-${n}-${box.def.ribbon}`;
-    const T = 96 * n;
+    // 96px cho mỗi ô khuôn, nhưng CHẶN TRẦN 768: hộp 11×11 sẽ là texture 1056² = 4.5MB VRAM cho
+    // một thứ hiếm khi chiếm quá 1/3 bề ngang bàn. Ở 768 thì ô khuôn vẫn còn ~70px, thừa nét.
+    const T = Math.min(768, 96 * n);
     if (!this.textures.exists(key)) this.bakeChocoTexture(key, n, box.def.ribbon, T);
     const img = this.add.image(0, 0, key).setDisplaySize(S, S);
 
