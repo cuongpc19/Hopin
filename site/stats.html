@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Hop In! — số liệu</title>
+<style>
+  /* Bảng điều khiển đọc bằng mắt, không phải bài viết: ưu tiên quét nhanh — số to, nhãn nhỏ,
+     màu chỉ dùng để BÁO TRẠNG THÁI (đạt / cảnh báo / hỏng), không dùng để trang trí. */
+  :root {
+    --bg: #f6f4ef;  --panel: #fffdf8;  --line: #e2ddd0;
+    --ink: #23201a;  --dim: #6f6858;  --faint: #9a9384;
+    --accent: #b4531f;         /* cam đất — trùng tông với poster game */
+    --good: #2f7d4f;  --warn: #b9861a;  --bad: #b03a2e;
+    --grid: #ece7db;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16150f;  --panel: #1e1c15;  --line: #35322a;
+      --ink: #f0ece0;  --dim: #a49c88;  --faint: #6f6858;
+      --accent: #e8874a;  --good: #63b487;  --warn: #d9ab4a;  --bad: #e2705f;
+      --grid: #2a2721;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #16150f;  --panel: #1e1c15;  --line: #35322a;
+    --ink: #f0ece0;  --dim: #a49c88;  --faint: #6f6858;
+    --accent: #e8874a;  --good: #63b487;  --warn: #d9ab4a;  --bad: #e2705f;
+    --grid: #2a2721;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.5 ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 18px 80px; }
+  header { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 6px; }
+  h1 { font-size: 22px; margin: 0; letter-spacing: -0.01em; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--dim);
+       margin: 34px 0 10px; font-weight: 600; }
+  .sub { color: var(--dim); font-size: 13px; }
+  button, select {
+    font: inherit; color: var(--ink); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 8px; padding: 7px 12px; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  button:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .bar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 16px 0 4px; }
+  .bar label { font-size: 13px; color: var(--dim); display: flex; align-items: center; gap: 6px; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-top: 14px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+  .card .n { font-size: 30px; font-weight: 650; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .card .k { font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.06em; }
+  .card .d { font-size: 12px; color: var(--faint); margin-top: 2px; }
+
+  .scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th, td { padding: 7px 12px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--grid); }
+  th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--dim);
+       font-weight: 600; position: sticky; top: 0; background: var(--panel); }
+  td:first-child, th:first-child { text-align: left; font-weight: 600; }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr:hover td { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+  .good { color: var(--good); } .warn { color: var(--warn); } .bad { color: var(--bad); font-weight: 650; }
+  .tag { font-size: 10px; padding: 1px 6px; border-radius: 99px; border: 1px solid currentColor; }
+
+  /* cột ngày: thanh nằm ngang, đọc nhanh hơn con số đứng một mình */
+  .spark { display: inline-block; height: 9px; border-radius: 2px; background: var(--accent); vertical-align: middle; }
+  .spark.n2 { background: color-mix(in srgb, var(--accent) 42%, transparent); }
+
+  #gate { max-width: 420px; margin: 90px auto; text-align: center; }
+  #gate p { color: var(--dim); font-size: 14px; }
+  code { font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+         background: var(--grid); padding: 1px 5px; border-radius: 4px; }
+  .err { color: var(--bad); font-size: 13px; white-space: pre-wrap; text-align: left; }
+  .note { color: var(--faint); font-size: 12px; margin-top: 8px; }
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <h1>Hop In! — số liệu</h1>
+  <p>Trang riêng. Đăng nhập bằng tài khoản Google của chủ dự án để đọc dữ liệu.</p>
+  <button id="signin">Đăng nhập bằng Google</button>
+  <p id="gateErr" class="err"></p>
+</div>
+
+<div class="wrap" id="app" hidden>
+  <header>
+    <h1>Hop In! — số liệu</h1>
+    <span class="sub" id="range"></span>
+    <span style="flex:1"></span>
+    <button id="signout">Thoát</button>
+  </header>
+
+  <div class="bar">
+    <label>Khoảng
+      <select id="days">
+        <option value="1">hôm nay</option>
+        <option value="3">3 ngày</option>
+        <option value="7" selected>7 ngày</option>
+        <option value="30">30 ngày</option>
+        <option value="9999">tất cả</option>
+      </select>
+    </label>
+    <label><input type="checkbox" id="excl" checked> bỏ máy test (localhost)</label>
+    <label>Bản build
+      <select id="build"><option value="">tất cả</option></select>
+    </label>
+    <button id="reload">Tải lại</button>
+    <span class="sub" id="status"></span>
+  </div>
+
+  <div class="cards" id="cards"></div>
+
+  <h2>Người chơi theo ngày</h2>
+  <div class="scroll"><table id="tDay"></table></div>
+
+  <h2>Từng level</h2>
+  <p class="sub" style="margin:0 0 8px">
+    Winrate/ván = số ván thắng ÷ tổng số ván. Winrate/người = số người cuối cùng qua được ÷ số người đã thử.
+    Bỏ đi = số người bắt đầu level này nhưng không bao giờ bắt đầu level sau.
+  </p>
+  <div class="scroll" style="max-height:70vh"><table id="tLv"></table></div>
+
+  <p class="note" id="foot"></p>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged }
+  from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
+// ⚠ THAY apiKey VÀ appId BẰNG CỦA DỰ ÁN:
+//   Firebase console → ⚙ Project settings → Your apps → Web app → "Firebase SDK snippet".
+//   Chưa có web app thì bấm "Add app → Web" (không cần cài gì thêm vào game).
+// Cấu hình này CÔNG KHAI, không phải bí mật: quyền đọc do LUẬT của Realtime Database quyết
+// định (chỉ uid của chủ dự án — xem database.rules.json), nên lộ mấy dòng này cũng không ai
+// xem được gì. Khoá bí mật của database thì TUYỆT ĐỐI không được đưa vào đây.
+const app = initializeApp({
+  apiKey: "PASTE_API_KEY",
+  authDomain: "hop-n-7d1af.firebaseapp.com",
+  databaseURL: "https://hop-n-7d1af-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "hop-n-7d1af",
+  appId: "PASTE_APP_ID",
+});
+const DB = "https://hop-n-7d1af-default-rtdb.asia-southeast1.firebasedatabase.app";
+const auth = getAuth(app);
+const $ = (id) => document.getElementById(id);
+
+$("signin").onclick = () => signInWithPopup(auth, new GoogleAuthProvider())
+  .catch((e) => { $("gateErr").textContent = e.message; });
+$("signout").onclick = () => signOut(auth);
+
+let token = null;
+onAuthStateChanged(auth, async (u) => {
+  if (!u) { $("gate").hidden = false; $("app").hidden = true; return; }
+  token = await u.getIdToken();
+  $("gate").hidden = true; $("app").hidden = false;
+  load();
+});
+
+// ---- tải dữ liệu ------------------------------------------------------------------------
+// Chỉ kéo về khoảng thời gian đang xem, KHÔNG kéo cả node: /runs lớn dần theo tháng và một
+// ngày nào đó sẽ nặng vài chục MB. Cần luật `.indexOn: ["at"]` thì truy vấn này mới chạy.
+let rows = [];
+async function load() {
+  const days = Number($("days").value);
+  const since = days >= 9999 ? 0 : Date.now() - days * 864e5;
+  $("status").textContent = "đang tải…";
+  const q = since ? `&orderBy="at"&startAt=${since}` : "";
+  const res = await fetch(`${DB}/runs.json?auth=${encodeURIComponent(token)}${q}`);
+  if (!res.ok) { $("status").textContent = `lỗi ${res.status} — ${await res.text()}`; return; }
+  const j = await res.json();
+  rows = Object.values(j || {}).filter((r) => r && r.at && r.lvl != null);
+  const builds = [...new Set(rows.map((r) => r.build).filter(Boolean))].sort();
+  const sel = $("build"), keep = sel.value;
+  sel.innerHTML = '<option value="">tất cả</option>' + builds.map((b) => `<option>${b}</option>`).join("");
+  sel.value = builds.includes(keep) ? keep : "";
+  $("status").textContent = "";
+  render();
+}
+$("reload").onclick = load;
+$("days").onchange = load;
+$("excl").onchange = render;
+$("build").onchange = render;
+
+// ---- tính ------------------------------------------------------------------------------
+const VN = 7 * 3600e3;                       // mốc thời gian là epoch, đổi sang ngày giờ VN
+const day = (ms) => new Date(ms + VN).toISOString().slice(0, 10);
+const pct = (a, b) => (b ? Math.round((100 * a) / b) : 0);
+const cls = (v, lo, hi) => (v < lo ? "bad" : v < hi ? "warn" : "good");
+
+function filtered() {
+  const ex = $("excl").checked, b = $("build").value;
+  return rows.filter((r) => {
+    if (ex && (r.host === "web" || /^localhost|^127\./.test(r.from || ""))) return false;
+    if (b && r.build !== b) return false;
+    // Đồng hồ máy người chơi có thể sai — dữ liệu thật đã gặp bản ghi đề ngày trong TƯƠNG LAI.
+    // Bỏ chúng đi, không thì bảng theo ngày mọc ra những cột trống ở cuối.
+    if (r.at > Date.now() + 36e5) return false;
+    return true;
+  });
+}
+
+// Một VÁN = một lần bấm vào level, kể cả có hồi sinh giữa chừng. Bản mới ghi `run` cho mỗi
+// lần như vậy; bản cũ không có thì mỗi bản ghi tính là một ván.
+function games(list) {
+  const m = new Map();
+  for (const r of list) {
+    const k = `${r.dev}|${r.lvl}|${r.run ?? r.at}`;
+    const cur = m.get(k);
+    if (!cur || r.result === "win") m.set(k, { ...r, revives: Math.max(cur?.revives ?? 0, r.revives ?? 0) });
+  }
+  return [...m.values()];
+}
+
+function render() {
+  const list = filtered();
+  const g = games(list);
+  if (!g.length) { $("cards").innerHTML = "<div class='card'><div class='n'>0</div><div class='k'>không có dữ liệu</div></div>"; $("tDay").innerHTML = ""; $("tLv").innerHTML = ""; return; }
+
+  const at = g.map((r) => r.at);
+  $("range").textContent = `${day(Math.min(...at))} → ${day(Math.max(...at))}`;
+
+  // ---- theo ngày
+  const first = new Map();
+  for (const r of g) if (!first.has(r.dev) || r.at < first.get(r.dev)) first.set(r.dev, r.at);
+  const byDay = new Map();
+  for (const r of g) {
+    const d = day(r.at);
+    if (!byDay.has(d)) byDay.set(d, { devs: new Set(), n: 0, w: 0, ms: 0 });
+    const o = byDay.get(d);
+    o.devs.add(r.dev); o.n++; if (r.result === "win") o.w++; o.ms += r.ms || 0;
+  }
+  const days = [...byDay.keys()].sort();
+  const maxDev = Math.max(...days.map((d) => byDay.get(d).devs.size));
+  const dayRows = days.map((d) => {
+    const o = byDay.get(d);
+    const nw = [...o.devs].filter((x) => day(first.get(x)) === d).length;
+    const w = (n) => Math.round((n / maxDev) * 180);
+    return `<tr><td>${d}</td><td>${o.devs.size}</td><td>${nw}</td><td>${o.devs.size - nw}</td>
+      <td>${o.n}</td><td>${(o.n / o.devs.size).toFixed(1)}</td>
+      <td class="${cls(pct(o.w, o.n), 55, 70)}">${pct(o.w, o.n)}%</td>
+      <td>${Math.round(o.ms / o.n / 1000)}s</td>
+      <td style="text-align:left"><span class="spark" style="width:${w(nw)}px"></span><span class="spark n2" style="width:${w(o.devs.size - nw)}px"></span></td></tr>`;
+  }).reverse().join("");
+  $("tDay").innerHTML = `<thead><tr><th>Ngày</th><th>Người chơi</th><th>Mới</th><th>Quay lại</th>
+    <th>Ván</th><th>Ván/người</th><th>Winrate</th><th>Thời gian/ván</th><th style="text-align:left">mới ▏quay lại</th></tr></thead><tbody>${dayRows}</tbody>`;
+
+  // ---- thẻ tổng
+  const today = days[days.length - 1], t = byDay.get(today);
+  const devAll = new Set(g.map((r) => r.dev));
+  const wins = g.filter((r) => r.result === "win").length;
+  const rev = g.reduce((s, r) => s + (r.revives || 0), 0);
+  const boosts = g.reduce((s, r) => s + Object.values(r.boost || {}).reduce((a, b) => a + b, 0), 0);
+  const ret = [...devAll].filter((x) => new Set(g.filter((r) => r.dev === x).map((r) => day(r.at))).size > 1).length;
+  $("cards").innerHTML = [
+    [devAll.size, "người chơi", `${t.devs.size} trong ngày ${today}`],
+    [g.length, "ván", `${(g.length / devAll.size).toFixed(1)} ván/người`],
+    [pct(wins, g.length) + "%", "winrate/ván", `${wins} ván thắng`],
+    [pct(ret, devAll.size) + "%", "quay lại", `${ret} người chơi từ 2 ngày trở lên`],
+    [rev, "lượt hồi sinh", `${pct(g.filter((r) => r.revives).length, g.length)}% số ván`],
+    [boosts, "lượt dùng booster", `${pct(g.filter((r) => r.boost).length, g.length)}% số ván`],
+  ].map(([n, k, d]) => `<div class="card"><div class="n">${n}</div><div class="k">${k}</div><div class="d">${d}</div></div>`).join("");
+
+  // ---- theo level
+  const lv = new Map();
+  for (const r of g) {
+    if (!lv.has(r.lvl)) lv.set(r.lvl, { devs: new Set(), pass: new Set(), n: 0, w: 0, rev: 0, boost: {}, ms: 0, sigs: new Set() });
+    const o = lv.get(r.lvl);
+    o.devs.add(r.dev); o.n++; o.ms += r.ms || 0; o.rev += r.revives || 0;
+    if (r.sig) o.sigs.add(r.sig);
+    if (r.result === "win") { o.w++; o.pass.add(r.dev); }
+    for (const [k, v] of Object.entries(r.boost || {})) o.boost[k] = (o.boost[k] || 0) + v;
+  }
+  const nums = [...lv.keys()].sort((a, b) => a - b);
+  const lvRows = nums.map((n) => {
+    const o = lv.get(n), nx = lv.get(n + 1);
+    const drop = nx ? 100 - pct(nx.devs.size, o.devs.size) : null;
+    const bs = Object.entries(o.boost).map(([k, v]) => `${k}×${v}`).join(" ") || "";
+    return `<tr><td>L${n}</td><td>${o.devs.size}</td><td>${o.n}</td>
+      <td class="${cls(pct(o.w, o.n), 25, 50)}">${pct(o.w, o.n)}%</td>
+      <td class="${cls(pct(o.pass.size, o.devs.size), 50, 80)}">${pct(o.pass.size, o.devs.size)}%</td>
+      <td>${(o.n / o.devs.size).toFixed(1)}</td>
+      <td class="${drop == null ? "" : drop > 40 ? "bad" : drop > 20 ? "warn" : ""}">${drop == null ? "—" : drop + "%"}</td>
+      <td>${Math.round(o.ms / o.n / 1000)}s</td><td>${o.rev || ""}</td><td style="text-align:left">${bs}</td>
+      <td class="${o.sigs.size > 1 ? "warn" : ""}" style="text-align:left">${[...o.sigs].join(" ")}</td></tr>`;
+  }).join("");
+  $("tLv").innerHTML = `<thead><tr><th>Level</th><th>Người</th><th>Ván</th><th>Winrate/ván</th>
+    <th>Winrate/người</th><th>Ván/người</th><th>Bỏ đi</th><th>Thời gian</th><th>Hồi sinh</th>
+    <th style="text-align:left">Booster</th><th style="text-align:left">Vân tay bản</th></tr></thead><tbody>${lvRows}</tbody>`;
+
+  const multi = nums.filter((n) => lv.get(n).sigs.size > 1);
+  $("foot").innerHTML = `Mã máy là số ngẫu nhiên 16 bit nên hai người lạ có thể trùng mã — với ${devAll.size} máy,
+    ước tính ~${Math.round((devAll.size * (devAll.size - 1)) / 2 / 65536)} cặp bị đếm trùng, số người thật cao hơn chút ít.
+    Một dòng chỉ được ghi khi một ván KẾT THÚC, nên ai mở game rồi thoát giữa màn đầu sẽ không xuất hiện ở đây.
+    ${multi.length ? `<br><b>Cột vân tay:</b> ${multi.length} level có nhiều hơn một vân tay trong khoảng này (${multi.map((n) => "L" + n).join(", ")}) — số của chúng đang trộn ván của hai bản level khác nhau, lọc theo bản build để tách.` : ""}`;
+}
+</script>
+</body>
+</html>
