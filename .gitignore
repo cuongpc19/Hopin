@@ -85,3 +85,7 @@ public/art/newbackground/
 # và tồn tại chỉ trong một đợt — đừng để chúng lấp `git status` che mất thay đổi thật.
 scripts/_*.json
 scripts/_*.err
+
+# Rác quét winrate: mỗi lượt shard đẻ ra hàng trăm _<tên>-<số>.json/.err
+scripts/_*-[0-9]*.json
+scripts/_*-[0-9]*.err

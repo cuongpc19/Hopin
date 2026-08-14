@@ -124,9 +124,11 @@ xem lỗi 8.6.
 `check-seats` vẫn đúng và không cần đụng vào tổng ghế. Nhưng nó đẻ ra một cách chết mà
 `check-seats` **không bắt được**: hộp ruy băng màu X số N cần ít nhất N slime màu X nằm NGOÀI
 mọi hộp, không thì bàn tắc mà mọi con số đều khớp. Chạy `node scripts/check-choco.mjs` sau mỗi
-lần đụng vào `boxes`. ⚠ Bộ đo winrate (`simcore2.mjs`, `build-levels.mjs`) **chưa mô hình hoá
-hộp** — số winrate của level có hộp hiện chưa đáng tin, phải làm phần đó trước khi gắn hộp vào
-level thật.
+lần đụng vào `boxes`. Từ 2026-08-14 `simcore.mjs` **đã mô hình hoá hộp** (chặn ngắm như slime
+`?`, đếm số lúc `clearCell`, vỡ hộp thì gỡ chặn), nên đo được bằng mô hình B như mọi level khác
+— kiểm bằng một hộp không thể mở: B tụt 100 → 0. Đo được rồi thì thấy ngay **ruy băng cầu vồng
+gần như miễn phí** (mọi màu đều trừ số → mở trong vài giây), còn **ruy băng một màu đắt ~7
+điểm**; đừng coi hai loại là hai kiểu trang trí.
 
 Slime `?` (`hidden`) đã bị user bỏ từ 2026-08-05; `build()` xoá nó đi.
 
@@ -413,6 +415,21 @@ không cách nào ép dễ.
 L10 là ví dụ: 3 màu vỡ vụn (id4: 56 ô trong 52 đốm, 52 đốm ≤2 ô; id6: 42 ô / 36 đốm; id11:
 37 ô / 28 đốm). Quét 65 nấc + thử cả cách xếp theo hướng xe chạy, trần vẫn **57%** so với target
 65%. Muốn dễ hơn thì **phải đổi ảnh**, không phải đổi hàng xe.
+
+### 7.1 ⚠ Nhưng ĐỪNG dùng độ vụn để ĐOÁN một board sẽ ra bao nhiêu
+
+Phần trên đúng về **xu hướng chung**. Nó KHÔNG đúng cho từng bàn, và tôi đã tự bịa ra một điểm
+số rồi tin vào nó: `màu×3 + độ-vụn×60`. Đo tương quan giữa điểm ấy và B thật đạt được, trên
+106 bàn ÷5 dựng ngày 2026-08-14:
+
+> **r = 0.011** — bằng không.
+
+L285 điểm 74 (cao, đáng lẽ dễ ép khó) rơi xuống B=13; L320 điểm 53 lại mắc ở 46. Nên:
+
+- **Không** dùng điểm vụn để chọn bàn nào cần thay ảnh — cứ dựng thang rồi đo, đúng §0.
+- Điểm vụn chỉ còn dùng được như **xác suất nền** lúc phải chọn ảnh THAY: 102/106 bàn lọt dải
+  có điểm nằm trong tứ phân vị 61-75, nên bốc ảnh từ khoảng ấy khá hơn bốc thái cực. Nhưng
+  tráo xong **vẫn phải đo lại** — không có đường tắt.
 
 Chẩn đoán nhanh một board:
 

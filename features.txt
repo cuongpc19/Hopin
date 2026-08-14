@@ -1416,6 +1416,57 @@ nằm trong dữ liệu mà người chơi không bao giờ tới. Đã kiểm: 
 không trùng L1-165 (49 cỡ 25, 48 cỡ 31, 24 cỡ 35; 47 bàn >10 màu). Đây là kho ảnh đã dựng
 xong, chưa ai thấy — dùng trước khi đi kiếm ảnh mới.
 
+39) SIẾT DẢI ÷5 THÊM 15% + HỘP SOCOLA VÀO L501-503 (user 2026-08-14)
+────────────────────────────────────────────────────────────────────────────
+Yêu cầu: "build mới các level 41 trở đi, các level chia hết cho 5 có độ khó tăng 15%.
+Nếu k đạt target thì thay thế bởi ảnh level dễ rồi build lại."
+
+CHỐT: "15%" hiểu theo nghĩa TƯƠNG ĐỐI trên chính con số winrate → dải ÷5 30-50 × 0.85 =
+26-43 (user chọn giữa ba cách hiểu). Áp dụng TỪ L41; L40 và dưới giữ 30-50. Chỉ dựng lại
+106 bàn ÷5 — dựng lại 437 bàn thường với ĐÚNG dải cũ chỉ tốn giờ mà ra lại cùng nấc.
+GIỮ NGUYÊN L45/L70/L130 (user: "bản cũ đủ khó rồi"). Đo lại thì L45=42 và L130=39 vốn ĐÃ
+nằm trong dải mới; build lại chỉ khó thêm 4 và 13 điểm nhưng phải thêm 13 và 8 xe.
+
+⚠⚠ BÀI HỌC LỚN NHẤT: DẢI CÀNG HẸP THÌ ĐỘ PHÂN GIẢI LÚC *CHỌN* NẤC CÀNG PHẢI CAO.
+Tài liệu cũ chỉ nói "con số ĐƯỢC BÁO CÁO phải đo ở độ phân giải cao" (§0.4) — đúng nhưng
+thiếu vế kia. Lượt đầu tôi chọn nấc bằng phép đo n=60 rồi đo lại n=200:
+   104/109 bàn ĐỔI SỐ, lệch tới 12 điểm, CẢ HAI CHIỀU (nhiễu, không phải lệch hệ thống)
+   số bàn "hụt dải" nhảy từ 4 lên 28
+Dải cũ rộng 20 điểm nên nhiễu ±12 vẫn lọt; dải mới rộng 17 điểm thì không còn dung sai.
+Quét lại đúng 28 bàn ấy ở N_B=200 → chỉ còn 4 bàn hụt, ĐÚNG 4 bàn mà lượt đầu đã chỉ ra.
+Nếu tin danh sách 28 mà đi tráo ảnh thì 24 bức bị thay OAN.
+
+⚠⚠ "ĐIỂM ÉP-KHÓ" (màu×3 + độ-vụn×60) KHÔNG DỰ ĐOÁN ĐƯỢC B. Đo tương quan trên 106 bàn:
+   r = 0.011  — tức BẰNG KHÔNG.
+L285 điểm 74 (cao, đáng lẽ dễ ép khó) rơi xuống B=13; L320 điểm 53 lại mắc ở 46. §7 nói
+"board liền mảng ít màu thì đụng trần" là đúng về XU HƯỚNG CHUNG nhưng KHÔNG dùng để đoán
+từng bàn. Chỉ còn dùng được như XÁC SUẤT NỀN: 102/106 bàn lọt dải có điểm nằm trong tứ phân
+vị 61-75, nên chọn ảnh thay từ khoảng ấy — rồi VẪN PHẢI ĐO LẠI.
+
+TRÁO ẢNH (scripts/_swap-hard.mjs): tráo HAI CHIỀU với một level thường, không bức nào rời
+khỏi game. Sau khi tráo phải dựng lại hàng xe CẢ HAI phía (đổi board = bất biến ghế=ô vỡ).
+⚠ ĐÁ LÀ PHÁ HUỶ: mã ≥90 ghi đè lên ô màu, màu gốc mất hẳn → không thể gỡ đá khỏi một board.
+Nên chỉ nhận ảnh KHÔNG ĐÁ làm ảnh cho vào, và rải lại đá lên ảnh mới ở đúng những hàng cũ.
+   L285 B=13 ←→ L259 · L320 B=46 ←→ L187 · L455 B=45 ←→ L336 · L465 B=19 ←→ L563
+   sau khi dựng lại: 26 / 35 / 31 / 34 (÷5) và 100 / 76 / 99 / 100 (bàn nhận ảnh)
+
+KẾT QUẢ: 110 bàn ghi lại, 0 bàn ngoài dải. ÷5: B trung bình 33.1 (thấp nhất 26, cao nhất
+43), xe trung bình 17.3 — GIẢM nhẹ so với 17.6 trước đợt, tức khó thêm mà không nhồi xe.
+
+HỘP SOCOLA vào L501/L502/L503 — nhưng PHẢI DẠY MÔ HÌNH B TRƯỚC.
+FEATURES §37 đã ghi "bộ đo winrate CHƯA mô hình hoá hộp". Gắn hộp rồi đo bằng bản cũ thì nó
+bỏ qua `boxes`, coi ô dưới hộp là slime thường → đo một bàn KHÁC với bàn người chơi gặp.
+Nên simcore.mjs (tầng state dùng chung của cả A và B) nay hiểu hộp: `box` là Set chặn ngắm
+dùng y như `hid` (tia vẫn DỪNG ở đó, chỉ không target được), `clearCell` đọc màu vừa ăn để
+trừ số, hộp về 0 thì gỡ chặn và mở nốt "?" dưới hộp. Kiểm bằng một hộp số 900 (không thể mở):
+B tụt 100 → 0. `remaining` vẫn đếm ô dưới hộp nên không thể thắng khi hộp còn đóng.
+   L501  5×5 CẦU VỒNG  số 8   B 100 → 100   (không tốn gì)
+   L502  5×5 một màu   số 7   B  81 →  74
+   L503  3×3 một màu   số 3   B  75 →  74
+⚠ RUY BĂNG CẦU VỒNG GẦN NHƯ MIỄN PHÍ: màu nào cũng trừ số nên 8 con đầu tiên là hộp mở, xong
+trước khi bàn kịp chật. Ruy băng MỘT MÀU đắt hơn hẳn vì bắt người chơi đi tìm đúng một màu
+hiếm. Hai luật ruy băng là hai MỨC KHÓ khác nhau, không phải hai kiểu trang trí.
+
 ────────────────────────────────────────────────────────────────────────────
 GHI CHÚ CHUNG
 ────────────────────────────────────────────────────────────────────────────

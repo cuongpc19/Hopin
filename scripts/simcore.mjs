@@ -19,28 +19,79 @@ export function makeState(L) {
   // (port từ GameScene hiddenSet + revealHiddenAround — cơ chế THẬT, không phải chỉ che mắt).
   const hid = new Set();
   if (L.hidden) L.hidden.forEach((v, i) => { if (v >= 0) hid.add(i); });
+  // HỘP SOCOLA (level.boxes): ô dưới hộp GIỮ MÀU THẬT trong occ — hộp giấu chứ không xoá — nên
+  // `remaining` vẫn đếm chúng và không thể thắng khi hộp còn đóng. Cái chặn là `box`, dùng y
+  // như `hid`: tia vẫn DỪNG ở đó (ô có tile) nhưng không bao giờ là target. Port từ
+  // GameScene.boxAt; xem FEATURES §37.
+  const box = new Set();
+  const boxes = [];
+  if (L.boxes) for (const def of L.boxes) {
+    const r0 = Math.floor(def.at / L.cols), c0 = def.at % L.cols;
+    if (def.n < 3 || def.n % 2 === 0 || r0 + def.n > L.rows || c0 + def.n > L.cols) continue;
+    const cells = [];
+    let ok = true;
+    for (let r = r0; r < r0 + def.n && ok; r++) for (let c = c0; c < c0 + def.n; c++) {
+      const i = r * L.cols + c;
+      if (!isC(L.board[i]) || box.has(i)) { ok = false; break; }
+      cells.push(i);
+    }
+    if (!ok) continue;
+    boxes.push({ cells, left: def.count, ribbon: def.ribbon });
+    for (const i of cells) box.add(i);
+  }
   return {
     cols: L.cols, rows: L.rows,
     occ: L.board.slice(),
     lay: L.layer2 ? L.layer2.slice() : null,
     hid,
+    box, boxes,
     queue,
     slots: [null, null, null, null, null],
   };
 }
 export function cloneState(s) {
-  return { cols: s.cols, rows: s.rows, occ: s.occ.slice(), lay: s.lay ? s.lay.slice() : null, hid: new Set(s.hid), queue: s.queue.map((c) => c.map((m) => ({ ...m }))), slots: s.slots.map((p) => (p ? { ...p } : null)) };
+  return { cols: s.cols, rows: s.rows, occ: s.occ.slice(), lay: s.lay ? s.lay.slice() : null, hid: new Set(s.hid),
+    box: new Set(s.box), boxes: s.boxes.map((b) => ({ cells: b.cells, left: b.left, ribbon: b.ribbon })),
+    queue: s.queue.map((c) => c.map((m) => ({ ...m }))), slots: s.slots.map((p) => (p ? { ...p } : null)) };
 }
-export const clearCell = (s, i) => {
-  if (s.lay && s.lay[i] >= 0) { s.occ[i] = s.lay[i]; s.lay[i] = -1; } else s.occ[i] = -1;
-  if (s.hid.size) { // ô vừa ăn → lộ "?" ở 4 ô kề (revealHiddenAround)
-    const r = (i / s.cols) | 0, c = i % s.cols;
-    if (r > 0) s.hid.delete(i - s.cols);
-    if (r < s.rows - 1) s.hid.delete(i + s.cols);
-    if (c > 0) s.hid.delete(i - 1);
-    if (c < s.cols - 1) s.hid.delete(i + 1);
-  }
+// Lộ "?" ở 4 ô kề ô `i` (revealHiddenAround). BỎ QUA ô còn nằm dưới hộp socola: trong game
+// revealHiddenAround chặn đúng chỗ đó, mở sớm ở đây là sim dễ hơn thật.
+const revealAround = (s, i) => {
+  if (!s.hid.size) return;
+  const r = (i / s.cols) | 0, c = i % s.cols;
+  const drop = (j) => { if (!s.box.has(j)) s.hid.delete(j); };
+  if (r > 0) drop(i - s.cols);
+  if (r < s.rows - 1) drop(i + s.cols);
+  if (c > 0) drop(i - 1);
+  if (c < s.cols - 1) drop(i + 1);
 };
+export const clearCell = (s, i) => {
+  // Màu vừa bị ăn phải đọc TRƯỚC khi xoá ô — nó là thứ trừ số cho hộp socola.
+  const eaten = s.occ[i];
+  if (s.lay && s.lay[i] >= 0) { s.occ[i] = s.lay[i]; s.lay[i] = -1; } else s.occ[i] = -1;
+  revealAround(s, i);
+  if (s.boxes.length && isC(eaten)) noteChoco(s, eaten);
+};
+// Một slime rời bàn → trừ số cho MỌI hộp mà nó hợp lệ (ruy băng cùng màu, hoặc cầu vồng = -1).
+// Về 0 thì hộp vỡ NGAY: n² ô thôi bị chặn và nhập vào bàn đúng chỗ nó đang chiếm.
+function noteChoco(s, color) {
+  for (const b of s.boxes) {
+    if (b.left <= 0) continue;
+    if (b.ribbon !== -1 && b.ribbon !== color) continue;
+    if (--b.left > 0) continue;
+    for (const ci of b.cells) s.box.delete(ci);
+    // Ô kề hộp có thể đã bị ăn sạch từ trước → "?" dưới hộp vừa lộ ra phải được mở ngay
+    // (breakChocoBox làm đúng việc này sau khi gỡ hộp).
+    if (s.hid.size) for (const ci of b.cells) {
+      const r = (ci / s.cols) | 0, c = ci % s.cols;
+      for (const [rr, cc] of [[r - 1, c], [r + 1, c], [r, c - 1], [r, c + 1]]) {
+        if (rr < 0 || cc < 0 || rr >= s.rows || cc >= s.cols) continue;
+        const j = rr * s.cols + cc;
+        if (!isC(s.occ[j]) && s.occ[j] < 90) revealAround(s, j);
+      }
+    }
+  }
+}
 
 export function rayHit(s, startR, startC, dr, dc) {
   const { cols, rows, occ } = s;
@@ -82,8 +133,9 @@ export function nearestTarget(s, e, l, color) {
   let best = null;
   for (const [r0, c0, dr, dc] of lanRays(s, e, l)) {
     const h = rayHit(s, r0, c0, dr, dc);
-    // ô "?" ẩn: tia DỪNG ở đó nhưng không target được (GameScene findLosTargets lọc hiddenSet)
-    if (h && !s.hid.has(h.idx) && s.occ[h.idx] === color && (!best || h.steps < best.steps)) best = h;
+    // ô "?" ẩn và ô dưới HỘP SOCOLA còn đóng: tia DỪNG ở đó nhưng không target được
+    // (GameScene findLosTargets lọc cả hiddenSet lẫn boxAt).
+    if (h && !s.hid.has(h.idx) && !s.box.has(h.idx) && s.occ[h.idx] === color && (!best || h.steps < best.steps)) best = h;
   }
   return best;
 }
@@ -93,7 +145,8 @@ export function reachableSet(s) {
   for (const { e, l } of laneSeq(s)) {
     for (const [r0, c0, dr, dc] of lanRays(s, e, l)) {
       const h = rayHit(s, r0, c0, dr, dc);
-      if (h && !s.hid.has(h.idx)) hits.add(h.idx); // "?" ẩn chưa collect được (computeReachable)
+      // "?" ẩn và ô dưới hộp socola đều chưa collect được (computeReachableColors lọc cả hai)
+      if (h && !s.hid.has(h.idx) && !s.box.has(h.idx)) hits.add(h.idx);
     }
   }
   return hits;

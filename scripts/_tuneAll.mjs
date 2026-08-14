@@ -23,8 +23,12 @@ const N_B = Number(process.env.N_B || 60);
 const d = readD();
 const [R0, R1] = (process.env.RANGE || "36-286").split("-").map(Number);
 const ONLY = process.env.ONLY ? new Set(process.env.ONLY.split(",").map(Number)) : null;
+// FIVESONLY=1 — chỉ những level ÷5. Dùng khi CHỈ dải ÷5 đổi target: dựng lại level thường
+// với đúng dải cũ chỉ tốn giờ mà ra lại gần như cùng một nấc.
+const FIVESONLY = process.env.FIVESONLY === "1";
 export const ALL = Object.keys(d).map(Number)
-  .filter((n) => n >= R0 && n <= R1 && (!ONLY || ONLY.has(n))).sort((a, b) => a - b);
+  .filter((n) => n >= R0 && n <= R1 && (!ONLY || ONLY.has(n)) && (!FIVESONLY || n % 5 === 0))
+  .sort((a, b) => a - b);
 // ⚠ TÍNH TRÊN TOÀN BỘ LEVEL, KHÔNG PHẢI TRÊN `ALL`. Lấy theo `ALL` thì bốc "một nửa" phụ thuộc
 // vào RANGE của lần chạy: chạy lại một level lẻ (RANGE=90-90) làm pool chỉ còn 1 phần tử và
 // round(1/2)=1 → level nào chạy riêng cũng bị ép có lớp-2. Đã dính đúng lỗi này: 9 level
@@ -40,11 +44,19 @@ const LAY_SET = (() => {
   return new Set(idx.slice(0, Math.round(pool.length / 2)).map((i) => pool[i]));
 })();
 
+// User 2026-08-14: "các level chia hết cho 5 có độ khó tăng 15%", áp dụng TỪ L41 TRỞ ĐI.
+// Chốt hiểu theo nghĩa TƯƠNG ĐỐI trên chính con số winrate: 30-50 × 0.85 = 26-43 (user chọn,
+// giữa ba cách hiểu — trừ thẳng 15 điểm, nhân 0.85, hay coi độ khó = 100−B rồi ×1.15).
+// L40 và mọi level ÷5 phía dưới GIỮ dải cũ 30-50: yêu cầu nói rõ "từ 41 trở đi".
+const FIVE_FROM = Number(process.env.FIVE_FROM || 41);
+const FIVE_BAND = (process.env.FIVE_BAND || "26-43").split("-").map(Number);
+
 export function cfg(n) {
   const five = n % 5 === 0;
+  const harder = five && n >= FIVE_FROM;
   return {
-    lo: five ? 30 : 60,
-    hi: five ? 50 : 100,
+    lo: five ? (harder ? FIVE_BAND[0] : 30) : 60,
+    hi: five ? (harder ? FIVE_BAND[1] : 50) : 100,
     lays: five && n >= 40 && LAY_SET.has(n) ? [40] : [0],
     hid: n % 15 === 0 && n >= 40 ? 0.05 : 0,
   };
