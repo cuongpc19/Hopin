@@ -25,7 +25,7 @@ import { getLives, spendLife, showHeartsModal, canEnterLevel, graceMsLeft } from
 import { platform } from "../platform";
 import { saveRun, groupRuns, exportJsonl, clearRuns, deviceId, copyToClipboard } from "../game/playlog";
 import { sendRun, openPrivacyPolicy } from "../game/telemetry";
-import { startAnalytics, track } from "../game/analytics";
+import { startAnalytics, track, gaLoaded } from "../game/analytics";
 import {
   awardClovers,
   isEventUnlocked,
@@ -6782,6 +6782,7 @@ export class GameScene extends Phaser.Scene {
       peakBays: this.peakUsed, bays: this.slots.length,
       run: this.runId,          // gộp các dòng của cùng một lượt (xem chú thích ở reviveCount)
       revives: this.reviveCount, // 0 = chưa revive lần nào
+      ga: gaLoaded() ? 1 : 0,   // gtag.js có tới nơi không — xem chú thích ở analytics.gaLoaded
       ...(boost ? { boost } : {}),
     };
     this.postLog({ ev: "result", ...summary }); // dòng tổng kết (postLog gom nốt vào playLog)

@@ -8,6 +8,12 @@
 // một measurement id. Bundle hiện 551 KB nén, mà thời gian vào được game là chỉ số CrazyGames
 // chấm điểm, nên 31 KB không phải khoản vặt.
 //
+// ⚠ PHẢI ĐẨY `arguments` VÀO dataLayer, KHÔNG PHẢI MỘT MẢNG. Đây là lỗi đã làm bản đầu tiên
+// (build 4ad62a5) không gửi được gì: người chơi thật vào game, sự kiện được xếp vào dataLayer,
+// mà GA vẫn trắng trơn. gtag.js chỉ xử lý các phần tử là đối tượng `arguments`; một mảng thật
+// bị nó coi là lượt push kiểu GTM và bỏ qua trong im lặng — không lỗi, không cảnh báo. Vì vậy
+// `gtag` bên dưới BẮT BUỘC là `function` thường (arrow không có `arguments`).
+//
 // ⚠ NẠP TRỄ, SAU KHI VÀO MÀN CHƠI. Nạp lúc khởi động là đặt một request 145 KB sang máy chủ
 // khác đúng vào lúc mạng đang chật nhất — chính thứ SplashScene đã bỏ công cắt xuống.
 //
@@ -15,19 +21,23 @@
 // sống sót qua điều đó, im lặng, không ném lỗi (cùng luật với `crazy.ts`).
 const ID = "G-WX6P6FZGHE";
 
-type GtagArgs = [string, ...unknown[]];
 declare global {
-  interface Window { dataLayer?: GtagArgs[]; gtag?: (...args: GtagArgs) => void }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  interface Window { dataLayer?: any[] }
 }
 
 let started = false;
+let loaded = false; // script gtag.js đã thực sự tới nơi chưa (adblock / CSP thì không)
 
-function gtag(...args: GtagArgs) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function gtag(...args: any[]) {
+  void args; // `arguments` mới là thứ được đẩy đi — xem chú thích ở đầu file
   try {
     window.dataLayer = window.dataLayer || [];
-    window.dataLayer.push(args);
+    // eslint-disable-next-line prefer-rest-params
+    window.dataLayer.push(arguments);
   } catch {
-    /* không có window / bị chặn — kệ */
+    /* không có window — kệ */
   }
 }
 
@@ -46,6 +56,7 @@ export function startAnalytics() {
     const el = document.createElement("script");
     el.async = true;
     el.src = `https://www.googletagmanager.com/gtag/js?id=${ID}`;
+    el.onload = () => { loaded = true; };
     document.head.appendChild(el);
     gtag("js", new Date());
     // `transport_type: beacon` để sự kiện cuối cùng vẫn đi được khi người chơi đóng tab —
@@ -54,6 +65,17 @@ export function startAnalytics() {
   } catch {
     /* không tạo được thẻ script — bỏ qua, game không được phép vỡ vì một trình theo dõi */
   }
+}
+
+/**
+ * gtag.js có tới nơi không.
+ *
+ * Đi kèm mỗi dòng gửi về Realtime Database (`sendRun`), vì đó là cách DUY NHẤT trả lời được
+ * câu "GA trắng trơn là do bị chặn hay do code sai" — bản thân GA im lặng thì không phân biệt
+ * được hai thứ đó. Một bit cho mỗi ván, không đáng kể.
+ */
+export function gaLoaded(): boolean {
+  return loaded;
 }
 
 /** Một sự kiện GA. An toàn khi gọi trước lúc script kịp tới: dataLayer nhận trước, gtag.js xử lý sau. */
