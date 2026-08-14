@@ -25,6 +25,7 @@ import { getLives, spendLife, showHeartsModal, canEnterLevel, graceMsLeft } from
 import { platform } from "../platform";
 import { saveRun, groupRuns, exportJsonl, clearRuns, deviceId, copyToClipboard } from "../game/playlog";
 import { sendRun, openPrivacyPolicy } from "../game/telemetry";
+import { startAnalytics, track } from "../game/analytics";
 import {
   awardClovers,
   isEventUnlocked,
@@ -833,6 +834,11 @@ export class GameScene extends Phaser.Scene {
     // Gọi ở đây rồi để setter tutPaused lập tức gameplayStop lại — ad vẫn được phép rơi vào
     // lúc modal đang mở đúng như cũ, chỉ khác là lượt vào màn được tính.
     platform.gameplayStart();
+    // GA nạp Ở ĐÂY chứ không lúc khởi động: gtag.js là 145 KB từ máy chủ khác, đặt nó vào lúc
+    // mở game là trả đúng cái giá mà SplashScene đã bỏ công cắt đi. Tới được màn chơi rồi thì
+    // mạng đã rảnh. Lần gọi thứ hai trở đi không làm gì.
+    startAnalytics();
+    track("level_start", { level: levelNum, tier: levelDifficulty(levelNum) });
     if (levelNum === 1) this.startTutorial(); // gentle intro guidance
     else if (this.maybeShowHardRockIntro()) { /* first hard-rock level → explain the rock */ }
     else this.maybeShowTwinIntro(); // first level with a twin pair → explain twin cars
@@ -6781,6 +6787,9 @@ export class GameScene extends Phaser.Scene {
     this.postLog({ ev: "result", ...summary }); // dòng tổng kết (postLog gom nốt vào playLog)
     saveRun(this.levelNum, result, ms, this.playLog.slice() as never); // cất lại để chép ra sau
     sendRun(summary); // …và gửi về Firebase, thứ duy nhất đến được tay ta từ người chơi thật
+    // GA chỉ nhận bản RÚT GỌN. Nó là nơi xem "đang có bao nhiêu người chơi, ở đâu"; còn winrate
+    // thì đọc ở Realtime Database, nơi có đủ vân tay level để không trộn hai bản với nhau.
+    track("level_end", { level: this.levelNum, result, seconds: Math.round(ms / 1000) });
   }
 
   private lose(pending?: ActiveChest) {
