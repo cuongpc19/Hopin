@@ -98,8 +98,12 @@
 
   <div class="bar">
     <label>Khoảng
+      <!-- Giá trị tính bằng NGÀY, cho phép số lẻ: 0.25 = 6 giờ. Nhãn ghi "giờ" cho đúng thứ nó
+           thật sự làm — "hôm nay" cũ nghĩa là 24 giờ gần đây chứ không phải từ nửa đêm. -->
       <select id="days">
-        <option value="1">hôm nay</option>
+        <option value="0.0417">1 giờ</option>
+        <option value="0.25">6 giờ</option>
+        <option value="1">24 giờ</option>
         <option value="3">3 ngày</option>
         <option value="7" selected>7 ngày</option>
         <option value="30">30 ngày</option>
@@ -117,6 +121,7 @@
   <div class="cards" id="cards"></div>
 
   <h2>Người chơi theo ngày</h2>
+  <p class="sub" id="hDay" style="margin:0 0 8px"></p>
   <div class="scroll"><table id="tDay"></table></div>
 
   <h2>Từng level</h2>
@@ -237,12 +242,16 @@ function render() {
   const at = g.map((r) => r.at);
   $("range").textContent = `${day(Math.min(...at))} → ${day(Math.max(...at))}`;
 
-  // ---- theo ngày
+  // ---- theo ngày, hoặc THEO GIỜ khi khoảng xem ≤ 24 giờ.
+  // Chọn "6 giờ" mà bảng chỉ có đúng một hàng "hôm nay" thì bảng đó chẳng nói lên gì; ở khoảng
+  // ngắn thì cái đáng nhìn là nhịp lên xuống trong ngày.
+  const hourly = Number($("days").value) <= 1;
+  const bucket = hourly ? (ms) => new Date(ms + VN).toISOString().slice(11, 13) + ":00" : day;
   const first = new Map();
   for (const r of g) if (!first.has(r.dev) || r.at < first.get(r.dev)) first.set(r.dev, r.at);
   const byDay = new Map();
   for (const r of g) {
-    const d = day(r.at);
+    const d = bucket(r.at);
     if (!byDay.has(d)) byDay.set(d, { devs: new Set(), n: 0, w: 0, ms: 0 });
     const o = byDay.get(d);
     o.devs.add(r.dev); o.n++; if (r.result === "win") o.w++; o.ms += r.ms || 0;
@@ -251,16 +260,23 @@ function render() {
   const maxDev = Math.max(...days.map((d) => byDay.get(d).devs.size));
   const dayRows = days.map((d) => {
     const o = byDay.get(d);
-    const nw = [...o.devs].filter((x) => day(first.get(x)) === d).length;
+    const nw = [...o.devs].filter((x) => bucket(first.get(x)) === d).length;
     const w = (n) => Math.round((n / maxDev) * 180);
     return `<tr><td>${d}</td><td>${o.devs.size}</td><td>${nw}</td><td>${o.devs.size - nw}</td>
+      <td class="${cls(pct(o.devs.size - nw, o.devs.size), 5, 15)}">${pct(o.devs.size - nw, o.devs.size)}%</td>
       <td>${o.n}</td><td>${(o.n / o.devs.size).toFixed(1)}</td>
       <td class="${cls(pct(o.w, o.n), 55, 70)}">${pct(o.w, o.n)}%</td>
       <td>${Math.round(o.ms / o.n / 1000)}s</td>
       <td style="text-align:left"><span class="spark" style="width:${w(nw)}px"></span><span class="spark n2" style="width:${w(o.devs.size - nw)}px"></span></td></tr>`;
   }).reverse().join("");
-  $("tDay").innerHTML = `<thead><tr><th>Ngày</th><th>Người chơi</th><th>Mới</th><th>Quay lại</th>
+  $("tDay").innerHTML = `<thead><tr><th>${hourly ? "Giờ" : "Ngày"}</th><th>Người chơi</th><th>Mới</th><th>Quay lại</th><th>% quay lại</th>
     <th>Ván</th><th>Ván/người</th><th>Winrate</th><th>Thời gian/ván</th><th style="text-align:left">mới ▏quay lại</th></tr></thead><tbody>${dayRows}</tbody>`;
+  // "Mới" chỉ có nghĩa TRONG khoảng đang tải: ai chơi từ trước khoảng đó vẫn bị tính là mới vì
+  // dữ liệu cũ không được kéo về. Ở khoảng vài giờ thì gần như ai cũng "mới", nên nói thẳng ra.
+  $("hDay").textContent =
+    "“% quay lại” = phần người chơi trong hàng đó đã từng chơi trước đó. ⚠ Chỉ tính trong khoảng đang tải: "
+    + "ai chơi trước khoảng này vẫn bị coi là mới, nên hàng ĐẦU TIÊN luôn 0% và các hàng đầu luôn thấp giả tạo. "
+    + (hourly ? "Đang xem theo giờ (giờ VN) — ở khoảng vài giờ thì cột này gần như vô nghĩa, kéo khoảng dài ra mới đọc được." : "");
 
   // ---- thẻ tổng
   const today = days[days.length - 1], t = byDay.get(today);
@@ -270,7 +286,7 @@ function render() {
   const boosts = g.reduce((s, r) => s + Object.values(r.boost || {}).reduce((a, b) => a + b, 0), 0);
   const ret = [...devAll].filter((x) => new Set(g.filter((r) => r.dev === x).map((r) => day(r.at))).size > 1).length;
   $("cards").innerHTML = [
-    [devAll.size, "người chơi", `${t.devs.size} trong ngày ${today}`],
+    [devAll.size, "người chơi", hourly ? `${t.devs.size} lúc ${today}` : `${t.devs.size} trong ngày ${today}`],
     [g.length, "ván", `${(g.length / devAll.size).toFixed(1)} ván/người`],
     [pct(wins, g.length) + "%", "winrate/ván", `${wins} ván thắng`],
     [pct(ret, devAll.size) + "%", "quay lại", `${ret} người chơi từ 2 ngày trở lên`],
