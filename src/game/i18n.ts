@@ -169,6 +169,26 @@ const S: Record<string, { vi: string; en: string }> = {
     en: "These rocks can NEVER be collected — no car can take them. They also BLOCK the line of fire, so anything hiding behind one has to be reached another way. Look before you tap!",
   },
 
+  // ---- choco intro (3 bước, bấm từng bước) ----
+  chocoTitle: { vi: "Hộp Socola!", en: "Chocolate Box!" },
+  chocoStep1: {
+    vi: "Tấm socola này đang ĐÈ LÊN mấy bạn slime nằm dưới. Đập vỡ nó thì các bạn ấy mới ra được.",
+    en: "This chocolate slab is SITTING ON the slimes underneath. Break it and they pop free.",
+  },
+  chocoStep2: {
+    vi: "Con số trên mặt hộp là số slime bạn còn phải ăn. Ăn được một con hợp lệ thì số tụt một — về 0 là hộp vỡ ngay.",
+    en: "The number on the box counts the slimes you still owe it. Each one that counts knocks it down by one — at zero the box bursts.",
+  },
+  chocoStep3: {
+    vi: "Dải ruy băng cho biết màu nào được tính: chỉ slime ĐÚNG MÀU ruy băng mới trừ số. Ăn slime màu khác thì hộp đứng yên.",
+    en: "The ribbon says which colour counts: only slimes MATCHING the ribbon knock the number down. Collect another colour and the box does not budge.",
+  },
+  chocoStep3Rainbow: {
+    vi: "Dải ruy băng CẦU VỒNG nghĩa là màu nào cũng được tính — ăn con nào cũng trừ số.",
+    en: "A RAINBOW ribbon means every colour counts — any slime you collect knocks the number down.",
+  },
+  chocoNext: { vi: "TIẾP →", en: "NEXT →" },
+
   // ---- tier banner + Home tags ----
   hardLevel: { vi: "🔥 HARD LEVEL", en: "🔥 HARD LEVEL" },
   superHardLevel: { vi: "💀 SUPER HARD", en: "💀 SUPER HARD" },

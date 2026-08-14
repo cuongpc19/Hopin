@@ -859,6 +859,7 @@ export class GameScene extends Phaser.Scene {
     startAnalytics();
     track("level_start", { level: levelNum, tier: levelDifficulty(levelNum) });
     if (levelNum === 1) this.startTutorial(); // gentle intro guidance
+    else if (this.maybeShowChocoIntro()) { /* first chocolate level → 3-step walkthrough */ }
     else if (this.maybeShowHardRockIntro()) { /* first hard-rock level → explain the rock */ }
     else this.maybeShowTwinIntro(); // first level with a twin pair → explain twin cars
     // Cảnh báo tier khi VÀO level khó (user 2026-08-01): banner 🔥HARD/💀SUPER ~1.5s.
@@ -867,6 +868,117 @@ export class GameScene extends Phaser.Scene {
     // Không modal mở màn nào bật → ván sống thật từ đây. (Có modal thì setter tutPaused đã
     // gameplayStop ngay sau lời gọi ở trên, và sẽ tự gameplayStart lại lúc người chơi đóng nó.)
     if (!this.tutPaused) platform.gameplayStart();
+  }
+
+  // ---- Chocolate-box intro (first level with a box, whichever one that is) ----
+  //
+  // BA BƯỚC, MỖI BƯỚC MỘT CÚ BẤM (user 2026-08-14). Hộp socola có ba luật rời nhau — nó che
+  // slime, con số đếm ngược, ruy băng quyết định màu nào được tính — và nhồi cả ba vào một
+  // modal như bản intro đá/xe đôi thì người chơi đọc lướt rồi bỏ qua. Tách ra thì mỗi cú bấm
+  // đóng lại đúng một ý.
+  //
+  // Bước 3 KHÔNG vẽ minh hoạ mà soi thẳng cái hộp THẬT trên bàn: luật ruy băng là luật về MÀU,
+  // mà màu ruy băng thì mỗi level một khác. Chỉ vào hộp thật thì không phải gọi tên màu, khỏi
+  // phải dịch mười chín tên màu sang hai thứ tiếng và khỏi sai khi level đổi ruy băng.
+  //
+  // Không gắn vào một SỐ level nào cả (khác xe đôi, vốn khoá ở L8): hộp hiện nằm ở L501-530,
+  // nhưng dải đó có thể được dời đi bất cứ lúc nào, và người chơi nhảy thẳng bằng ?level= thì
+  // vẫn phải được dạy. Cờ trong storage lo phần chỉ hiện một lần.
+  private maybeShowChocoIntro(): boolean {
+    const box = this.boxes.find((b) => !b.broken && b.cont);
+    if (!box) return false;
+    let shown = false;
+    try { shown = platform.storage.getItem("pf_choco_intro") === "1"; } catch { /* storage unavailable */ }
+    if (shown) return false;
+    try { platform.storage.setItem("pf_choco_intro", "1"); } catch { /* storage unavailable */ }
+    this.tutPaused = true; // đóng băng sau modal, mở lại ở bước cuối
+    this.showChocoIntroStep(1, box);
+    return true;
+  }
+
+  /** Một bước của intro socola. Bước 1-2 là modal giữa màn; bước 3 khoét sáng đúng cái hộp. */
+  private showChocoIntroStep(step: number, box: LiveBox) {
+    const D = 400;
+    const last = step === 3;
+    const objs: Phaser.GameObjects.GameObject[] = [];
+
+    if (last && box.cont) {
+      // Màn tối có LỖ: bốn dải quanh hộp thay vì một tấm phủ kín. Rẻ hơn mask, và cái hộp giữ
+      // nguyên màu thật của nó — nếu phủ mờ lên thì chính màu ruy băng đang muốn chỉ bị xỉn đi.
+      const b = box.cont;
+      const S = b.width || this.cell * box.def.n;
+      const l = b.x - S / 2, r = b.x + S / 2, t = b.y - S / 2, bo = b.y + S / 2;
+      // Bỏ dải rỗng: hộp sát mép bàn thì một trong bốn dải có bề rộng 0, và một hình 0×0 có
+      // vùng chạm là thứ không cần tồn tại.
+      const dimAt = (x: number, y: number, w: number, h: number) => {
+        if (w <= 0 || h <= 0) return;
+        objs.push(this.add.rectangle(x, y, w, h, 0x000000, 0.68).setOrigin(0, 0).setDepth(D).setInteractive());
+      };
+      dimAt(0, 0, GAME_W, Math.max(0, t));
+      dimAt(0, bo, GAME_W, Math.max(0, GAME_H - bo));
+      dimAt(0, Math.max(0, t), Math.max(0, l), Math.max(0, bo - t));
+      dimAt(r, Math.max(0, t), Math.max(0, GAME_W - r), Math.max(0, bo - t));
+      // viền nhấp nháy quanh hộp
+      const ring = this.add.graphics().setDepth(D + 1);
+      ring.lineStyle(4, 0xffd95e, 1);
+      ring.strokeRoundedRect(l - 6, t - 6, S + 12, S + 12, 14);
+      objs.push(ring);
+      this.tweens.add({ targets: ring, alpha: 0.25, duration: 620, yoyo: true, repeat: -1, ease: "Sine.inOut" });
+    } else {
+      objs.push(this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, 0x000000, 0.6).setDepth(D).setInteractive());
+    }
+
+    const pw = 330;
+    const ph = last ? 210 : 300;
+    const x0 = GAME_W / 2 - pw / 2;
+    // Bước 3: bảng chữ né sang nửa màn ĐỐI DIỆN với hộp, không thì nó che mất thứ đang chỉ.
+    const y0 = last
+      ? (box.cont && box.cont.y < GAME_H / 2 ? GAME_H - ph - 28 : 28)
+      : GAME_H / 2 - ph / 2;
+    const panel = this.add.graphics().setDepth(D + 2);
+    panel.fillStyle(0xf7edd0, 1);
+    panel.fillRoundedRect(x0, y0, pw, ph, 20);
+    panel.lineStyle(4, 0x8a5a12, 1);
+    panel.strokeRoundedRect(x0, y0, pw, ph, 20);
+    objs.push(panel);
+
+    if (!last) {
+      objs.push(this.add.text(GAME_W / 2, y0 + 62, step === 1 ? "🍫" : "🔢", { fontSize: "40px" })
+        .setOrigin(0.5).setDepth(D + 3));
+      objs.push(this.add.text(GAME_W / 2, y0 + 118, tr("chocoTitle"), {
+        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "22px", color: "#6a4a12",
+      }).setOrigin(0.5).setDepth(D + 3));
+    }
+    const rainbow = box.def.ribbon === RAINBOW;
+    const msg = step === 1 ? tr("chocoStep1") : step === 2 ? tr("chocoStep2") : rainbow ? tr("chocoStep3Rainbow") : tr("chocoStep3");
+    objs.push(this.add.text(GAME_W / 2, y0 + (last ? 74 : 182), msg, {
+      fontFamily: "Arial, sans-serif", fontSize: "14px", color: "#6a4a12", align: "center",
+      wordWrap: { width: pw - 44 },
+    }).setOrigin(0.5).setDepth(D + 3));
+
+    // Chấm bước 1·2·3 để người chơi biết còn mấy cú bấm nữa — cùng lý do phải tách bước.
+    for (let i = 1; i <= 3; i++) {
+      objs.push(this.add.circle(GAME_W / 2 + (i - 2) * 16, y0 + ph - 62, 4, i === step ? 0x8a5a12 : 0xcbb98a)
+        .setDepth(D + 3));
+    }
+
+    const btn = this.add.text(GAME_W / 2, y0 + ph - 34, last ? tr("gotIt") : tr("chocoNext"), {
+      fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "16px", color: "#ffffff",
+      backgroundColor: "#3a8a3a", padding: { x: 26, y: 8 },
+    }).setOrigin(0.5).setDepth(D + 3).setInteractive({ useHandCursor: true });
+    objs.push(btn);
+    this.tweens.add({ targets: btn, scale: 1.06, duration: 640, yoyo: true, repeat: -1, ease: "Sine.inOut" });
+
+    // BẮT BUỘC BẤM NÚT. Intro đá/xe đôi cho chạm-nền-để-đóng, nhưng ở đây chạm nhầm là mất
+    // luôn một bước mà người chơi chưa kịp đọc, và không có đường quay lại.
+    let done = false;
+    btn.on("pointerdown", () => {
+      if (done) return;
+      done = true;
+      for (const o of objs) { this.tweens.killTweensOf(o); o.destroy(); }
+      if (last) this.tutPaused = false;   // xong: trả ván về cho người chơi
+      else this.showChocoIntroStep(step + 1, box);
+    });
   }
 
   // ---- Hard-rock intro (first level that has hard rock) ---------------
@@ -1764,7 +1876,7 @@ export class GameScene extends Phaser.Scene {
       const r0 = Math.floor(def.at / cols), c0 = def.at % cols;
       // Luật đặt hộp (scripts/check-choco.mjs kiểm cùng bộ này lúc build level). Ở đây chỉ là
       // lưới an toàn lúc chạy: thà mất cái hộp còn hơn vỡ cả level.
-      if (n < 3 || n % 2 === 0) continue;              // phải LẺ để ruy băng cắt đúng ô giữa
+      if (n < 3 || n > 12) continue;                   // 3-12; chẵn thì ruy băng cắt ở KHE giữa hai ô
       if (r0 + n > rows || c0 + n > cols) continue;    // tràn mép bàn
       if (def.count < 1) continue;
       const cells: number[] = [];
@@ -1859,8 +1971,120 @@ export class GameScene extends Phaser.Scene {
     return { rim: hsv(0.34), groove: hsv(0.46), base: hsv(0.62), face: hsv(0.76) };
   }
 
-  /** Nướng mặt tấm socola vào một texture vuông cạnh `T`. Mọi số đo là tỉ lệ của T. */
+  /**
+   * Nướng mặt tấm socola. Mọi số đo là tỉ lệ của cạnh `T`.
+   *
+   * Vẽ trên CANVAS chứ không phải Phaser Graphics, vì hai thứ chỉ canvas mới làm được:
+   *   1. Ô khuôn dùng ĐÚNG `drawVoxelCube` mà ô bàn cờ đang dùng (VOXEL_TILES=true) → hộp có
+   *      cùng thứ khối 2.5D, cùng hướng sáng, cùng kiểu vát cạnh với bàn. Trước đây hộp là
+   *      hình chữ nhật bo góc phẳng nên đứng cạnh bàn nhìn rất lạc (user 2026-08-14).
+   *   2. GRADIENT THẬT cho lớp bóng. Bản Graphics phải chồng 16 hình bầu dục alpha 0.014 mới
+   *      giả được rìa mềm; canvas có createRadialGradient nên vừa mượt hơn vừa gọn hơn.
+   * Không có canvas (test/headless) thì rơi về bản Graphics phẳng bên dưới.
+   */
   private bakeChocoTexture(key: string, n: number, ribbon: number, T: number) {
+    if (this.textures.exists(key)) this.textures.remove(key);
+    const tex = this.textures.createCanvas(key, T, T);
+    const ctx = tex?.getContext();
+    if (!tex || !ctx) { this.bakeChocoFlat(key, n, ribbon, T); return; }
+
+    const S = T;
+    const tone = this.chocoTones(ribbon);
+    const hx = (c: number) => `#${c.toString(16).padStart(6, "0")}`;
+    const rgb = (c: number): [number, number, number] => [(c >> 16) & 0xff, (c >> 8) & 0xff, c & 0xff];
+    // roundRect chưa chắc có ở mọi WebView Android → tự vẽ bằng arcTo.
+    const round = (x: number, y: number, w: number, h: number, r: number) => {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
+    };
+    const rr = S * 0.055;
+
+    // viền sẫm quanh mép + rãnh làm nền cho các khối nổi lên
+    round(0, 0, S, S, rr); ctx.fillStyle = hx(tone.rim); ctx.fill();
+    const inset = S * 0.03, fx = inset, fw = S - inset * 2;
+    round(fx, fx, fw, fw, rr * 0.8); ctx.fillStyle = hx(tone.groove); ctx.fill();
+
+    // ---- n² KHỐI VOXEL, cùng công thức với makeVoxelTileTexture (cell = u).
+    // ⚠ PHẢI VẼ TỪ HÀNG TRÊN XUỐNG: nắp khối thò LÊN hàng phía trên, nên hàng dưới phải đè
+    // lên hàng trên (luật 1 trong voxelCube.ts). Vòng lặp r tăng dần là đúng thứ tự.
+    setVoxelFrontRatio(VOXEL_BODY);
+    const u = fw / n;
+    const m = u * 0.06;
+    const cw = u - m * 2;
+    const ch = cw / (1 + VOXEL_BODY);
+    const ov = voxelFrontOverlap(ch);
+    for (let r = 0; r < n; r++)
+      for (let c = 0; c < n; c++)
+        drawVoxelCube(ctx, fx + c * u + m, fx + r * u + m + ov, cw, ch, rgb(tone.face));
+
+    // ---- lớp bọc bóng: quầng sáng trên-trái + nửa dưới chìm, bằng gradient thật
+    const glow = ctx.createRadialGradient(S * 0.36, S * 0.24, 0, S * 0.36, S * 0.24, S * 0.72);
+    glow.addColorStop(0, "rgba(255,255,255,0.22)");
+    glow.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = glow; ctx.fillRect(0, 0, S, S);
+    const dark = ctx.createLinearGradient(0, S * 0.42, 0, S);
+    dark.addColorStop(0, "rgba(0,0,0,0)");
+    dark.addColorStop(1, "rgba(0,0,0,0.20)");
+    ctx.fillStyle = dark; ctx.fillRect(0, 0, S, S);
+
+    // ---- ruy băng: một dải NGANG + một dải DỌC, mỗi dải rộng đúng một ô khuôn, neo vào TÂM
+    // hình học nên n chẵn (hai dải cắt ở khe) hay lẻ (cắt giữa ô) đều đúng.
+    const mid = (n - 1) / 2;
+    const bw = u * 1.02;
+    const b0 = fx + mid * u - (bw - u) / 2;
+    const rain = ribbon === RAINBOW;
+    // ⚠ QUANG PHỔ LẶP 2 LẦN: mặt đồng hồ che khúc giữa, trải một lần thì mỗi CÁNH chỉ còn 3-4
+    // màu — đọc ra "hộp hai màu" chứ không ra cầu vồng.
+    const HUES = [0, 1, 2, 3, 4, 5, 6, 7], SEG = HUES.length * 2;
+    const band = (bx: number, by: number, w: number, h: number, horiz: boolean) => {
+      if (!rain) { ctx.fillStyle = hx(COLORS[ribbon] ?? 0xffffff); ctx.fillRect(bx, by, w, h); }
+      else for (let i = 0; i < SEG; i++) {
+        ctx.fillStyle = hx(COLORS[HUES[i % HUES.length]]);
+        if (horiz) ctx.fillRect(bx + (w * i) / SEG, by, w / SEG + 0.6, h);
+        else ctx.fillRect(bx, by + (h * i) / SEG, w, h / SEG + 0.6);
+      }
+      // satin: gradient vắt NGANG THÂN dải — sáng ở giữa, sẫm dần ra hai mép, nên dải trông
+      // như một sợi vải cuộn tròn chứ không phải một vệt sơn dẹt.
+      const s = horiz ? ctx.createLinearGradient(0, by, 0, by + h) : ctx.createLinearGradient(bx, 0, bx + w, 0);
+      s.addColorStop(0, "rgba(0,0,0,0.28)");
+      s.addColorStop(0.28, "rgba(255,255,255,0.34)");
+      s.addColorStop(0.55, "rgba(255,255,255,0.06)");
+      s.addColorStop(1, "rgba(0,0,0,0.30)");
+      ctx.fillStyle = s; ctx.fillRect(bx, by, w, h);
+    };
+    band(fx, b0, fw, bw, true);
+    ctx.fillStyle = "rgba(0,0,0,0.20)"; // bóng dải dọc hắt xuống dải ngang chỗ giao nhau
+    ctx.fillRect(b0 - bw * 0.08, b0, bw * 1.16, bw);
+    band(b0, fx, bw, fw, false);
+
+    // ---- mặt đồng hồ kem. Con số KHÔNG nướng vào đây (nó đếm ngược) — buildChocoBox đặt Text
+    // lên đúng tâm này, dùng chung công thức bán kính CHOCO_DIAL.
+    const R = S * CHOCO_DIAL(n), mx = S / 2;
+    const disc = (cx: number, cy: number, rad: number, fill: string) => {
+      ctx.beginPath(); ctx.arc(cx, cy, rad, 0, Math.PI * 2); ctx.fillStyle = fill; ctx.fill();
+    };
+    disc(mx, mx + R * 0.1, R * 1.03, "rgba(0,0,0,0.28)");
+    disc(mx, mx, R, hx(0xe0b055));
+    disc(mx, mx, R * 0.88, hx(0xf7ecd2));
+    const face = ctx.createLinearGradient(0, mx - R, 0, mx + R); // mặt kem hơi cong
+    face.addColorStop(0, "rgba(255,255,255,0.5)");
+    face.addColorStop(1, "rgba(0,0,0,0.10)");
+    ctx.save(); ctx.beginPath(); ctx.arc(mx, mx, R * 0.88, 0, Math.PI * 2); ctx.clip();
+    ctx.fillStyle = face; ctx.fillRect(0, 0, S, S); ctx.restore();
+    for (let i = 0; i < 12; i++) {
+      const a = (Math.PI * 2 * i) / 12;
+      disc(mx + Math.sin(a) * R * 0.72, mx - Math.cos(a) * R * 0.72, R * 0.045, "rgba(201,160,106,0.55)");
+    }
+    tex.refresh();
+  }
+
+  /** Bản phẳng dự phòng khi không tạo được canvas texture. Giữ nguyên bản Graphics đã dùng. */
+  private bakeChocoFlat(key: string, n: number, ribbon: number, T: number) {
     const g = this.make.graphics({ x: 0, y: 0 }, false);
     const S = T;
     const rr = S * 0.055;
