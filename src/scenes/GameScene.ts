@@ -7025,10 +7025,11 @@ export class GameScene extends Phaser.Scene {
       this.addGold(reward);
       setWallet(this.gold);
     };
-    // FLOW (user 2026-08-13): KHÔNG phải bấm CLAIM nữa — thắng là xu bay vào ví ngay, rồi đi
-    // thẳng sang level kế. Trước đây phải bấm CLAIM, và từ L10 trở lên còn bị đá về Home:
-    // mỗi ván thắng mất thêm một màn hình và hai cú bấm, đúng chỗ người chơi dễ bỏ nhất.
-    // Nút CLAIM giữ lại làm nút BỎ QUA — bấm là sang luôn, không phải chờ hoạt cảnh.
+    // FLOW (user 2026-08-14: "hiển thị lại nút Claim, luồng như cũ"): thắng → bấm CLAIM → xu
+    // bay vào ví → chuyển cảnh → level kế. Bản 2026-08-13 bỏ cú bấm này và tự cộng thưởng;
+    // giờ trả lại như cũ.
+    // ⚠ CHỈ trả lại cú bấm CLAIM. Việc "từ L10 trở lên bị đá về Home" cũng bỏ cùng ngày hôm đó
+    // nhưng user KHÔNG yêu cầu khôi phục, nên `finishAndGo` vẫn đi thẳng sang level kế.
     let claiming = false;
     const finishAndGo = () => {
       if (closed) return;
@@ -7473,13 +7474,9 @@ export class GameScene extends Phaser.Scene {
 
     // ---- nút CLAIM xanh — BÉ lại như ảnh mẫu (2026-08-01) ----
     const cbw = Math.min(GAME_W - 180, 190);
-    void claimY; void cbw; // hai biến chỉ còn khối CLAIM bên dưới dùng — xem chú thích
-    /* ===== NÚT CLAIM — TẠM ẨN (user 2026-08-13: "user k cần claim thì tạm ẩn button Claim đi")
-       Thưởng đã tự cộng ngay khi thắng (lời gọi `claim()` ở cuối hàm), nên nút này không còn
-       việc gì để làm. Giữ nguyên code trong khối chú thích chứ không xoá, để bật lại là một
-       thao tác — cùng cách đã làm với dải nút debug ở trên.
-       Bỏ nút cũng bỏ luôn đường "bấm để bỏ qua"; chuyển cảnh giờ chỉ còn 600ms nên không đáng
-       đánh đổi lấy nguy cơ chạm nhầm làm mất luôn hoạt cảnh xu bay.
+    // Nút này từng bị tạm ẩn 2026-08-13 ("user k cần claim thì tạm ẩn button Claim đi") và
+    // thưởng tự cộng; user 2026-08-14 cho bật lại nguyên luồng cũ — phải bấm CLAIM mới nhận
+    // xu và mới đi tiếp.
     const claimBtn = this.add.graphics().setDepth(402);
     claimBtn.fillStyle(0x35c04a, 1);
     claimBtn.fillRoundedRect(cx - cbw / 2, claimY - 25, cbw, 50, 24);
@@ -7495,17 +7492,11 @@ export class GameScene extends Phaser.Scene {
     objs.push(cText);
     this.tweens.add({ targets: cText, scale: 1.08, duration: 620, yoyo: true, repeat: -1, ease: "Sine.inOut" });
     const hit = this.add.rectangle(cx, claimY, cbw, 50, 0xffffff, 0.001).setDepth(404).setInteractive({ useHandCursor: true });
-    // Bấm vào nút = BỎ QUA, sang màn kế ngay, không chờ hết hoạt cảnh. (`finishAndGo` tự gọi
-    // `applyReward` nên bấm sớm cỡ nào cũng không mất xu.)
-    hit.on("pointerdown", finishAndGo);
+    // Bấm CLAIM = nhận xu rồi đi tiếp: `claim` chạy đàn xu bay vào ví, xong mới sang chuyển
+    // cảnh. Trong quãng 2026-08-13→14 nút này từng nối thẳng vào `finishAndGo` (bỏ qua hoạt
+    // cảnh) vì thưởng đã tự cộng; giờ thưởng lại chờ cú bấm này nên phải là `claim`.
+    hit.on("pointerdown", claim);
     objs.push(hit);
-    ===== END NÚT CLAIM ================================================== */
-
-    // TỰ NHẬN THƯỞNG (user 2026-08-13: "thắng xong là được thêm coin luôn"). Trước đây phải
-    // bấm CLAIM mới có xu và mới đi tiếp — một cú bấm bắt buộc sau MỌI ván thắng, nằm đúng
-    // chỗ người chơi dễ rời đi nhất. Đàn xu vẫn bay như cũ vì đó là phần thưởng nhìn thấy
-    // được, chỉ khác là không phải xin phép nữa.
-    claim();
   }
 
   // Placeholder XU VÀNG (chưa có art thật public/art/coin.png): xu tròn vàng bóng, mặt
