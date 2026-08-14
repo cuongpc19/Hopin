@@ -1,25 +1,26 @@
+// Luật Realtime Database. Deploy: firebase deploy --only database
+//
+// ⚠ Chú thích phải là dòng `//` như thế này. Một khoá `"//"` bên trong node lại được hiểu là
+// một ĐƯỜNG DẪN CON tên là "//", và giá trị của nó phải là object luật — để mảng chuỗi vào đó
+// thì CLI báo `Syntax error ... Expected '{'`.
 {
   "rules": {
     ".read": false,
     ".write": false,
 
+    // GHI: mở cho tất cả. Game gửi thẳng từ trình duyệt người chơi bằng một lời fetch, không
+    // đăng nhập, nên không có cách nào khoá lại mà vẫn nhận được dữ liệu.
+    //
+    // ĐỌC: chỉ đúng một tài khoản. URL của database nằm lộ trong bundle game (không tránh được
+    // với telemetry từ trình duyệt), nên mở đọc là ai cũng tải về được toàn bộ log.
+    //
+    // indexOn "at": trang /stats.html chỉ kéo về khoảng thời gian đang xem
+    // (orderBy="at"&startAt=…) chứ không kéo cả node. Thiếu dòng này thì mọi truy vấn có
+    // orderBy bị từ chối, và cách duy nhất còn lại là tải toàn bộ /runs — đã 2,5 MB sau sáu
+    // ngày và lớn dần.
     "runs": {
-      "//": [
-        "GHI: mở cho tất cả. Game gửi thẳng từ trình duyệt người chơi bằng một lời fetch,",
-        "không đăng nhập, nên không có cách nào khoá lại mà vẫn nhận được dữ liệu.",
-        "",
-        "ĐỌC: chỉ đúng một tài khoản. URL của database nằm lộ trong bundle game (không tránh",
-        "được với telemetry từ trình duyệt), nên nếu mở đọc thì ai cũng tải về được toàn bộ.",
-        "Thay UID bên dưới bằng uid của bạn: đăng nhập vào /stats.html một lần, trang sẽ báo",
-        "lỗi 401 kèm uid, hoặc xem ở Firebase console → Authentication → Users.",
-        "",
-        "indexOn 'at': trang thống kê chỉ kéo về khoảng thời gian đang xem",
-        "(orderBy=\"at\"&startAt=...) chứ không kéo cả node. Thiếu dòng này thì mọi truy vấn",
-        "có orderBy đều bị từ chối, và cách duy nhất còn lại là tải toàn bộ /runs — hiện đã",
-        "2,5 MB và lớn dần mỗi ngày."
-      ],
       ".write": true,
-      ".read": "auth != null && auth.uid === 'PASTE_YOUR_UID'",
+      ".read": "auth != null && auth.uid === 'ZcMwJpI87DPVtkgQGZLECEnPbUC2'",
       ".indexOn": ["at"]
     }
   }
