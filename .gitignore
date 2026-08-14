@@ -79,3 +79,9 @@ store/crazygames/*.mp4
 # Anh Gemini goc de cat ra anh bia — 24MB, chi la nguyen lieu.
 # Ba tam bia thanh pham trong store/crazygames/ VAN duoc theo doi.
 public/art/newbackground/
+
+# Kết quả quét của các đợt tune level: mỗi shard ghi một file, một đợt sinh ra hàng trăm cái
+# (_q5-*, _p-*, _f-*, _g-* …). Chúng là số liệu trung gian, dựng lại được bằng cách chạy lại,
+# và tồn tại chỉ trong một đợt — đừng để chúng lấp `git status` che mất thay đổi thật.
+scripts/_*.json
+scripts/_*.err
