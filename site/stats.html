@@ -155,10 +155,14 @@ $("signin").onclick = () => signInWithPopup(auth, new GoogleAuthProvider())
   .catch((e) => { $("gateErr").textContent = e.message; });
 $("signout").onclick = () => signOut(auth);
 
-let token = null;
+// ⚠ ID token của Firebase CHỈ SỐNG 1 TIẾNG. Giữ lại `user` chứ không giữ chuỗi token: mỗi lần
+// gọi phải xin token mới, vì `getIdToken()` tự làm mới khi sắp hết hạn còn một chuỗi đã lưu thì
+// cứ thế mục đi. Bản đầu lưu chuỗi, nên tải lần đầu thì được mà một tiếng sau đổi khoảng ngày
+// là database trả 401 "Permission denied" — nhìn hệt như luật đọc sai, dù luật không liên quan.
+let user = null;
 onAuthStateChanged(auth, async (u) => {
+  user = u;
   if (!u) { $("gate").hidden = false; $("app").hidden = true; return; }
-  token = await u.getIdToken();
   $("gate").hidden = true; $("app").hidden = false;
   load();
 });
@@ -168,11 +172,18 @@ onAuthStateChanged(auth, async (u) => {
 // ngày nào đó sẽ nặng vài chục MB. Cần luật `.indexOn: ["at"]` thì truy vấn này mới chạy.
 let rows = [];
 async function load() {
+  if (!user) return;
   const days = Number($("days").value);
   const since = days >= 9999 ? 0 : Date.now() - days * 864e5;
   $("status").textContent = "đang tải…";
   const q = since ? `&orderBy="at"&startAt=${since}` : "";
-  const res = await fetch(`${DB}/runs.json?auth=${encodeURIComponent(token)}${q}`);
+  const get = async (force) => {
+    const t = await user.getIdToken(force);
+    return fetch(`${DB}/runs.json?auth=${encodeURIComponent(t)}${q}`);
+  };
+  let res = await get(false);
+  // 401 vẫn có thể xảy ra khi token vừa hết hạn đúng lúc — ép làm mới rồi thử lại ĐÚNG MỘT lần.
+  if (res.status === 401) res = await get(true);
   if (!res.ok) { $("status").textContent = `lỗi ${res.status} — ${await res.text()}`; return; }
   const j = await res.json();
   rows = Object.values(j || {}).filter((r) => r && r.at && r.lvl != null);
