@@ -177,6 +177,11 @@ const S: Record<string, { vi: string; en: string }> = {
     en: "These two are best buddies — they set off, park, and leave TOGETHER, always side by side. Tap one and BOTH roll out!",
   },
 
+  // ---- daily challenge ----
+  // Giữ NGUYÊN tiếng Anh ở cả hai ngôn ngữ, cùng nhóm với Level/Home/Revive/Coin — mấy chữ
+  // game phổ thông người Việt vẫn đọc thẳng, dịch ra nghe lạ hơn là giữ.
+  dailyTitle: { vi: "DAILY CHALLENGE", en: "DAILY CHALLENGE" },
+
   rockTitle: { vi: "Đá Cứng!", en: "Hard Rock!" },
   rockDesc: {
     vi: "Mấy tảng đá này KHÔNG ăn được — xe nào tới cũng phải chịu. Chúng còn CHẶN đường bắn, nên ô nào nấp sau đá thì phải dọn lối khác mà tới. Nhìn kỹ trước khi bấm nhé!",

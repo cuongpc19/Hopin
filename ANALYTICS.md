@@ -14,12 +14,32 @@ nguồn là ra kết luận sai, nên đọc mục 0 trước.
 | **Winrate của level N** | **`hop-n-7d1af.web.app/stats.html`** | xem cảnh báo bên dưới |
 | Người chơi rụng ở level nào | **stats.html** | GA không biết level nào là level nào sau khi dựng lại |
 | Ai dùng booster / hồi sinh | **stats.html** | GA hiện không nhận hai thứ này (xem §5) |
+| **Daily Challenge**: bao nhiêu người chơi, winrate, rụng ở bậc nào | **stats.html**, bảng *Daily Challenge* | chỉ log của game mới mang trường `daily` |
 
 > ⚠ **ĐỪNG đo winrate bằng GA.** Log chỉ ghi *số* level; khi một level được dựng lại thì ván
 > của bản cũ vẫn nằm dưới cùng con số ấy. `stats.html` mang theo **vân tay level** và cảnh báo
 > khi một level có nhiều hơn một bản trong khoảng đang xem — GA không có khái niệm đó, nó sẽ
 > gộp hai thiết kế khác nhau thành một con số trông rất thuyết phục. Đây đúng là chuyện đã làm
 > hỏng một đợt hiệu chuẩn trước đây (`LEVEL-DESIGN.md` §2.5).
+
+### Daily Challenge (từ 2026-08-15)
+
+Bảng *Daily Challenge* ở cuối `stats.html`. Mỗi hàng là một **bậc** trong dãy 10 bàn.
+
+| cột | nghĩa |
+|---|---|
+| Bậc | vị trí trong dãy, 0-based — bậc 0 là bàn đầu tiên ai cũng gặp |
+| Level | số level thật đang nằm ở bậc đó (dải riêng 9001-9010) |
+| Winrate/ván · Winrate/người | như bảng level thường |
+| **Còn lại so với bậc 0** | phễu: bao nhiêu % người chơi bậc 0 còn đi tới bậc này |
+
+Cột **phễu** là thứ đáng nhìn nhất — một chế độ hằng ngày sống hay chết nằm ở chỗ người chơi
+rụng ở bậc mấy, không nằm ở winrate từng bàn.
+
+⚠ **Nhận biết ván thử thách bằng trường `daily`, KHÔNG bằng số level.** Cùng một bàn hoàn toàn
+có thể tới bằng đường chơi thường (trước 2026-08-15 chúng còn nằm trong tiến trình chính), và
+ván đó không phải thử thách. `daily` do chính ván ghi ra nên không nhầm được; dòng log cũ không
+có trường này nên tự động không lọt vào bảng.
 
 ---
 

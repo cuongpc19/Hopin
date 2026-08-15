@@ -7,3 +7,9 @@ declare const __APP_BUILD__: string; //   short git commit hash, or "local"
 // builds — that is what guarantees the CrazyGames bundle carries no third-party ad
 // code, which their rules forbid outright. See CRAZYGAMES.md.
 declare const __TARGET__: "web" | "crazy" | "android";
+
+// Vite injects import.meta.env; tsconfig sets `"types": []` nên vite/client không được nạp,
+// khai báo tay đúng cái duy nhất đang dùng. DEV chỉ true khi chạy `vite` (dev server) — mọi
+// `vite build` đều false, nên thứ gì gói sau `import.meta.env.DEV` KHÔNG lọt vào bản phát hành.
+interface ImportMetaEnv { readonly DEV: boolean; readonly PROD: boolean }
+interface ImportMeta { readonly env: ImportMetaEnv }

@@ -131,6 +131,10 @@
   </p>
   <div class="scroll" style="max-height:70vh"><table id="tLv"></table></div>
 
+  <h2>Daily Challenge</h2>
+  <p class="sub" id="hDaily" style="margin:0 0 8px"></p>
+  <div class="scroll"><table id="tDaily"></table></div>
+
   <p class="note" id="foot"></p>
 </div>
 
@@ -320,6 +324,45 @@ function render() {
   $("tLv").innerHTML = `<thead><tr><th>Level</th><th>Người</th><th>Ván</th><th>Winrate/ván</th>
     <th>Winrate/người</th><th>Ván/người</th><th>Bỏ đi</th><th>Thời gian</th><th>Hồi sinh</th>
     <th style="text-align:left">Booster</th><th style="text-align:left">Vân tay bản</th></tr></thead><tbody>${lvRows}</tbody>`;
+
+  // ---- DAILY CHALLENGE ------------------------------------------------------------------
+  // Nhận biết bằng trường `daily` (bậc trong dãy, 0-based), KHÔNG bằng số level: bàn thử thách
+  // nằm ở dải riêng 9001-9010 nhưng dải đó có thể đổi, còn `daily` thì do chính ván ghi ra.
+  // Trước 2026-08-15 chưa có trường này nên mọi dòng cũ tự động không lọt vào đây.
+  const dg = g.filter((r) => r.daily != null);
+  const dDev = new Set(dg.map((r) => r.dev));
+  const dWin = dg.filter((r) => r.result === "win").length;
+  // Người THẮNG ít nhất một bậc — khác với người chỉ thử.
+  const wonDev = new Set(dg.filter((r) => r.result === "win").map((r) => r.dev));
+  $("hDaily").textContent = dg.length
+    ? `${dDev.size} người · ${dg.length} ván · winrate/ván ${pct(dWin, dg.length)}% · ${pct(wonDev.size, dDev.size)}% số người thắng ít nhất 1 bậc`
+    : "chưa có ván thử thách nào";
+
+  if (!dg.length) { $("tDaily").innerHTML = ""; }
+  else {
+    const st = new Map();
+    for (const r of dg) {
+      const k = r.daily;
+      if (!st.has(k)) st.set(k, { devs: new Set(), won: new Set(), n: 0, w: 0, ms: 0, lvls: new Set() });
+      const o = st.get(k);
+      o.devs.add(r.dev); o.n++; o.ms += r.ms || 0; o.lvls.add(r.lvl);
+      if (r.result === "win") { o.w++; o.won.add(r.dev); }
+    }
+    const steps = [...st.keys()].sort((a, b) => a - b);
+    // PHỄU: bậc 0 có bao nhiêu người thì tính phần trăm còn lại theo con số ấy. Đây mới là thứ
+    // đáng nhìn nhất ở một chế độ hằng ngày — người chơi rụng ở bậc nào.
+    const base = st.get(steps[0])?.devs.size || 0;
+    const rowsH = steps.map((k) => {
+      const o = st.get(k);
+      const wr = pct(o.w, o.n), wrDev = pct(o.won.size, o.devs.size), keep = pct(o.devs.size, base);
+      return `<tr><td>${k}</td><td>${[...o.lvls].join(", ")}</td><td>${o.devs.size}</td><td>${o.n}</td>
+        <td class="${cls(wr, 20, 45)}">${wr}%</td><td class="${cls(wrDev, 25, 55)}">${wrDev}%</td>
+        <td class="${cls(keep, 30, 60)}">${keep}%</td>
+        <td>${o.n ? Math.round(o.ms / o.n / 1000) : 0}s</td></tr>`;
+    }).join("");
+    $("tDaily").innerHTML = `<thead><tr><th>Bậc</th><th>Level</th><th>Người</th><th>Ván</th>
+      <th>Winrate/ván</th><th>Winrate/người</th><th>Còn lại so với bậc 0</th><th>Thời gian</th></tr></thead><tbody>${rowsH}</tbody>`;
+  }
 
   const multi = nums.filter((n) => lv.get(n).sigs.size > 1);
   $("foot").innerHTML = `Mã máy là số ngẫu nhiên 16 bit nên hai người lạ có thể trùng mã — với ${devAll.size} máy,

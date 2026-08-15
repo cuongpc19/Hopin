@@ -16,6 +16,7 @@ import {
   MILESTONES,
   type EventReward,
 } from "../game/cloverEvent";
+import { dailyEnter, dailyDone, dailyNeverPlayed, dailyResetFromUrl } from "../game/daily";
 
 
 // Home screen (redesign 2026-08-01, user): BỎ bản đồ dây-level cuộn — nền là bức tranh
@@ -42,6 +43,7 @@ export class LevelSelectScene extends Phaser.Scene {
     // Start-nav mascot. Placeholder for now → swap to the real cute-slime art when ready.
     this.load.image("start-slime", "art/slime-3.png");
     // Nav icons (user 2026-08-02): nút Shop & Cup đã cắt-viền tròn, thay emoji 🛒/🏆.
+    this.load.image("daily-icon", "art/daily-challenge.png");
     this.load.image("nav-shop", "art/nav-shop.png");
     this.load.image("nav-trophy", "art/nav-trophy.png");
     // Lucky Clover event: booster sprites for the reward previews (clover drawn/emoji).
@@ -56,6 +58,7 @@ export class LevelSelectScene extends Phaser.Scene {
     // art (the play screen swaps it for the checkerboard tone — see GameScene.create).
     setPageBackground(0xbfe3a0);
 
+    dailyResetFromUrl(); // ?daily=reset — Home cũng phải xử lý, đây mới là màn đầu thường gặp
     this.gold = this.readInt("pf_gold", 0);
     const progress = Math.max(1, this.readInt("pf_progress", 1));
     // WHERE the player currently is (may be below the highest unlocked, e.g. after a reset
@@ -67,7 +70,6 @@ export class LevelSelectScene extends Phaser.Scene {
     const showEvent = isEventUnlocked() && !isEventComplete();
     this.viewTop = showEvent ? 194 : 88;
     void this.viewTop; // giữ lại cho các popup sau này định vị
-    void progress; // tiến độ cao nhất vẫn lưu pf_progress (Ô LEVEL hiển thị pf_current)
 
     this.buildBackground();
     this.buildTopBar();
@@ -75,6 +77,68 @@ export class LevelSelectScene extends Phaser.Scene {
     // Nút PLAY riêng đã BỎ — Ô LEVEL (buildStage) đã tap-để-chơi (user 2026-08-01).
     this.buildBottomNav();
     if (showEvent) this.buildEventBar();
+    // Huy hiệu Thử Thách chỉ hiện SAU KHI qua L20 (user 2026-08-15) — mở khoá dần, và giữ
+    // khúc đầu game gọn cho người mới. `progress` là level cao nhất đã mở, nên "qua L20" là >20.
+    if (progress > 20) this.buildDailyBadge(showEvent);
+  }
+
+  // ---- Daily Challenge: huy hiệu nổi ở mép phải -------------------------------------------
+  // Đặt LỆCH HẲN sang mép phải và cao hơn thanh nav: giữa màn là Ô LEVEL (chạm để chơi tiếp),
+  // thứ người chơi tìm mỗi lần vào — huy hiệu không được tranh chỗ với nó. Mép phải trống, và
+  // nếu có thanh sự kiện Cỏ Bốn Lá thì tụt xuống dưới nó cho khỏi chồng.
+  private buildDailyBadge(eventShown: boolean) {
+    const D = 80;
+    const size = 78;
+    const x = GAME_W - size / 2 - 12;
+    const y = (eventShown ? 208 : 118) + size / 2;
+
+    // Chip ✓ báo ĐÃ THẮNG bậc này, không phải "đã vào hôm nay" (user 2026-08-15). Hai thứ khác
+    // nhau: vào rồi mà thua thì vẫn còn việc phải làm, huy hiệu không được tắt đèn.
+    const ready = !dailyDone();
+    const icon = this.add.image(x, y, "daily-icon").setDisplaySize(size, size).setDepth(D + 1);
+    // Vùng chạm là một hình chữ nhật RIÊNG, to hơn ảnh: huy hiệu có nhiều chỗ trong suốt
+    // (tia nắng, khe giữa vòng nguyệt quế) nên bắt chạm trên chính ảnh sẽ trượt ở rìa.
+    const hit = this.add.rectangle(x, y, size + 10, size + 10, 0x000000, 0.001)
+      .setDepth(D + 2).setInteractive({ useHandCursor: true });
+
+    // Ba trạng thái, mỗi cái một mức gây chú ý:
+    //   CHƯA CHƠI BAO GIỜ → quầng sáng lan ra + nhấp nhô mạnh: đây là thứ người chơi chưa biết
+    //                        là có, nên nó phải tự giới thiệu (user 2026-08-15).
+    //   đã biết, chưa thắng hôm nay → chỉ nhấp nhô nhẹ.
+    //   thắng rồi → xỉn và đứng yên; vẫn bấm được nhưng không giả vờ là có gì mới.
+    const isNew = dailyNeverPlayed();
+    if (isNew) {
+      // Hai vòng lệch pha nhau: một quầng liên tục thì mắt quen sau vài giây và lờ đi, hai
+      // vòng nối nhau giữ nhịp như tín hiệu radar.
+      for (const delay of [0, 700]) {
+        const halo = this.add.circle(x, y, size * 0.44, 0xffe14a, 0.38).setDepth(D);
+        this.tweens.add({ targets: halo, scale: 1.7, alpha: 0, duration: 1400, delay,
+          repeat: -1, ease: "Quad.out" });
+      }
+    }
+    if (ready) this.tweens.add({ targets: icon, y: y - (isNew ? 8 : 5), duration: isNew ? 900 : 1300,
+      yoyo: true, repeat: -1, ease: "Sine.inOut" });
+    else icon.setAlpha(0.55);
+
+    // CHỈ hiện dấu ✓ khi đã thắng; chưa thắng thì KHÔNG có chip nào (user 2026-08-15: "không
+    // cần viết chữ 1/10"). Số bậc là chuyện nội bộ của dãy, người chơi không cần biết mình đang
+    // ở bàn thứ mấy — huy hiệu chỉ cần trả lời một câu: hôm nay xong chưa.
+    const chip = ready ? null : this.add
+      .text(x, y + size / 2 - 2, "✓", {
+        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "13px", color: "#ffffff",
+        backgroundColor: "#4a6a4a", padding: { x: 8, y: 2 },
+      })
+      .setOrigin(0.5)
+      .setDepth(D + 3);
+
+    // ⚠ CỐ Ý KHÔNG GỌI this.canPlay(). Mọi đường khác vào level đều qua cổng tim, riêng thử
+    // thách thì miễn hoàn toàn (user 2026-08-15) — vào, thua, chơi lại, thoát ra đều không
+    // trừ tim. Giới hạn của nó là MỖI NGÀY MỘT BÀN, không phải số tim; chặn thêm bằng tim là
+    // hai hàng rào cho một thứ. Đừng thêm canPlay() vào đây vì thấy nó "thiếu".
+    hit.on("pointerdown", () => {
+      this.tweens.add({ targets: chip ? [icon, chip] : [icon], scale: 0.9, duration: 90, yoyo: true,
+        onComplete: () => this.scene.start("game", { level: dailyEnter() }) });
+    });
   }
 
   // ---- Background -----------------------------------------------------

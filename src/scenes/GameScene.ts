@@ -23,6 +23,7 @@ import { Audio } from "../game/audio";
 import { t as tr, tf as trf, getLang, setLang } from "../game/i18n";
 import { getLives, spendLife, showHeartsModal, canEnterLevel, graceMsLeft } from "../game/lives";
 import { platform } from "../platform";
+import { dailyRunning, dailyNoteWin, dailyClearRun, dailyLevel, dailyIndex, dailyDone, dailyEnter, dailyResetFromUrl } from "../game/daily";
 import { saveRun, groupRuns, exportJsonl, clearRuns, deviceId, copyToClipboard } from "../game/playlog";
 import { sendRun, openPrivacyPolicy } from "../game/telemetry";
 import { startAnalytics, track, gaLoaded } from "../game/analytics";
@@ -671,18 +672,38 @@ export class GameScene extends Phaser.Scene {
     Audio.unlock();
     this.input.on("pointerdown", () => Audio.unlock());
 
-    // Level to start: picker choice > ?level=N (dev) > level 1.
-    const q = parseInt(new URLSearchParams(location.search).get("level") ?? "", 10);
+    // Level to start: picker choice > ?daily=1 > ?level=N (dev) > level 1.
+    const qs = new URLSearchParams(location.search);
+    const q = parseInt(qs.get("level") ?? "", 10);
     const fromUrl = Number.isFinite(q) && q > 0 ? q : undefined;
+    // ?daily=1 — vào thẳng ván THỬ THÁCH y như bấm huy hiệu (đóng dấu pf_daily_run, nên tiêu
+    // đề, thưởng x3, miễn tim và trường `daily` trong log đều chạy). Cần có, vì mở ?level=511
+    // KHÔNG phải là thử thách: đó đúng là chỗ dễ hiểu nhầm nhất khi test.
+    // ?daily=reset xoá sạch trạng thái thử thách để test lại từ bậc 0.
+    const dq = qs.get("daily");
+    dailyResetFromUrl();
     this.failedThisAttempt = false; // fresh entry from the map → a clean First-Try win is possible
-    this.startLevel(this.startAt ?? fromUrl ?? 1);
+    this.startLevel(this.startAt ?? (dq === "1" ? dailyEnter() : undefined) ?? fromUrl ?? 1);
+
+    // ?win=1 — thắng ngay, CHỈ Ở DEV SERVER. Cố tình khoá sau import.meta.env.DEV chứ không
+    // phải sau target: nó không được lọt vào BẤT KỲ bản build nào, kể cả bản web tự host, vì
+    // một tham số URL phá xong level là thứ người chơi truyền tay nhau trong một buổi chiều.
+    if (import.meta.env.DEV && qs.get("win") === "1") this.time.delayedCall(400, () => this.win());
   }
 
   private startLevel(levelNum: number) {
     this.levelNum = levelNum;
+    // Cờ "ván này là thử thách" phải TẮT ngay khi vào một bàn khác. Thắng xong game đi thẳng
+    // sang level kế; không xoá thì bàn kế cũng đội mũ DAILY CHALLENGE và thắng nó lại đóng dấu
+    // ✓ cho thử thách hôm nay.
+    if (levelNum !== dailyLevel()) dailyClearRun();
     // Remember WHERE the player currently is (not just the highest ever reached) so the
     // Home picker features THIS level, not the max unlocked one (user 2026-07-31).
-    try { platform.storage.setItem("pf_current", String(levelNum)); } catch { /* storage unavailable */ }
+    // Ván THỬ THÁCH thì KHÔNG ghi: nếu ghi, vào thử thách L511 xong về Home là Ô LEVEL hiện
+    // "LEVEL 511" và người chơi mất dấu mình đang ở đâu trong game chính.
+    if (!dailyRunning()) {
+      try { platform.storage.setItem("pf_current", String(levelNum)); } catch { /* storage unavailable */ }
+    }
     this.playLog = []; this.playStart = (typeof performance !== "undefined" ? performance.now() : 0); this.peakUsed = 0;
     this.boosterUse = {}; this.reviveCount = 0;
     this.runId = Math.random().toString(36).slice(2, 10);
@@ -4037,20 +4058,27 @@ export class GameScene extends Phaser.Scene {
     // giữ nguyên canh giữa như cũ. Khi dồn thì neo theo MÉP TRÁI cố định chứ không theo tâm:
     // bề rộng ô đổi theo số chữ số của level, canh tâm thì mép phải xê dịch và tag bên cạnh
     // sẽ nhảy chỗ mỗi màn.
+    const daily = dailyRunning();
     const tier = levelDifficulty(levelNum);
     const LVL_X0 = 68; // ngay sau nút bánh răng (tâm 30, bán kính 20 → hết ở x≈50)
     const lph = 34;
     const ly0 = y - lph / 2;
     const lvlText = this.add
-      .text(0, y, `LEVEL ${levelNum}`, {
+      // Ván thử thách KHÔNG hiện số level (user 2026-08-15: "bỏ chữ level đi, để chữ daily
+      // challenge chung"). Người chơi vào từ huy hiệu, họ không cần biết bên dưới là bàn nào —
+      // và hiện số sẽ lộ ra rằng thử thách chỉ là một level thường của game.
+      .text(0, y, daily ? tr("dailyTitle") : `LEVEL ${levelNum}`, {
         fontFamily: "Arial, sans-serif",
         fontStyle: "bold",
-        fontSize: "18px",
+        // "DAILY CHALLENGE" dài gấp đôi "LEVEL 41", mà bề rộng ô tính theo bề rộng chữ — để
+        // nguyên 18px là ô phình ra đè hết ô Coin bên phải (user 2026-08-15). Hạ xuống 12px cho
+        // ô ngắn lại; chữ nhỏ vẫn đọc được vì nó là NHÃN, không phải con số cần liếc nhanh.
+        fontSize: daily ? "12px" : "18px",
         color: "#ffffff",
       })
       .setOrigin(0.5)
       .setDepth(D + 2);
-    const lpw = lvlText.width + 40;
+    const lpw = lvlText.width + (daily ? 26 : 40);
     const lx0 = tier === "normal" ? GAME_W / 2 - lpw / 2 : LVL_X0;
     lvlText.setX(lx0 + lpw / 2);
     const lpill = this.add.graphics().setDepth(D + 1);
@@ -4200,6 +4228,11 @@ export class GameScene extends Phaser.Scene {
   }
 
   // Bump the saved progress so the level picker unlocks/star-marks levels.
+  /** Level cao nhất người chơi từng mở khoá (pf_progress). 1 nếu chưa có gì. */
+  private readProgress(): number {
+    try { return parseInt(platform.storage.getItem("pf_progress") ?? "1", 10) || 1; } catch { return 1; }
+  }
+
   private unlockProgress(reached: number) {
     try {
       const cur = parseInt(platform.storage.getItem("pf_progress") ?? "1", 10) || 1;
@@ -4404,6 +4437,11 @@ export class GameScene extends Phaser.Scene {
       // silent, which read as "no heart was taken at all", so ask first and name the price.
       // Once the level is already won/lost there is nothing to charge — leave straight away.
       if (this.won || this.lost) { this.scene.start("select"); return; }
+      // THỬ THÁCH HẰNG NGÀY KHÔNG TÍNH TIM (user 2026-08-15: "quit không chơi daily challenge
+      // thì k bị mất tim"). Bỏ dở một ván thường là né mất một ván thua nên phải trả giá; còn
+      // thử thách thì bậc đã tiêu ngay lúc VÀO và không lấy lại được, nên thu thêm tim là
+      // phạt hai lần cho một lượt.
+      if (dailyRunning()) { kill(); this.scene.start("select"); return; }
       this.confirmHeartCost({
         title: tr("quitTitle"),
         body: tr("quitBody"),
@@ -7294,6 +7332,11 @@ export class GameScene extends Phaser.Scene {
     const boost = Object.keys(this.boosterUse).length ? this.boosterUse : undefined;
     const summary = {
       lvl: this.levelNum, sig: this.levelSig, result, ms, launches,
+      // THỬ THÁCH HẰNG NGÀY: `daily` là BẬC trong dãy (0-based), không phải true/false — nó
+      // vừa nói "ván này là thử thách" vừa nói "bậc mấy", nên lọc log không cần bảng tra.
+      // KHÔNG dùng `lvl` để nhận biết: cùng một số level hoàn toàn có thể tới bằng đường chơi
+      // thường, và ván đó KHÔNG phải thử thách.
+      ...(dailyRunning() ? { daily: dailyIndex() } : {}),
       peakBays: this.peakUsed, bays: this.slots.length,
       run: this.runId,          // gộp các dòng của cùng một lượt (xem chú thích ở reviveCount)
       revives: this.reviveCount, // 0 = chưa revive lần nào
@@ -7450,7 +7493,13 @@ export class GameScene extends Phaser.Scene {
     // hearts, so the deduction lives here on the two "attempt over" buttons. Both confirm
     // first and name the price, so the charge is never a surprise (user 2026-08-02) — and
     // cancelling drops the player back on this screen with Revive still on offer.
+    // THỬ THÁCH HẰNG NGÀY MIỄN TIM HOÀN TOÀN (user 2026-08-15). Kể cả thua: mỗi ngày chỉ có
+    // một bàn, và bậc đã tiêu ngay lúc vào — giới hạn nằm ở NGÀY, không nằm ở tim. Nên hai nút
+    // dưới đây bỏ luôn hộp xác nhận, vì hỏi "có chịu mất 1 tim không" rồi lại không trừ thì
+    // còn khó hiểu hơn là đi thẳng.
+    const freeRun = dailyRunning();
     mkBtn(cx - gap / 2 - bw / 2, by, bw, 46, tr("replay"), 0xd98a2b, 0xa5610f, () => {
+      if (freeRun) { closeAll(); this.startLevel(this.levelNum); return; }
       this.confirmHeartCost({
         title: tr("retryTitle"),
         body: tr("attemptCostBody"),
@@ -7467,6 +7516,7 @@ export class GameScene extends Phaser.Scene {
       });
     });
     mkBtn(cx + gap / 2 + bw / 2, by, bw, 46, tr("home"), 0x6d7b8a, 0x49525d, () => {
+      if (freeRun) { closeAll(); this.scene.start("select"); return; }
       this.confirmHeartCost({
         title: tr("quitTitle"),
         body: tr("attemptCostBody"),
@@ -7487,17 +7537,31 @@ export class GameScene extends Phaser.Scene {
     if (this.won) return;
     if (this.tutStep > 0) { this.clearTutHint(); this.tutStep = 0; } // tutorial dở dang (vd xe không quay về) → dọn khi thắng
     this.won = true;
+    // Phải hỏi TRƯỚC khi đóng dấu: dailyNoteWin() ghi "bậc này đã thắng", nên hỏi sau thì lần
+    // nào cũng ra false và thưởng x3 không bao giờ chạy.
+    const dailyFirstWin = dailyRunning() && !dailyDone();
+    dailyNoteWin(); // ván thử thách thắng → chip trên huy hiệu thành ✓
     this.emitPlayLog("win");
     const next = this.levelNum + 1;
     // Gold is granted only the FIRST time a level is cleared (no replay farming).
     const firstClear = this.claimFirstClearReward(this.levelNum);
     // Mọi ván thắng +WIN_GOLD (video mẫu). KHÔNG cộng ví ngay — màn thắng bay đàn xu từ
     // "+40" lên pill ví rồi mới cộng (showWinModal.applyReward; user 2026-08-01).
-    const reward = WIN_GOLD;
-    this.unlockProgress(next); // record on the picker that this level is beaten
-    // Ô LEVEL ở Home đọc pf_current — thắng xong phải trỏ NGAY sang level kế, kẻo về Home
-    // vẫn thấy level vừa thắng (pf_current xưa nay chỉ được ghi lúc BẮT ĐẦU chơi; user 2026-08-03).
-    try { platform.storage.setItem("pf_current", String(next)); } catch { /* storage unavailable */ }
+    // THẮNG THỬ THÁCH ĂN GẤP 3 (user 2026-08-15). Chỉ tính LẦN THẮNG ĐẦU của bậc đó: trong
+    // cùng một ngày người chơi vào lại được thoải mái (miễn tim), nên nếu lần nào thắng cũng x3
+    // thì chỉ việc thắng đi thắng lại một bàn là in tiền. Thắng lại vẫn được thưởng thường.
+    const reward = dailyFirstWin ? WIN_GOLD * 3 : WIN_GOLD;
+    // ⚠ THẮNG THỬ THÁCH KHÔNG ĐỘNG VÀO TIẾN ĐỘ GAME CHÍNH (user 2026-08-15 hỏi đúng chỗ này).
+    // Bàn thử thách là một level bình thường bị mượn — L511 chẳng hạn. Nếu vẫn chạy hai dòng
+    // dưới thì thắng nó sẽ MỞ KHOÁ tới L512 và Ô LEVEL ở Home nhảy sang "LEVEL 512", tức người
+    // chơi đang ở L25 tự nhiên được tặng 487 level. Thử thách là chế độ RIÊNG, tiến độ của nó
+    // nằm ở pf_daily_idx.
+    if (!dailyRunning()) {
+      this.unlockProgress(next); // record on the picker that this level is beaten
+      // Ô LEVEL ở Home đọc pf_current — thắng xong phải trỏ NGAY sang level kế, kẻo về Home
+      // vẫn thấy level vừa thắng (pf_current chỉ được ghi lúc BẮT ĐẦU chơi; user 2026-08-03).
+      try { platform.storage.setItem("pf_current", String(next)); } catch { /* storage unavailable */ }
+    }
 
     // Lucky Clover event: award clovers + auto-grant any milestone rewards reached.
     // Unlocks after Level 10; every win from then on collects clovers (2 for a clean
@@ -7553,8 +7617,16 @@ export class GameScene extends Phaser.Scene {
       applyReward(); // bảo hiểm — bình thường xu cuối đã cộng rồi
       for (const t of timers) t.remove();
       for (const o of objs) { this.tweens.killTweensOf(o); o.destroy(); }
-      // Hết level thiết kế thì mới về Home — chơi tiếp sẽ rơi vào level dựng tự động.
-      if (nextLevel <= LEVEL_COUNT) this.startLevel(nextLevel);
+      // VỀ HOME sau mỗi ván thắng, kể từ khi người chơi qua L20 (user 2026-08-15) — để họ
+      // nhìn thấy huy hiệu Thử Thách, vốn chỉ nằm ở Home. Ván thử thách cũng luôn về Home,
+      // vì đi thẳng sang "level kế" của nó là rơi vào một bàn thường không liên quan.
+      //
+      // ⚠ ĐÂY LÀ ĐI NGƯỢC ed17689. Hôm đó bỏ đúng luật này (từ L10 bị đá về Home) vì "mỗi ván
+      // thắng tốn một màn hình và hai cú chạm, đúng vào lúc người chơi dễ bỏ nhất". Giờ đưa
+      // lại có lý do mới, nhưng CÁI GIÁ CŨ VẪN CÒN — nếu conversion tụt sau bản này thì đây là
+      // chỗ nhìn đầu tiên, và cách gỡ là đưa huy hiệu vào màn thắng chứ không bắt về Home.
+      const backHome = dailyRunning() || this.readProgress() > 20;
+      if (!backHome && nextLevel <= LEVEL_COUNT) this.startLevel(nextLevel);
       else this.scene.start("select");
     };
     const claim = () => {

@@ -12,6 +12,8 @@ import { readD, isC } from "./genlib.mjs";
 const SIZE = Number(process.env.SIZE || 31);
 const TOP = Number(process.env.TOP || 10);
 const ONLY = process.env.ONLY ? new Set(process.env.ONLY.split(",").map(Number)) : null;
+// RANGE=401-586 — chấm cả một dải bất kể cỡ bàn (SIZE chỉ dùng khi không có RANGE).
+const RANGE = process.env.RANGE ? process.env.RANGE.split("-").map(Number) : null;
 const d = readD();
 
 function beauty(L) {
@@ -39,17 +41,24 @@ function beauty(L) {
 }
 
 const rows = Object.keys(d).map(Number).sort((a, b) => a - b)
-  .filter((n) => (ONLY ? ONLY.has(n) : d[n]?.cols === SIZE))
+  // ONLY thắng tất; có RANGE thì lọc theo dải, và nếu ĐẶT THÊM SIZE thì lọc cả cỡ bàn.
+  .filter((n) => {
+    if (ONLY) return ONLY.has(n);
+    if (!d[n]?.cols) return false;
+    if (RANGE && (n < RANGE[0] || n > RANGE[1])) return false;
+    if (!RANGE || process.env.SIZE) return d[n].cols === SIZE;
+    return true;
+  })
   .map((n) => ({ n, ...beauty(d[n]), level: d[n] }))
   .sort((a, b) => b.score - a.score);
 
 const pick = {};
-console.log(`top ${TOP} / ${rows.length} ban ${SIZE}x${SIZE}:`);
-console.log("lv   | diem | mau | lien mang | do phu");
+console.log(`top ${TOP} / ${rows.length} ban:`);
+console.log("lv   | co ban | diem | mau | lien mang | do phu");
 for (const r of rows.slice(0, TOP)) {
-  console.log(`L${String(r.n).padEnd(4)}| ${String(r.score).padStart(4)} | ${String(r.colours).padStart(3)} | `
+  console.log(`L${String(r.n).padEnd(4)}| ${String(r.level.cols)}x${r.level.cols} | ${String(r.score).padStart(4)} | ${String(r.colours).padStart(3)} | `
     + `${(r.clean * 100).toFixed(0).padStart(8)}% | ${(r.cover * 100).toFixed(0).padStart(5)}%`);
-  pick[`L${r.n}@${SIZE}`] = { name: `L${r.n}`, theme: "", size: SIZE, colours: r.colours, score: r.score, level: r.level };
+  pick[`L${r.n}`] = { name: `L${r.n}`, theme: "", size: r.level.cols, colours: r.colours, score: r.score, level: r.level };
 }
 fs.writeFileSync("public/art/level art/emoji/_pretty-pick.json", JSON.stringify(pick));
 console.log("\nghi _pretty-pick.json — ve bang: PICK=_pretty-pick.json OUT=... node scripts/board-sheet.mjs");
