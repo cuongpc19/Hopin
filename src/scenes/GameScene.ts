@@ -707,6 +707,14 @@ export class GameScene extends Phaser.Scene {
       this.guideMode = q === "1";
       if (!this.guideMode) platform.storage.removeItem("hopin_guide"); // dọn cờ cũ còn sót
     } catch { this.guideMode = false; }
+    // ?intro=reset — xoá cờ "đã xem" của MỌI tutorial để xem lại (user 2026-08-14 hỏi đúng câu
+    // này). Mỗi intro chỉ chạy một lần rồi ghi cờ vào storage, mà không có nút nào bật lại —
+    // cùng cái bẫy đã làm bàn tay chỉ dẫn kẹt suốt sáu ngày. Đặt lối thoát NGAY LÚC dựng cờ,
+    // đừng đợi tới lúc có người mắc kẹt.
+    try {
+      if (typeof location !== "undefined" && new URLSearchParams(location.search).get("intro") === "reset")
+        for (const k of ["pf_choco_intro", "pf_rock_intro", "pf_twin_intro"]) platform.storage.removeItem(k);
+    } catch { /* storage unavailable */ }
     this.guideKey = ""; this.guideHand = undefined; this.guideRing = undefined; this.guidePlan = null; this.guidePlanWinning = false; this.guidePlanNonce = 0;
     if (typeof window !== "undefined") { (window as any).hopLog = () => console.log(platform.storage.getItem("hopin_playlog") || "[]"); (window as any).hopLogClear = () => platform.storage.removeItem("hopin_playlog"); }
     // "start" streams AFTER makeLevel below (needs this.level); see the postLog("start") call there.
@@ -900,24 +908,40 @@ export class GameScene extends Phaser.Scene {
   // nhưng dải đó có thể được dời đi bất cứ lúc nào, và người chơi nhảy thẳng bằng ?level= thì
   // vẫn phải được dạy. Cờ trong storage lo phần chỉ hiện một lần.
   private maybeShowChocoIntro(): boolean {
-    const box = this.boxes.find((b) => !b.broken && b.cont);
-    if (!box) return false;
+    // Gom MỘT hộp mỗi LOẠI ruy băng (user 2026-08-14: "tutorial cho cả 2 loại là socola cầu
+    // vồng và socola 1 màu"). Bàn có cả hai → dạy cả hai, mỗi cái một bước soi riêng; bàn chỉ
+    // có một loại → chỉ dạy loại ấy, KHÔNG bịa ra cái hộp thứ hai để chỉ vào.
+    const live = this.boxes.filter((b) => !b.broken && b.cont);
+    const solid = live.find((b) => b.def.ribbon !== RAINBOW);
+    const rain = live.find((b) => b.def.ribbon === RAINBOW);
+    const spots = [solid, rain].filter(Boolean) as LiveBox[];
+    if (!spots.length) return false;
     let shown = false;
     try { shown = platform.storage.getItem("pf_choco_intro") === "1"; } catch { /* storage unavailable */ }
     if (shown) return false;
     try { platform.storage.setItem("pf_choco_intro", "1"); } catch { /* storage unavailable */ }
     this.tutPaused = true; // đóng băng sau modal, mở lại ở bước cuối
-    this.showChocoIntroStep(1, box);
+    this.showChocoIntroStep(1, spots);
     return true;
   }
 
-  /** Một bước của intro socola. Bước 1-2 là modal giữa màn; bước 3 khoét sáng đúng cái hộp. */
-  private showChocoIntroStep(step: number, box: LiveBox) {
+  /**
+   * Một bước của intro socola. Bước 1-2 là modal giữa màn; từ bước 3 trở đi khoét sáng đúng
+   * MỘT cái hộp thật, mỗi loại ruy băng một bước.
+   *
+   * `spots` là các hộp sẽ soi, tối đa hai (một-màu rồi cầu vồng). Tổng số bước = 2 + spots.
+   * Dạy một-màu TRƯỚC vì nó là luật chặt hơn — hiểu "chỉ đúng màu mới tính" rồi thì cầu vồng
+   * chỉ còn là một câu nới lỏng, ngược lại thì phải học hai luật rời nhau.
+   */
+  private showChocoIntroStep(step: number, spots: LiveBox[]) {
     const D = 400;
-    const last = step === 3;
+    const total = 2 + spots.length;
+    const spot = step >= 3;            // bước soi hộp (bảng chữ gọn, né sang nửa màn đối diện)
+    const last = step === total;
+    const box = spots[Math.min(spots.length - 1, Math.max(0, step - 3))];
     const objs: Phaser.GameObjects.GameObject[] = [];
 
-    if (last && box.cont) {
+    if (spot && box.cont) {
       // Màn tối có LỖ: bốn dải quanh hộp thay vì một tấm phủ kín. Rẻ hơn mask, và cái hộp giữ
       // nguyên màu thật của nó — nếu phủ mờ lên thì chính màu ruy băng đang muốn chỉ bị xỉn đi.
       const b = box.cont;
@@ -944,10 +968,10 @@ export class GameScene extends Phaser.Scene {
     }
 
     const pw = 330;
-    const ph = last ? 210 : 300;
+    const ph = spot ? 210 : 300;
     const x0 = GAME_W / 2 - pw / 2;
     // Bước 3: bảng chữ né sang nửa màn ĐỐI DIỆN với hộp, không thì nó che mất thứ đang chỉ.
-    const y0 = last
+    const y0 = spot
       ? (box.cont && box.cont.y < GAME_H / 2 ? GAME_H - ph - 28 : 28)
       : GAME_H / 2 - ph / 2;
     const panel = this.add.graphics().setDepth(D + 2);
@@ -957,7 +981,7 @@ export class GameScene extends Phaser.Scene {
     panel.strokeRoundedRect(x0, y0, pw, ph, 20);
     objs.push(panel);
 
-    if (!last) {
+    if (!spot) {
       objs.push(this.add.text(GAME_W / 2, y0 + 62, step === 1 ? "🍫" : "🔢", { fontSize: "40px" })
         .setOrigin(0.5).setDepth(D + 3));
       objs.push(this.add.text(GAME_W / 2, y0 + 118, tr("chocoTitle"), {
@@ -966,14 +990,14 @@ export class GameScene extends Phaser.Scene {
     }
     const rainbow = box.def.ribbon === RAINBOW;
     const msg = step === 1 ? tr("chocoStep1") : step === 2 ? tr("chocoStep2") : rainbow ? tr("chocoStep3Rainbow") : tr("chocoStep3");
-    objs.push(this.add.text(GAME_W / 2, y0 + (last ? 74 : 182), msg, {
+    objs.push(this.add.text(GAME_W / 2, y0 + (spot ? 74 : 182), msg, {
       fontFamily: "Arial, sans-serif", fontSize: "14px", color: "#6a4a12", align: "center",
       wordWrap: { width: pw - 44 },
     }).setOrigin(0.5).setDepth(D + 3));
 
     // Chấm bước 1·2·3 để người chơi biết còn mấy cú bấm nữa — cùng lý do phải tách bước.
-    for (let i = 1; i <= 3; i++) {
-      objs.push(this.add.circle(GAME_W / 2 + (i - 2) * 16, y0 + ph - 62, 4, i === step ? 0x8a5a12 : 0xcbb98a)
+    for (let i = 1; i <= total; i++) {
+      objs.push(this.add.circle(GAME_W / 2 + (i - (total + 1) / 2) * 16, y0 + ph - 62, 4, i === step ? 0x8a5a12 : 0xcbb98a)
         .setDepth(D + 3));
     }
 
@@ -992,7 +1016,7 @@ export class GameScene extends Phaser.Scene {
       done = true;
       for (const o of objs) { this.tweens.killTweensOf(o); o.destroy(); }
       if (last) this.tutPaused = false;   // xong: trả ván về cho người chơi
-      else this.showChocoIntroStep(step + 1, box);
+      else this.showChocoIntroStep(step + 1, spots);
     });
   }
 
@@ -2127,14 +2151,17 @@ export class GameScene extends Phaser.Scene {
 
     // 4) khối cầu trên mặt nắp + chấm sáng — thứ làm mắt đọc ra "hạt nhựa bóng"
     ctx.save(); R(ctx, m + bw, m + bw, w - bw * 2, lidH - bw, rr * 0.9); ctx.clip();
+    // Độ bóng hạ một nấc (user 2026-08-14: "giảm độ bóng xuống 1 chút xíu"). Giữ nguyên hình
+    // dạng — vẫn khối cầu + chấm sáng lệch trên-trái — chỉ nhạt đi, vì ở ô 11-17px thì chấm
+    // sáng quá gắt làm màu thật của ô bị bạc đi.
     const g = ctx.createLinearGradient(m, m, m + w, m + lidH);
-    g.addColorStop(0, "rgba(255,255,255,0.36)");
+    g.addColorStop(0, "rgba(255,255,255,0.26)");
     g.addColorStop(0.55, "rgba(255,255,255,0.02)");
-    g.addColorStop(1, "rgba(0,0,0,0.22)");
+    g.addColorStop(1, "rgba(0,0,0,0.18)");
     ctx.fillStyle = g; ctx.fillRect(0, 0, size, size);
     ctx.beginPath();
-    ctx.ellipse(m + w * 0.33, m + lidH * 0.32, w * 0.18, lidH * 0.16, -0.7, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(255,255,255,0.72)"; ctx.fill();
+    ctx.ellipse(m + w * 0.33, m + lidH * 0.32, w * 0.17, lidH * 0.15, -0.7, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255,255,255,0.52)"; ctx.fill();
     ctx.restore();
     // 5) khe sẫm giữa nắp và mặt trước — chính nó làm nắp đọc ra là cao hơn
     ctx.fillStyle = "rgba(0,0,0,0.30)";

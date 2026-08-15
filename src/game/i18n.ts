@@ -22,6 +22,20 @@ if (!platform.forcedLang) {
   } catch {
     /* storage unavailable — stay on the default */
   }
+  // ?lang=en|vi — ĐỔI VÀ GHI NHỚ. Hàng đổi ngôn ngữ trong Settings đang bị comment ("hidden for
+  // submission"), nên không còn đường nào đổi từ trong game: máy nào trình duyệt tiếng Việt là
+  // preferredLang() trả "vi" và người chơi kẹt luôn ở đó (user 2026-08-14 hỏi đúng chuyện này).
+  // Cùng cái bẫy của cờ chỉ-dẫn và cờ tutorial — ẩn UI thì phải chừa một lối thoát.
+  // Vẫn dưới forcedLang: bản CrazyGames khoá tiếng Anh, không tham số nào được phép cãi.
+  try {
+    const q = typeof location !== "undefined" ? new URLSearchParams(location.search).get("lang") : null;
+    if (q === "en" || q === "vi") {
+      lang = q;
+      platform.storage.setItem("pf_lang", q);
+    }
+  } catch {
+    /* no location / no storage — giữ nguyên */
+  }
 }
 
 export function getLang(): Lang {
