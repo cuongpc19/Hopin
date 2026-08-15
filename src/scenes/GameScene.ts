@@ -243,7 +243,8 @@ const AUTO_RELAUNCH_TELEGRAPH_MS = 520;
 const SPEED = 15.6; // track nodes per second (car travel speed — slam: reverted to pre-bump slower speed, user 2026-07-28)
 const MIN_GAP = 5; // min spacing between cars, in nodes (bigger cars need more room)
 const TWIN_SPAWN_GAP = 5; // nodes between a twin pair on the ray (snug but the rope still shows)
-const TWIN_INTRO_LEVEL = 8; // the ONE level that introduces twin cars (skip if you're past it)
+// XE "?" chỉ xuất hiện từ level này trở đi (user 2026-08-15) — xem chỗ gỡ cờ trong startLevel.
+const BURIED_FROM_LEVEL = 10;
 const BELT_SPEED = 6; // Line belt cleats: nodes per second
 const SHOT_COOLDOWN = 10; // ms between pickups — slam: near frame-rate cap (~1 slime/frame @60fps)
 // CẤU HÌNH coin thưởng MỖI ván thắng (user 2026-08-01, theo video mẫu "+40" — mọi ván
@@ -779,6 +780,15 @@ export class GameScene extends Phaser.Scene {
     this.twinLinkG = this.add.graphics().setDepth(DEPTH_TWINLINK);
 
     this.level = makeLevel(levelNum);
+    // XE "?" CHỈ TỪ L10 (user 2026-08-15). Trước đó nó ngửa mặt như xe thường: mấy màn đầu là
+    // lúc người chơi đang học "bấm xe nào", mà xe "?" giấu cả màu lẫn số ghế nên nó biến bài học
+    // ấy thành đoán mò. Hiện L2/L4/L6/L7/L8 đều đang có xe "?".
+    //
+    // Gỡ Ở ĐÂY chứ không xoá trong designed.json, vì bộ dựng rắc lại cờ này theo target mỗi lần
+    // tune (`buriedCount`) — sửa dữ liệu thì lượt tune sau lại mọc ra, sửa ở đây thì luật đứng yên.
+    // Winrate KHÔNG đổi: cả hai mô hình mô phỏng đều bỏ qua cờ `buried` (LEVEL-DESIGN §1.4 gọi
+    // đúng nó là "lever giả"), nên không phải tune lại gì.
+    if (levelNum < BURIED_FROM_LEVEL) for (const c of this.level.chests) delete c.buried;
     // Vân tay NỘI DUNG level, chốt NGAY LÚC NẠP (board bị ăn dần trong lúc chơi nên tính sau
     // sẽ ra hash khác). Không có nó thì playlog chỉ ghi số level, mà một số level đã đổi nội
     // dung 5 lần trong một ngày — hiệu chuẩn `winrate-cal.mjs --fit` ghép ván cũ với board mới
@@ -1154,13 +1164,16 @@ export class GameScene extends Phaser.Scene {
     this.showTutHint(front.container.x, front.container.y, msg, this.chestSize * 0.95);
   }
 
-  // ---- Twin-car intro (only on its designated level) -----------------
+  // ---- Twin-car intro (level ĐẦU TIÊN thật sự có xe đôi) -------------
   private maybeShowTwinIntro() {
-    // Only introduce twin cars AT their intro level — never on later twin levels you
-    // reached by skipping ahead (e.g. testing straight to 11/12, already past level 8).
-    // Exception: L200 opens the kid pack (jumped to directly), so it re-offers the
-    // intro for a child who never played L8 — the pf_twin_intro flag still dedupes.
-    if (this.levelNum !== TWIN_INTRO_LEVEL && this.levelNum !== 200) return;
+    // TỰ TÌM, KHÔNG KHOÁ SỐ LEVEL (user 2026-08-15). Bản cũ khoá cứng ở L8 cộng một ngoại lệ
+    // L200 cho "kid pack" — bộ kid pack ấy đã bị đợt art thay sạch, còn cặp xe đôi thì bộ dựng
+    // rắc theo luật riêng của nó mỗi lần tune và không hề biết tới hằng số này. Hậu quả đo được
+    // 2026-08-15: L5 đã có một cặp, tức người chơi gặp xe đôi TRƯỚC bài dạy ba màn — bấm một xe
+    // thấy hai xe chạy ra mà không ai giải thích.
+    //
+    // Điều kiện giờ chỉ còn "level này có nhóm xe nối dây", đúng cách intro socola làm. Cờ
+    // pf_twin_intro lo phần chỉ hiện một lần, nên dời cặp đi đâu bài dạy cũng bám theo.
     if (this.carGroups.length === 0) return;
     let shown = false;
     try {
