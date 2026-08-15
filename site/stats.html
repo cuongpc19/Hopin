@@ -110,6 +110,14 @@
         <option value="9999">tất cả</option>
       </select>
     </label>
+    <!-- Chọn khoảng theo NGÀY. Điền vào đây thì ô "Khoảng" ở trên bị bỏ qua. Cả hai đầu đều
+         tính CẢ NGÀY ĐÓ, để 11→14 nghĩa là trọn bốn ngày — khớp cách bảng CrazyGames đọc. -->
+    <label>Từ <input type="date" id="from"></label>
+    <label>đến <input type="date" id="to"></label>
+    <button id="clearDate" title="Bỏ chọn ngày, quay về ô Khoảng">✕</button>
+    <!-- Cắt ngày theo UTC: CrazyGames tính theo UTC, ta mặc định giờ VN. Lệch 7 tiếng đủ để
+         đẩy người chơi ban đêm sang ngày khác và làm hai bảng không khớp. -->
+    <label><input type="checkbox" id="utc"> ngày theo UTC</label>
     <label><input type="checkbox" id="excl" checked> bỏ máy test (localhost)</label>
     <label>Bản build
       <select id="build"><option value="">tất cả</option></select>
@@ -179,13 +187,31 @@ onAuthStateChanged(auth, async (u) => {
 // ---- tải dữ liệu ------------------------------------------------------------------------
 // Chỉ kéo về khoảng thời gian đang xem, KHÔNG kéo cả node: /runs lớn dần theo tháng và một
 // ngày nào đó sẽ nặng vài chục MB. Cần luật `.indexOn: ["at"]` thì truy vấn này mới chạy.
+/** Mốc thời gian đang xem. FROM/TO (nếu có) ĐÈ ô "Khoảng". */
+function windowMs() {
+  const tz = $("utc").checked ? 0 : 7 * 3600e3;
+  const f = $("from").value, t = $("to").value;
+  if (f || t) {
+    return {
+      since: f ? Date.parse(f + "T00:00:00Z") - tz : 0,
+      // +1 ngày: ô "đến" tính cả ngày đó, không thì chọn 14→14 sẽ ra rỗng
+      until: t ? Date.parse(t + "T00:00:00Z") - tz + 864e5 : Infinity,
+      tz,
+    };
+  }
+  const days = Number($("days").value);
+  return { since: days >= 9999 ? 0 : Date.now() - days * 864e5, until: Infinity, tz };
+}
+
 let rows = [];
 async function load() {
   if (!user) return;
-  const days = Number($("days").value);
-  const since = days >= 9999 ? 0 : Date.now() - days * 864e5;
+  const { since, until } = windowMs();
   $("status").textContent = "đang tải…";
-  const q = since ? `&orderBy="at"&startAt=${since}` : "";
+  // endAt để server cắt luôn đầu trên — khoảng quá khứ thì không phải tải về rồi mới lọc bỏ.
+  const q = since || until < Infinity
+    ? `&orderBy="at"${since ? `&startAt=${since}` : ""}${until < Infinity ? `&endAt=${until}` : ""}`
+    : "";
   const get = async (force) => {
     const t = await user.getIdToken(force);
     return fetch(`${DB}/runs.json?auth=${encodeURIComponent(t)}${q}`);
@@ -205,12 +231,21 @@ async function load() {
 }
 $("reload").onclick = load;
 $("days").onchange = load;
+$("from").onchange = load;
+$("to").onchange = load;
+$("clearDate").onclick = () => { $("from").value = ""; $("to").value = ""; load(); };
+// Đổi múi giờ phải TẢI LẠI chứ không chỉ vẽ lại: khi đang chọn theo ngày thì chính mốc
+// đầu/cuối của truy vấn dịch đi 7 tiếng, tức tập dữ liệu cần tải cũng khác.
+$("utc").onchange = load;
 $("excl").onchange = render;
 $("build").onchange = render;
 
 // ---- tính ------------------------------------------------------------------------------
-const VN = 7 * 3600e3;                       // mốc thời gian là epoch, đổi sang ngày giờ VN
-const day = (ms) => new Date(ms + VN).toISOString().slice(0, 10);
+// Mốc thời gian là epoch; cộng lệch múi giờ RỒI mới cắt ngày. Đọc ô "ngày theo UTC" mỗi lần gọi
+// chứ không chốt một hằng số: đổi múi giờ là mọi hàng trong bảng ngày phải xếp lại.
+const tzNow = () => ($("utc").checked ? 0 : 7 * 3600e3);
+const VN = 7 * 3600e3; // giữ tên cũ cho chỗ chia theo GIỜ bên dưới
+const day = (ms) => new Date(ms + tzNow()).toISOString().slice(0, 10);
 const pct = (a, b) => (b ? Math.round((100 * a) / b) : 0);
 const cls = (v, lo, hi) => (v < lo ? "bad" : v < hi ? "warn" : "good");
 
@@ -250,7 +285,7 @@ function render() {
   // Chọn "6 giờ" mà bảng chỉ có đúng một hàng "hôm nay" thì bảng đó chẳng nói lên gì; ở khoảng
   // ngắn thì cái đáng nhìn là nhịp lên xuống trong ngày.
   const hourly = Number($("days").value) <= 1;
-  const bucket = hourly ? (ms) => new Date(ms + VN).toISOString().slice(11, 13) + ":00" : day;
+  const bucket = hourly ? (ms) => new Date(ms + tzNow()).toISOString().slice(11, 13) + ":00" : day;
   const first = new Map();
   for (const r of g) if (!first.has(r.dev) || r.at < first.get(r.dev)) first.set(r.dev, r.at);
   const byDay = new Map();
@@ -262,25 +297,44 @@ function render() {
   }
   const days = [...byDay.keys()].sort();
   const maxDev = Math.max(...days.map((d) => byDay.get(d).devs.size));
+  // ---- D1 THẬT: trong số người có NGÀY ĐẦU là d, bao nhiêu quay lại đúng d+1 ---------------
+  // Khác hẳn cột "% quay lại" bên cạnh (= bao nhiêu người HÔM ĐÓ từng chơi trước đây). D1 mới là
+  // con số CrazyGames và mọi bảng phân tích game dùng, nên phải có mặt để đối chiếu được.
+  const dayOf = new Map();               // dev -> Set ngày đã chơi
+  for (const r of g) {
+    if (!dayOf.has(r.dev)) dayOf.set(r.dev, new Set());
+    dayOf.get(r.dev).add(day(r.at));
+  }
+  const nextDay = (d) => new Date(Date.parse(d + "T00:00:00Z") + 864e5).toISOString().slice(0, 10);
+  const lastDay = days[days.length - 1];
+  const d1Of = (d) => {
+    if (hourly) return null;                       // theo giờ thì D1 vô nghĩa
+    const cohort = [...first.entries()].filter(([, t]) => day(t) === d).map(([dev]) => dev);
+    if (!cohort.length || nextDay(d) > lastDay) return null;
+    const back = cohort.filter((x) => dayOf.get(x).has(nextDay(d))).length;
+    return { n: cohort.length, back, p: pct(back, cohort.length) };
+  };
   const dayRows = days.map((d) => {
     const o = byDay.get(d);
     const nw = [...o.devs].filter((x) => bucket(first.get(x)) === d).length;
     const w = (n) => Math.round((n / maxDev) * 180);
+    const r1 = d1Of(d);
     return `<tr><td>${d}</td><td>${o.devs.size}</td><td>${nw}</td><td>${o.devs.size - nw}</td>
       <td class="${cls(pct(o.devs.size - nw, o.devs.size), 5, 15)}">${pct(o.devs.size - nw, o.devs.size)}%</td>
+      <td class="${r1 ? cls(r1.p, 3, 8) : ""}" title="${r1 ? `${r1.back}/${r1.n} người mới của ngày này quay lại hôm sau` : ""}">${r1 ? r1.p + "%" : "—"}</td>
       <td>${o.n}</td><td>${(o.n / o.devs.size).toFixed(1)}</td>
       <td class="${cls(pct(o.w, o.n), 55, 70)}">${pct(o.w, o.n)}%</td>
       <td>${Math.round(o.ms / o.n / 1000)}s</td>
       <td style="text-align:left"><span class="spark" style="width:${w(nw)}px"></span><span class="spark n2" style="width:${w(o.devs.size - nw)}px"></span></td></tr>`;
   }).reverse().join("");
-  $("tDay").innerHTML = `<thead><tr><th>${hourly ? "Giờ" : "Ngày"}</th><th>Người chơi</th><th>Mới</th><th>Quay lại</th><th>% quay lại</th>
+  $("tDay").innerHTML = `<thead><tr><th>${hourly ? "Giờ" : "Ngày"}</th><th>Người chơi</th><th>Mới</th><th>Quay lại</th><th>% quay lại</th><th>D1</th>
     <th>Ván</th><th>Ván/người</th><th>Winrate</th><th>Thời gian/ván</th><th style="text-align:left">mới ▏quay lại</th></tr></thead><tbody>${dayRows}</tbody>`;
-  // "Mới" chỉ có nghĩa TRONG khoảng đang tải: ai chơi từ trước khoảng đó vẫn bị tính là mới vì
-  // dữ liệu cũ không được kéo về. Ở khoảng vài giờ thì gần như ai cũng "mới", nên nói thẳng ra.
-  $("hDay").textContent =
-    "“% quay lại” = phần người chơi trong hàng đó đã từng chơi trước đó. ⚠ Chỉ tính trong khoảng đang tải: "
-    + "ai chơi trước khoảng này vẫn bị coi là mới, nên hàng ĐẦU TIÊN luôn 0% và các hàng đầu luôn thấp giả tạo. "
-    + (hourly ? "Đang xem theo giờ (giờ VN) — ở khoảng vài giờ thì cột này gần như vô nghĩa, kéo khoảng dài ra mới đọc được." : "");
+  $("hDay").innerHTML =
+    "<b>D1</b> = trong số người chơi LẦN ĐẦU vào ngày đó, bao nhiêu % quay lại đúng hôm sau — đây là con số so được với bảng CrazyGames. "
+    + "<b>% quay lại</b> là thứ khác: phần người chơi trong ngày đó đã từng chơi trước đây, không cần liền ngày. "
+    + "⚠ Cả hai chỉ xét trong khoảng đang tải — ai chơi trước khoảng này vẫn bị coi là mới, nên <b>hàng đầu tiên luôn sai lệch</b>; "
+    + "muốn đọc D1 của một ngày thì kéo khoảng bắt đầu sớm hơn ngày đó vài hôm. "
+    + (hourly ? "Đang xem theo GIỜ nên cột D1 để trống." : "");
 
   // ---- thẻ tổng
   const today = days[days.length - 1], t = byDay.get(today);
