@@ -51,9 +51,36 @@ const LAY_SET = (() => {
 const FIVE_FROM = Number(process.env.FIVE_FROM || 41);
 const FIVE_BAND = (process.env.FIVE_BAND || "26-43").split("-").map(Number);
 
+// Dải HỘP SOCOLA (user 2026-08-14): L501-530 đều có một hộp 8×8 ở góc và cùng nhắm 30-60,
+// KHÔNG theo luật ÷5 nữa — cả 30 bàn là một bộ, level ÷5 trong đó cũng dùng dải này.
+const CHOCO = (process.env.CHOCO_RANGE || "501-530").split("-").map(Number);
+const CHOCO_BAND = (process.env.CHOCO_BAND || "30-60").split("-").map(Number);
+
+// Dải 25×25 (user 2026-08-14): L470-500 chuyển hết sang bàn 25×25 giữ nguyên ảnh cũ, cùng nhắm
+// 40-50 — KHÔNG theo luật ÷5 nữa, cả 31 bàn là một bộ.
+const SMALL = (process.env.SMALL_RANGE || "470-500").split("-").map(Number);
+const SMALL_BAND = (process.env.SMALL_BAND || "40-50").split("-").map(Number);
+const inSmall = (n) => n >= SMALL[0] && n <= SMALL[1];
+
+// Level vừa được RẢI ĐÁ (user 2026-08-14). Sàn 40, trần thả — user: "để winrate >40%", không
+// phải một dải. Đá chỉ làm khó thêm, nên chỉ cần chặn đáy là đủ; trần rộng còn giúp bộ tune
+// dừng sớm ở nấc ít xe nhất.
+const ROCKS = new Set((process.env.ROCK_LEVELS || "68,73,117,174").split(",").map(Number).filter(Boolean));
+
 export function cfg(n) {
   const five = n % 5 === 0;
   const harder = five && n >= FIVE_FROM;
+  if (ROCKS.has(n)) return { lo: 40, hi: 100, lays: [0], hid: 0 };
+  if (inSmall(n)) {
+    // lays = [0, 40]: thang phải có CẢ HAI CHIỀU. Bàn 25×25 chỉ còn ~480 ô (so với ~890 của
+    // 35×35) nên phần lớn ra RẤT DỄ — lượt đầu 15/31 bàn đọc trên 50, có bàn chạm 100 — mà
+    // thang lúc đó không có lớp-2 cho level thường nên không còn núm nào để ép xuống. Vài bàn
+    // khác lại quá khó (15), tức cũng cần nấc KHÔNG lớp-2. Cho thang thử cả hai rồi chọn.
+    return { lo: SMALL_BAND[0], hi: SMALL_BAND[1], lays: [0, 40], hid: 0 };
+  }
+  if (n >= CHOCO[0] && n <= CHOCO[1]) {
+    return { lo: CHOCO_BAND[0], hi: CHOCO_BAND[1], lays: five ? [40] : [0], hid: 0 };
+  }
   return {
     lo: five ? (harder ? FIVE_BAND[0] : 30) : 60,
     hi: five ? (harder ? FIVE_BAND[1] : 50) : 100,
@@ -123,7 +150,9 @@ function ladderFor(n) {
   const caps = (process.env.CAPS || "130,95,65,45,30").split(",").map(Number);
   const waves = (process.env.WAVES || "1,2,3,5").split(",").map(Number);
   // Level dễ không cần núm khó: quét áp lực cao ở đó là đi ngược hướng cần tìm (§8.8).
-  const press = n % 5 === 0 ? [0, 0.15, 0.3] : [0, 0.15];
+  // Dải 25×25 cũng cần nấc áp lực cao: bàn nhỏ vốn dễ, mà dải 40-50 chỉ rộng 10 điểm nên
+  // thiếu núm là không với tới được (lượt đầu 15/31 bàn vượt trần).
+  const press = (n % 5 === 0 || inSmall(n)) ? [0, 0.15, 0.3] : [0, 0.15];
   const mins = (process.env.MINCAR_LADDER || "22,40").split(",").map(Number);
   const out = [];
   for (const cap of caps) for (const wave of waves) for (const pressure of press) for (const lay of c.lays) for (const minCar of mins)

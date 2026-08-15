@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc --noEmit)",
+      "Bash(node --check *)",
+      "Bash(npx --yes firebase-tools@13 database:get *)",
+
+      "Bash(node scripts/check-seats.mjs)",
+      "Bash(node scripts/check-choco.mjs)",
+      "Bash(node scripts/scan-shards.mjs)",
+
+      "Bash(git status:*)",
+      "Bash(git log:*)",
+      "Bash(git diff:*)",
+      "Bash(git show:*)"
+    ]
+  }
+}

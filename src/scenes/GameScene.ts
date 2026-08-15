@@ -146,6 +146,12 @@ interface LiveBox {
 // 5×5 — mà con số là thứ dễ đọc nhất trên hộp, không được co theo cỡ hộp.
 // Mặt kem NƯỚNG vào texture còn con SỐ là Text thật, hai bên phải dùng chung công thức này.
 const CHOCO_DIAL = (n: number) => Math.max(0.16, 0.62 / n);
+// Chiều cao MẶT TRƯỚC của hộp socola, tính theo MỘT Ô khuôn (không phải theo cạnh hộp).
+// Cả tấm là MỘT khối nổi: nắp phủ đúng n² ô, mặt trước thò xuống dưới → hộp đứng hẳn lên khỏi
+// bàn thay vì nằm bẹt (user 2026-08-14, kèm ảnh mẫu). Neo vào ô chứ không vào cạnh hộp, nếu
+// không hộp 8×8 sẽ có mặt trước dày hơn một ô rưỡi và đè mất cả hàng slime bên dưới.
+// 0.55 sâu hơn mặt trước của ô bàn cờ (VOXEL_BODY 0.34) một chút, để khối to đọc ra là cái thùng.
+const CHOCO_FRONT = 0.55;
 
 const SLOT_COUNT = 5;
 // DESIGN sizes for the bottom cluster (bays → queue → boosters). The BOARD is fixed on
@@ -186,6 +192,8 @@ const TILE_CAP_FIT = 1.3;
 // Ô bàn cờ vẽ bằng khối kẹo nổi (voxelCube) thay vì nạp PNG. Đặt false để quay lại bộ
 // tile-<id>.png trong public/art/slime/.
 const VOXEL_TILES = true;
+// Ô bàn cờ dùng khối của HỘP SOCOLA thay cho drawVoxelCube. Tắt = về bản voxel cũ.
+const CHOCO_STYLE_TILES = true;
 // Do day THAN o (mat truoc). 0.2 = look "puffy" goc cua playbook, cao hon = khoi day hon.
 const VOXEL_BODY = 0.34;
 // Fixed car size — the SAME on every level (independent of the grid's cell size,
@@ -614,6 +622,9 @@ export class GameScene extends Phaser.Scene {
     for (let i = 0; i < COLORS.length; i++) {
       // VOXEL: dựng ô ngay trong game từ MỘT màu phẳng (public/pixel-voxel-rendering).
       // Không cần file PNG, và ô luôn khớp palette.ts — đổi màu trong palette là ô đổi theo.
+      // CHOCO_STYLE_TILES: ô bàn cờ vẽ bằng ĐÚNG khối của hộp socola (user 2026-08-14 chốt
+      // "lấy cách vẽ khối socola làm chuẩn"). Tắt cờ này là quay lại drawVoxelCube như cũ.
+      if (CHOCO_STYLE_TILES) { this.makeChocoStyleTile(`tile-${i}`, COLORS[i]); continue; }
       if (VOXEL_TILES) { this.makeVoxelTileTexture(`tile-${i}`, COLORS[i]); continue; }
       const t = this.textures.exists(`tile-${i}`) ? this.textures.get(`tile-${i}`) : null;
       const ok = t && t.getSourceImage() && (t.getSourceImage() as HTMLImageElement).width >= 8;
@@ -1914,22 +1925,36 @@ export class GameScene extends Phaser.Scene {
     // một thứ hiếm khi chiếm quá 1/3 bề ngang bàn. Ở 768 thì ô khuôn vẫn còn ~70px, thừa nét.
     const T = Math.min(768, 96 * n);
     if (!this.textures.exists(key)) this.bakeChocoTexture(key, n, box.def.ribbon, T);
-    const img = this.add.image(0, 0, key).setDisplaySize(S, S);
+    // Texture cao hơn rộng (nắp T×T + mặt trước). Vẽ ở đúng tỉ lệ đó, rồi kéo origin lên sao cho
+    // TÂM NẮP — chứ không phải tâm ảnh — rơi vào tâm container, tức đúng giữa n² ô nó phủ.
+    const fr = this.cell * CHOCO_FRONT; // khớp `front = (T/n)·CHOCO_FRONT` lúc nướng, vì S = n·cell
+    const img = this.add.image(0, 0, key)
+      .setDisplaySize(S, S + fr)
+      .setOrigin(0.5, (S / 2) / (S + fr));
 
     // Bán kính mặt đồng hồ = TỈ LỆ của cạnh, giống hệt công thức trong bakeChocoTexture, để
     // con số (một Text thật, luôn nét) rơi đúng vào giữa mặt kem đã nướng sẵn.
     const R = S * CHOCO_DIAL(n);
     const digits = String(Math.max(1, box.def.count)).length;
+    // Con số TRẮNG VIỀN SẪM, ngồi TRÊN viên đá (bố cục lấy từ ảnh mẫu user gửi 2026-08-14).
+    // Trắng-viền-đen đọc được trên MỌI tông nắp — mà nắp giờ đổi màu theo ruy băng, nên một màu
+    // chữ cố định như nâu #4a2a16 sẽ chìm ngay khi ruy băng là màu sẫm.
+    // Chữ to hơn hẳn bản cũ: nó là thứ dễ đọc nhất trên hộp, không phải viên đá.
     const num = this.add
-      .text(0, 0, String(box.def.count), {
+      .text(0, -R * 0.72, String(box.def.count), {
         fontFamily: "Arial, sans-serif", fontStyle: "bold",
-        fontSize: `${Math.round(R * (digits >= 3 ? 0.78 : digits === 2 ? 1.0 : 1.15))}px`,
-        color: "#4a2a16",
+        fontSize: `${Math.round(R * (digits >= 3 ? 1.0 : digits === 2 ? 1.25 : 1.45))}px`,
+        color: "#ffffff",
+        stroke: "#2a1810",
+        strokeThickness: Math.max(3, Math.round(R * 0.16)),
       })
       .setOrigin(0.5);
 
     const cont = this.add.container(x, y, [img, num]);
     cont.setSize(S, S);
+    // Nâng trên ô bàn cờ (depth 0) để MẶT TRƯỚC không bị hàng slime ngay dưới che mất — buildBoard
+    // dựng theo hàng nên hàng dưới sinh sau và mặc định vẽ đè lên. Vẫn dưới xe (DEPTH_CAR=2).
+    cont.setDepth(1);
     cont.setData("choco", true);
     box.cont = cont;
     box.num = num;
@@ -1940,11 +1965,16 @@ export class GameScene extends Phaser.Scene {
    * màu, nhạt hơn chút so với ruy băng"). Cả hộp mang màu của luật, ruy băng là bản đậm nhất
    * nên vẫn nổi lên trên.
    *
-   * "Nhạt" ở đây là GIẢM BÃO HOÀ, không phải làm sáng lên. Hai ruy băng đang dùng — bé id14 và
-   * xanh trời id15 — vốn đã rất sáng; làm sáng thêm nữa là ra gần trắng và ruy băng biến mất
-   * trên chính cái nền cùng màu của nó. Giảm bão hoà thì hợp với cả ruy băng sáng lẫn tối.
+   * "Nhạt" = vừa GIẢM BÃO HOÀ vừa SÁNG HƠN ruy băng.
    *
-   * Thứ tự sáng-tối giữ nguyên (face sáng nhất → rim tối nhất) để hộp vẫn ra khối.
+   * ⚠ Bản đầu chỉ giảm bão hoà và ĐÓNG CỨNG độ sáng ở 0.76. Với ruy băng sáng (xanh trời id15
+   * có V≈0.94) thì nắp hoá ra TỐI HƠN HẲN ruy băng — user 2026-08-14: "màu của hộp hơi tối hơn
+   * nhiều so với màu của ruybang". Nên độ sáng phải NEO VÀO CHÍNH V CỦA RUY BĂNG: nắp kéo lên
+   * phía trắng, khung kéo xuống phía đen. Làm vậy thì công thức đúng cho cả ruy băng sáng lẫn
+   * tối, thay vì đúng cho một khoảng rồi hỏng ở khoảng kia.
+   *
+   * Nắp SÁNG HƠN ruy băng, khung + mặt trước SẪM HƠN — nắp sáng nằm trong khung sẫm mới ra
+   * "tấm panel nổi lên", đúng bố cục ảnh mẫu.
    * Màu gần xám (bão hoà < 0.12) không có tông màu để mượn → trả về nâu socola gốc.
    */
   private chocoTones(ribbon: number) {
@@ -1961,76 +1991,146 @@ export class GameScene extends Phaser.Scene {
       else h = (r - gg) / dl + 4;
       h *= 60;
     }
-    const sat = (dl / mx) * 0.5; // NHẠT: chỉ còn một nửa độ bão hoà của ruy băng
-    const hsv = (v: number) => {
-      const cc = v * sat, x = cc * (1 - Math.abs(((h / 60) % 2) - 1)), m = v - cc;
+    const S0 = dl / mx, V0 = mx; // bão hoà & độ sáng GỐC của ruy băng
+    const hsv = (v: number, s: number) => {
+      const cc = v * s, x = cc * (1 - Math.abs(((h / 60) % 2) - 1)), m = v - cc;
       const [rr2, gg2, bb2] = h < 60 ? [cc, x, 0] : h < 120 ? [x, cc, 0] : h < 180 ? [0, cc, x]
         : h < 240 ? [0, x, cc] : h < 300 ? [x, 0, cc] : [cc, 0, x];
       return (Math.round((rr2 + m) * 255) << 16) | (Math.round((gg2 + m) * 255) << 8) | Math.round((bb2 + m) * 255);
     };
-    return { rim: hsv(0.34), groove: hsv(0.46), base: hsv(0.62), face: hsv(0.76) };
+    const up = (k: number) => Math.min(0.97, V0 + (1 - V0) * k); // kéo về phía TRẮNG
+    return {
+      rim: hsv(Math.max(0.26, V0 * 0.56), S0 * 0.8),  // khung + mặt trước: sẫm để đóng khung
+      groove: hsv(Math.max(0.40, V0 * 0.8), S0 * 0.6),
+      base: hsv(up(0.3), S0 * 0.42),
+      face: hsv(up(0.58), S0 * 0.3),                  // NẮP: sáng hơn ruy băng, bão hoà thấp
+    };
+  }
+
+  /** Hình bo góc vẽ bằng arcTo — `ctx.roundRect` chưa chắc có ở mọi WebView Android. */
+  private static roundPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  /**
+   * KHỐI 2.5D dùng chung cho HỘP SOCOLA và Ô BÀN CỜ (user 2026-08-14: "thử vẽ lại ô vuông, dùng
+   * chung style khối với socola"). Vẽ bóng đổ → thân → mặt trước → viền nắp → mặt nắp, rồi trả
+   * lại vùng NẮP để nơi gọi vẽ tiếp thứ của riêng nó (quai + viên đá, hay mặt slime).
+   *
+   * MỘT HÀM CHO CẢ HAI là điểm chính. Trước đó hộp vẽ tay còn ô gọi drawVoxelCube — cùng ngôn
+   * ngữ nhưng hai bộ hằng số, tức sửa một bên là hai bên lệch nhau mà không ai biết.
+   *
+   * Nguồn sáng TRÊN-TRÁI ở mọi chỗ: bóng đổ xuống-phải, vát sáng ở mép trên và mép trái.
+   */
+  private drawBlock(
+    ctx: CanvasRenderingContext2D,
+    x: number, y: number, w: number, lidH: number, front: number,
+    tone: { rim: number; face: number },
+  ) {
+    const R = GameScene.roundPath;
+    const hx = (c: number) => `#${c.toString(16).padStart(6, "0")}`;
+    const rr = w * 0.055;
+    const H = lidH + front;
+
+    R(ctx, x + w * 0.02, y + front * 0.5, w - w * 0.02, H - front * 0.1, rr);
+    ctx.fillStyle = "rgba(20,10,16,0.30)"; ctx.fill();                       // bóng đổ xuống-phải
+    R(ctx, x, y, w, H, rr);
+    ctx.fillStyle = hx(shade(tone.rim, 0.72)); ctx.fill();                   // thân (lộ ra ở viền)
+    const fg = ctx.createLinearGradient(0, y + lidH - rr, 0, y + H);         // mặt trước, vát dần
+    fg.addColorStop(0, hx(tone.rim));
+    fg.addColorStop(1, hx(shade(tone.rim, 0.66)));
+    R(ctx, x + w * 0.012, y + lidH - rr, w - w * 0.024, front + rr, rr * 0.9);
+    ctx.fillStyle = fg; ctx.fill();
+
+    R(ctx, x, y, w, lidH, rr); ctx.fillStyle = hx(tone.rim); ctx.fill();     // viền quanh nắp
+    const ins = w * 0.022;
+    R(ctx, x + ins, y + ins, w - ins * 2, lidH - ins * 2, rr * 0.85);
+    ctx.fillStyle = hx(tone.face); ctx.fill();                              // mặt nắp
+
+    // lớp bọc bóng: quầng sáng trên-trái + nửa dưới chìm
+    const glow = ctx.createRadialGradient(x + w * 0.36, y + lidH * 0.24, 0, x + w * 0.36, y + lidH * 0.24, w * 0.72);
+    glow.addColorStop(0, "rgba(255,255,255,0.22)");
+    glow.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.save(); R(ctx, x, y, w, lidH, rr); ctx.clip();
+    ctx.fillStyle = glow; ctx.fillRect(x, y, w, lidH);
+    const dim = ctx.createLinearGradient(0, y + lidH * 0.42, 0, y + lidH);
+    dim.addColorStop(0, "rgba(0,0,0,0)");
+    dim.addColorStop(1, "rgba(0,0,0,0.20)");
+    ctx.fillStyle = dim; ctx.fillRect(x, y, w, lidH);
+    ctx.restore();
+    return { rr, ins };
+  }
+
+  /** Vát cạnh + khe nắp/mặt trước. Gọi SAU CÙNG nên nằm trên mọi thứ vẽ lên nắp. */
+  private blockBevel(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, lidH: number, rr: number) {
+    ctx.fillStyle = "rgba(255,255,255,0.30)";
+    ctx.fillRect(x + rr * 0.6, y + lidH * 0.008, w - rr * 1.2, lidH * 0.016);
+    ctx.fillRect(x + w * 0.008, y + rr * 0.6, w * 0.014, lidH - rr * 1.2);
+    // Khe sẫm giữa nắp và mặt trước — chính nó làm mắt đọc ra "nắp cao hơn", không phải bóng đổ.
+    ctx.fillStyle = "rgba(0,0,0,0.34)";
+    ctx.fillRect(x + rr * 0.4, y + lidH - lidH * 0.018, w - rr * 0.8, lidH * 0.018);
+  }
+
+  /**
+   * Ô BÀN CỜ vẽ bằng ĐÚNG khối của hộp socola (thử theo yêu cầu user 2026-08-14).
+   * Bật/tắt bằng CHOCO_STYLE_TILES; tắt thì quay về makeVoxelTileTexture như cũ.
+   *
+   * ⚠ TEXTURE PHẢI VUÔNG. Hộp socola được phép cao hơn rộng vì buildChocoBox bù bằng origin
+   * lệch, còn ô bàn cờ thì makeKey/runner/zipToCar đều coi là vuông — đổi tỉ lệ ở đây là lệch
+   * cả bàn. Nên khối nhét GỌN trong ô vuông: nắp cao lidH, mặt trước chiếm phần còn lại, đúng
+   * tỉ lệ 1/(1+VOXEL_BODY) mà drawVoxelCube vẫn dùng.
+   */
+  private makeChocoStyleTile(key: string, col: number, size = 128) {
+    if (this.textures.exists(key)) this.textures.remove(key);
+    const tex = this.textures.createCanvas(key, size, size);
+    const ctx = tex?.getContext();
+    if (!tex || !ctx) { this.makeVoxelTileTexture(key, col, size); return; }
+    const m = size * 0.05;
+    const w = size - m * 2;
+    const lidH = w / (1 + VOXEL_BODY);
+    const front = w - lidH;
+    // Mặt nắp GIỮ NGUYÊN màu palette — ô bàn cờ phải đọc đúng màu của nó; chỉ viền và mặt trước
+    // sẫm đi để ra khối. Khác hẳn hộp socola, nơi nắp cố tình nhạt hơn ruy băng.
+    const { rr } = this.drawBlock(ctx, m, m, w, lidH, front, { rim: shade(col, 0.6), face: col });
+    this.blockBevel(ctx, m, m, w, lidH, rr);
+    tex.refresh();
   }
 
   /**
    * Nướng mặt tấm socola. Mọi số đo là tỉ lệ của cạnh `T`.
    *
-   * Vẽ trên CANVAS chứ không phải Phaser Graphics, vì hai thứ chỉ canvas mới làm được:
-   *   1. Ô khuôn dùng ĐÚNG `drawVoxelCube` mà ô bàn cờ đang dùng (VOXEL_TILES=true) → hộp có
-   *      cùng thứ khối 2.5D, cùng hướng sáng, cùng kiểu vát cạnh với bàn. Trước đây hộp là
-   *      hình chữ nhật bo góc phẳng nên đứng cạnh bàn nhìn rất lạc (user 2026-08-14).
-   *   2. GRADIENT THẬT cho lớp bóng. Bản Graphics phải chồng 16 hình bầu dục alpha 0.014 mới
-   *      giả được rìa mềm; canvas có createRadialGradient nên vừa mượt hơn vừa gọn hơn.
+   * Vẽ trên CANVAS chứ không phải Phaser Graphics vì cần GRADIENT THẬT: bản Graphics phải chồng
+   * 16 hình bầu dục alpha 0.014 mới giả được rìa mềm, canvas có createRadialGradient.
    * Không có canvas (test/headless) thì rơi về bản Graphics phẳng bên dưới.
    */
   private bakeChocoTexture(key: string, n: number, ribbon: number, T: number) {
     if (this.textures.exists(key)) this.textures.remove(key);
-    const tex = this.textures.createCanvas(key, T, T);
+    // Texture CAO HƠN RỘNG: nắp là ô vuông T×T phủ đúng n² ô bàn, mặt trước thò thêm `front`
+    // xuống dưới. buildChocoBox bù lại bằng origin lệch, để nắp vẫn nằm đúng chỗ.
+    const front = Math.round((T / n) * CHOCO_FRONT);
+    const tex = this.textures.createCanvas(key, T, T + front);
     const ctx = tex?.getContext();
     if (!tex || !ctx) { this.bakeChocoFlat(key, n, ribbon, T); return; }
 
     const S = T;
     const tone = this.chocoTones(ribbon);
     const hx = (c: number) => `#${c.toString(16).padStart(6, "0")}`;
-    const rgb = (c: number): [number, number, number] => [(c >> 16) & 0xff, (c >> 8) & 0xff, c & 0xff];
-    // roundRect chưa chắc có ở mọi WebView Android → tự vẽ bằng arcTo.
-    const round = (x: number, y: number, w: number, h: number, r: number) => {
-      ctx.beginPath();
-      ctx.moveTo(x + r, y);
-      ctx.arcTo(x + w, y, x + w, y + h, r);
-      ctx.arcTo(x + w, y + h, x, y + h, r);
-      ctx.arcTo(x, y + h, x, y, r);
-      ctx.arcTo(x, y, x + w, y, r);
-      ctx.closePath();
-    };
-    const rr = S * 0.055;
+    const dk = (c: number, f: number) => shade(c, f);
 
-    // viền sẫm quanh mép + rãnh làm nền cho các khối nổi lên
-    round(0, 0, S, S, rr); ctx.fillStyle = hx(tone.rim); ctx.fill();
-    const inset = S * 0.03, fx = inset, fw = S - inset * 2;
-    round(fx, fx, fw, fw, rr * 0.8); ctx.fillStyle = hx(tone.groove); ctx.fill();
-
-    // ---- n² KHỐI VOXEL, cùng công thức với makeVoxelTileTexture (cell = u).
-    // ⚠ PHẢI VẼ TỪ HÀNG TRÊN XUỐNG: nắp khối thò LÊN hàng phía trên, nên hàng dưới phải đè
-    // lên hàng trên (luật 1 trong voxelCube.ts). Vòng lặp r tăng dần là đúng thứ tự.
-    setVoxelFrontRatio(VOXEL_BODY);
-    const u = fw / n;
-    const m = u * 0.06;
-    const cw = u - m * 2;
-    const ch = cw / (1 + VOXEL_BODY);
-    const ov = voxelFrontOverlap(ch);
-    for (let r = 0; r < n; r++)
-      for (let c = 0; c < n; c++)
-        drawVoxelCube(ctx, fx + c * u + m, fx + r * u + m + ov, cw, ch, rgb(tone.face));
-
-    // ---- lớp bọc bóng: quầng sáng trên-trái + nửa dưới chìm, bằng gradient thật
-    const glow = ctx.createRadialGradient(S * 0.36, S * 0.24, 0, S * 0.36, S * 0.24, S * 0.72);
-    glow.addColorStop(0, "rgba(255,255,255,0.22)");
-    glow.addColorStop(1, "rgba(255,255,255,0)");
-    ctx.fillStyle = glow; ctx.fillRect(0, 0, S, S);
-    const dark = ctx.createLinearGradient(0, S * 0.42, 0, S);
-    dark.addColorStop(0, "rgba(0,0,0,0)");
-    dark.addColorStop(1, "rgba(0,0,0,0.20)");
-    ctx.fillStyle = dark; ctx.fillRect(0, 0, S, S);
+    // ---- KHỐI: dùng CHUNG hàm với ô bàn cờ (user 2026-08-14: "lấy cách vẽ khối socola làm
+    // chuẩn"). Nắp phủ đúng n² ô, mặt trước thò xuống dưới.
+    // NẮP LÀ MỘT MẢNG LIỀN, không chia ô: lưới n² ô trước đây là để đọc được hộp giấu bao nhiêu
+    // slime, nhưng ở cỡ 8×8 nó thành 64 ô lấm tấm tranh chỗ với quai và con số — mà hai thứ đó
+    // mới là LUẬT. Cỡ hộp vẫn đọc được từ chính diện tích nó chiếm.
+    const { rr, ins } = this.drawBlock(ctx, 0, 0, S, S, front, tone);
+    const fx = ins, fw = S - ins * 2;
+    const u = fw / n; // đơn vị cho bề rộng quai bên dưới
 
     // ---- ruy băng: một dải NGANG + một dải DỌC, mỗi dải rộng đúng một ô khuôn, neo vào TÂM
     // hình học nên n chẵn (hai dải cắt ở khe) hay lẻ (cắt giữa ô) đều đúng.
@@ -2048,38 +2148,53 @@ export class GameScene extends Phaser.Scene {
         if (horiz) ctx.fillRect(bx + (w * i) / SEG, by, w / SEG + 0.6, h);
         else ctx.fillRect(bx, by + (h * i) / SEG, w, h / SEG + 0.6);
       }
-      // satin: gradient vắt NGANG THÂN dải — sáng ở giữa, sẫm dần ra hai mép, nên dải trông
-      // như một sợi vải cuộn tròn chứ không phải một vệt sơn dẹt.
+      // satin: gradient vắt NGANG THÂN quai — sáng ở giữa, sẫm dần ra hai mép, nên quai trông
+      // như một sợi cuộn tròn chứ không phải một vệt sơn dẹt.
       const s = horiz ? ctx.createLinearGradient(0, by, 0, by + h) : ctx.createLinearGradient(bx, 0, bx + w, 0);
       s.addColorStop(0, "rgba(0,0,0,0.28)");
       s.addColorStop(0.28, "rgba(255,255,255,0.34)");
       s.addColorStop(0.55, "rgba(255,255,255,0.06)");
       s.addColorStop(1, "rgba(0,0,0,0.30)");
       ctx.fillStyle = s; ctx.fillRect(bx, by, w, h);
+      // VIỀN SẪM hai mép quai (ảnh mẫu): thứ tách quai khỏi mặt hộp. Không có nó thì quai chỉ
+      // như một mảng màu loang trên nắp, nhất là khi nắp đã cùng tông màu với quai.
+      ctx.fillStyle = "rgba(0,0,0,0.42)";
+      const t = Math.max(1, h * 0.055);
+      if (horiz) { ctx.fillRect(bx, by, w, t); ctx.fillRect(bx, by + h - t, w, t); }
+      else { ctx.fillRect(bx, by, t, h); ctx.fillRect(bx + w - t, by, t, h); }
     };
     band(fx, b0, fw, bw, true);
     ctx.fillStyle = "rgba(0,0,0,0.20)"; // bóng dải dọc hắt xuống dải ngang chỗ giao nhau
     ctx.fillRect(b0 - bw * 0.08, b0, bw * 1.16, bw);
     band(b0, fx, bw, fw, false);
 
-    // ---- mặt đồng hồ kem. Con số KHÔNG nướng vào đây (nó đếm ngược) — buildChocoBox đặt Text
-    // lên đúng tâm này, dùng chung công thức bán kính CHOCO_DIAL.
-    const R = S * CHOCO_DIAL(n), mx = S / 2;
+    // ---- VIÊN ĐÁ ở giữa, thay cho mặt đồng hồ kem (user 2026-08-14 gửi ảnh mẫu).
+    // Mặt kem có vành vàng + 12 vạch giờ là quá nhiều chi tiết cho một thứ chỉ để đỡ con số, và
+    // nó kéo mắt khỏi chính con số. Viên đá tròn bóng thì gọn hơn, lại mang MÀU RUY BĂNG nên
+    // nhắc lại luật một lần nữa ngay giữa hộp.
+    // Đá nằm HƠI DƯỚI tâm, con số ngồi TRÊN nó — bố cục lấy từ ảnh mẫu.
+    const R = S * CHOCO_DIAL(n), mx = S / 2, gy = S * 0.5 + R * 0.55;
+    const gemCol = ribbon === RAINBOW ? 0xff4d6d : (COLORS[ribbon] ?? 0xff4d6d);
     const disc = (cx: number, cy: number, rad: number, fill: string) => {
       ctx.beginPath(); ctx.arc(cx, cy, rad, 0, Math.PI * 2); ctx.fillStyle = fill; ctx.fill();
     };
-    disc(mx, mx + R * 0.1, R * 1.03, "rgba(0,0,0,0.28)");
-    disc(mx, mx, R, hx(0xe0b055));
-    disc(mx, mx, R * 0.88, hx(0xf7ecd2));
-    const face = ctx.createLinearGradient(0, mx - R, 0, mx + R); // mặt kem hơi cong
-    face.addColorStop(0, "rgba(255,255,255,0.5)");
-    face.addColorStop(1, "rgba(0,0,0,0.10)");
-    ctx.save(); ctx.beginPath(); ctx.arc(mx, mx, R * 0.88, 0, Math.PI * 2); ctx.clip();
-    ctx.fillStyle = face; ctx.fillRect(0, 0, S, S); ctx.restore();
-    for (let i = 0; i < 12; i++) {
-      const a = (Math.PI * 2 * i) / 12;
-      disc(mx + Math.sin(a) * R * 0.72, mx - Math.cos(a) * R * 0.72, R * 0.045, "rgba(201,160,106,0.55)");
-    }
+    disc(mx, gy + R * 0.12, R * 1.12, "rgba(0,0,0,0.30)");   // hốc đá
+    disc(mx, gy, R * 1.02, hx(dk(gemCol, 0.45)));            // vành sẫm
+    // Thân đá: gradient từ sáng ở trên-trái xuống sẫm ở dưới-phải → ra khối cầu, không phải đĩa.
+    const gem = ctx.createRadialGradient(mx - R * 0.35, gy - R * 0.4, R * 0.05, mx, gy, R);
+    gem.addColorStop(0, hx(0xffffff));
+    gem.addColorStop(0.35, hx(gemCol));
+    gem.addColorStop(1, hx(dk(gemCol, 0.6)));
+    disc(mx, gy, R * 0.88, "#000"); ctx.fillStyle = gem;
+    ctx.beginPath(); ctx.arc(mx, gy, R * 0.88, 0, Math.PI * 2); ctx.fill();
+    // Chấm sáng nhỏ trên-trái = nguồn sáng, cùng hướng với cả hộp.
+    ctx.save();
+    ctx.beginPath(); ctx.ellipse(mx - R * 0.32, gy - R * 0.38, R * 0.30, R * 0.20, -0.6, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255,255,255,0.75)"; ctx.fill();
+    ctx.restore();
+
+    // Vát cạnh vẽ SAU CÙNG nên nằm trên cả quai — cùng hàm với ô bàn cờ.
+    this.blockBevel(ctx, 0, 0, S, S, rr);
     tex.refresh();
   }
 

@@ -28,9 +28,10 @@ for (const n of Object.keys(d).map(Number).sort((a, b) => a - b)) {
     const N = b.n;
     const r0 = Math.floor(b.at / W), c0 = b.at % W;
     const tag = `hop${bi} (${N}x${N} @r${r0}c${c0})`;
-    // N LẺ: hai dải ruy băng phải cắt nhau đúng Ô GIỮA, N chẵn thì không có ô giữa.
-    // 3-11 (user 2026-08-14 cho gấp đôi cỡ cũ 3/5 → làm tròn lên số lẻ thành 7/11).
-    if (N % 2 === 0 || N < 3 || N > 11) err.push(`${tag}: n=${N}, phai LE va trong 3-11`);
+    // 3-12, CHẴN CŨNG ĐƯỢC. Luật "N phải lẻ" đã bỏ 2026-08-14 khi user yêu cầu 8x8 và 4x4:
+    // với N chẵn thì hai dải ruy băng cắt nhau ở KHE giữa hai ô thay vì giữa một ô, và mặt đồng
+    // hồ vẫn ngồi đúng tâm hộp. Công thức vẽ vốn đã neo vào TÂM HÌNH HỌC nên không phải sửa gì.
+    if (N < 3 || N > 12) err.push(`${tag}: n=${N}, phai trong 3-12`);
     // Bàn phải RỘNG HƠN hộp ít nhất 2 ô mỗi chiều: bàn đúng bằng hộp là không còn slime nào
     // ngoài để mở nó → chết ngay từ lúc thiết kế.
     if (W < N + 2 || H < N + 2) err.push(`${tag}: ban ${W}x${H} qua nho, can it nhat ${N + 2}x${N + 2}`);
@@ -41,11 +42,22 @@ for (const n of Object.keys(d).map(Number).sort((a, b) => a - b)) {
     // 25 slime. Trần nới từ 1/3 lên 1/2 sau khi ĐO 2026-08-14: hộp 5×5 số 7-8 làm winrate tụt
     // 0-7 điểm, tức gần như miễn phí — con số phải nặng hơn nhiều thì hộp mới là chướng ngại
     // thật (user chốt khoảng 40-60).
-    const lo = Math.round((N * N) / 4), hi = Math.round((N * N) / 2);
-    if (b.count < lo || b.count > hi) wrn.push(`${tag}: count=${b.count} ngoai khoang de nghi ${lo}-${hi}`);
-    // Mở hộp không được TỐN HƠN phần thưởng: ăn 40 con để lộ ra 25 con là lỗ, người chơi dọn
-    // gần sạch bàn trước khi hộp kịp mở và cái hộp thành vô nghĩa.
-    if (b.count >= N * N) err.push(`${tag}: count=${b.count} >= ${N * N} o hop giau — mo hop lo hon phan thuong`);
+    // ⚠ HAI LUẬT KHÁC HẲN NHAU CHO HAI LOẠI RUY BĂNG.
+    //
+    // MỘT MÀU: count so với n² là hợp lý, vì người chơi phải săn đúng một màu hiếm — 1/4..1/2
+    // số ô hộp giấu. Và `count >= n²` là LỖI: ăn 70 con để lộ ra 64 con thì đã dọn gần sạch bàn
+    // trước khi hộp kịp mở, cái hộp thành vô nghĩa.
+    //
+    // CẦU VỒNG: so với n² là VÔ NGHĨA. Màu nào cũng trừ số nên nó rút cực nhanh — đo 2026-08-14:
+    // hộp 5×5 số 8 làm winrate tụt ĐÚNG 0 điểm, "1-2 xe chạy lên là hết luôn" (user). Nên nó
+    // phải tính theo CẢ BÀN, không theo cỡ hộp: user chốt 60-80 cho hộp cầu vồng.
+    if (b.ribbon === RAINBOW) {
+      if (b.count < 40) wrn.push(`${tag}: cau vong count=${b.count} qua thap — mau nao cung tru, mo gan nhu tuc thi`);
+    } else {
+      const lo = Math.round((N * N) / 4), hi = Math.round((N * N) / 2);
+      if (b.count < lo || b.count > hi) wrn.push(`${tag}: count=${b.count} ngoai khoang de nghi ${lo}-${hi}`);
+      if (b.count >= N * N) err.push(`${tag}: count=${b.count} >= ${N * N} o hop giau — mo hop lo hon phan thuong`);
+    }
 
     for (let r = r0; r < r0 + N; r++)
       for (let c = c0; c < c0 + N; c++) {
