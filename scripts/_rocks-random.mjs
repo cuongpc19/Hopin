@@ -28,13 +28,23 @@ const pool = Object.keys(d).map(Number)
     && !d[n].board.some((v) => v >= 90) && d[n].rows >= BAND + MARGIN * 2 + 4)
   .sort((a, b) => a - b);
 
-const want = Math.max(1, Math.round((pool.length * PCT) / 100));
-// SEED cố định → chạy lại ra ĐÚNG bộ level ấy. Không có seed thì mỗi lần chạy lại là một bộ
-// khác, mà đá đã rải rồi thì không gỡ được (xem cảnh báo phá huỷ ở trên).
-const rng = mkRng(Number(process.env.SEED || 20260814));
-const idx = pool.map((_, i) => i);
-for (let i = idx.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [idx[i], idx[j]] = [idx[j], idx[i]]; }
-const picked = idx.slice(0, want).map((i) => pool[i]).sort((a, b) => a - b);
+// ONLY=n,n,n — rải đúng bộ level được chỉ định, bỏ qua phần bốc ngẫu nhiên. Dùng khi bộ level
+// đã được chọn ở nơi khác (_pick-obst.mjs bốc đá và socola một lượt để hai bộ không trùng nhau).
+const ONLY = (process.env.ONLY || "").split(",").map(Number).filter(Boolean);
+let picked;
+if (ONLY.length) {
+  const bad = ONLY.filter((n) => !pool.includes(n));
+  if (bad.length) { console.log(`ONLY co level khong du dieu kien: ${bad.join(",")} — dung lai`); process.exit(1); }
+  picked = ONLY.slice().sort((a, b) => a - b);
+} else {
+  const want = Math.max(1, Math.round((pool.length * PCT) / 100));
+  // SEED cố định → chạy lại ra ĐÚNG bộ level ấy. Không có seed thì mỗi lần chạy lại là một bộ
+  // khác, mà đá đã rải rồi thì không gỡ được (xem cảnh báo phá huỷ ở trên).
+  const rng = mkRng(Number(process.env.SEED || 20260814));
+  const idx = pool.map((_, i) => i);
+  for (let i = idx.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [idx[i], idx[j]] = [idx[j], idx[i]]; }
+  picked = idx.slice(0, want).map((i) => pool[i]).sort((a, b) => a - b);
+}
 
 const out = [];
 for (let k = 0; k < picked.length; k++) {
@@ -67,7 +77,9 @@ for (let k = 0; k < picked.length; k++) {
   out.push({ n, size: `${W}x${H}`, where: top ? "TREN" : "DUOI", rows: `${r0}-${r0 + BAND - 1}`, laid, wiped });
 }
 
-console.log(`pool: ${pool.length} level thuong trong L${R0}-${R1} chua co da | ${PCT}% -> ${want} level`);
+console.log(ONLY.length
+  ? `ONLY: rai da vao ${picked.length} level da chi dinh (pool du dieu kien: ${pool.length})`
+  : `pool: ${pool.length} level thuong trong L${R0}-${R1} chua co da | ${PCT}% -> ${picked.length} level`);
 console.log("lv   | co ban | vi tri | hang  | o da | canh bao");
 for (const o of out)
   console.log(`L${String(o.n).padEnd(4)}| ${o.size.padEnd(7)}| ${o.where.padEnd(7)}| ${o.rows.padEnd(6)}| ${String(o.laid).padStart(4)} | `

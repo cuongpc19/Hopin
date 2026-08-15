@@ -60,12 +60,21 @@ const RAIN_COUNTS = [60, 65, 70, 75, 80];
 // Cứ 7 level một cái → 5 level trong dải 30: hộp thứ hai đặt ở góc ĐỐI DIỆN cho cân bàn.
 const TWO_BOX = (i) => i % 7 === 0;
 
+// ONLY=n,n,n — đặt hộp vào đúng bộ level chỉ định thay vì cả dải liên tục. Cần khi bộ level là
+// một nhúm rải rác (5% của L200-400 chẳng hạn) chứ không phải một đoạn liền.
+const ONLY = (process.env.ONLY || "").split(",").map(Number).filter(Boolean);
+const TARGETS = ONLY.length ? ONLY.slice().sort((a, b) => a - b) : Array.from({ length: R1 - R0 + 1 }, (_, i) => R0 + i);
+
 const rows = [];
-for (let n = R0; n <= R1; n++) {
+for (let ti = 0; ti < TARGETS.length; ti++) {
+  const n = TARGETS[ti];
   const L = d[n];
   if (!L?.board) continue;
   const N = sizeFor(L.cols);
-  const idx = n - R0;
+  // Thứ tự TRONG BỘ, không phải khoảng cách tới R0: nó điều khiển xoay góc, nhịp cầu vồng và
+  // level hai hộp. Lấy theo số level thì một bộ rải rác sẽ nhảy cóc — góc dồn cụm và nhịp
+  // "cứ 4 level một cầu vồng" thành ngẫu nhiên.
+  const idx = ti;
   const total = {};
   L.board.forEach((v) => { if (isC(v)) total[v] = (total[v] || 0) + 1; });
   const allCells = Object.values(total).reduce((a, b) => a + b, 0);

@@ -23,6 +23,18 @@ const N_B = Number(process.env.N_B || 60);
 const d = readD();
 const [R0, R1] = (process.env.RANGE || "36-286").split("-").map(Number);
 const ONLY = process.env.ONLY ? new Set(process.env.ONLY.split(",").map(Number)) : null;
+// ⚠ ONLY BỊ RANGE CẮT. Mặc định RANGE là 36-286 (từ thời game chỉ dài đến đó), nên ONLY= một
+// danh sách có số lớn hơn 286 mà QUÊN đặt RANGE thì phần đuôi biến mất KHÔNG MỘT LỜI BÁO — lượt
+// quét vẫn chạy, vẫn "thành công", chỉ là thiếu level. Đã dính 2026-08-15: ONLY 20 level, 9 cái
+// từ L287 trở lên rơi hết, mất 20 phút máy mới phát hiện. Nên hỏng TO TIẾNG ngay tại đây.
+if (ONLY) {
+  const cut = [...ONLY].filter((n) => n < R0 || n > R1).sort((a, b) => a - b);
+  if (cut.length) {
+    console.error(`ONLY co ${cut.length} level NGOAI RANGE ${R0}-${R1}: ${cut.join(",")}`);
+    console.error(`  -> dat RANGE cho phu, vd RANGE=${Math.min(R0, cut[0])}-${Math.max(R1, cut[cut.length - 1])}`);
+    process.exit(1);
+  }
+}
 // FIVESONLY=1 — chỉ những level ÷5. Dùng khi CHỈ dải ÷5 đổi target: dựng lại level thường
 // với đúng dải cũ chỉ tốn giờ mà ra lại gần như cùng một nấc.
 const FIVESONLY = process.env.FIVESONLY === "1";
@@ -77,11 +89,42 @@ const FORCE = new Map((process.env.FORCE || "").split(",").filter(Boolean).map((
 // dừng sớm ở nấc ít xe nhất.
 const ROCKS = new Set((process.env.ROCK_LEVELS || "68,73,117,174").split(",").map(Number).filter(Boolean));
 
+// CHƯỚNG NGẠI RẢI TRONG L200-400 (user 2026-08-15: "từ level 200-400 lấy 5% level trong nhóm này
+// rồi thêm slime đá... 5% thêm socola", cả hai "target winrate 30-60%"). Hai bộ 10 level rời nhau
+// do _pick-obst.mjs bốc; ghi thẳng vào đây để lượt tune sau còn tìm lại được chúng.
+//   đá   : 227 231 236 251 276 287 298 307 358 374
+//   socola: 203 229 234 237 266 286 321 339 347 371
+//
+// KHÁC bộ ROCKS ở trên: bộ kia user chỉ yêu cầu ">40%" nên trần thả, bộ này là một DẢI hai đầu.
+// lays = [0, 40] chứ không phải [0] — lý do y hệt dải 470-500 (xem chú thích ở inSmall): 5 trong
+// 20 bàn là 25×25, mà bàn nhỏ gần như luôn đọc quá dễ, không có nấc lớp-2 thì hết núm để ép
+// xuống 60. Đó cũng là lý do không dùng FORCE= cho bộ này — FORCE chỉ cho lays:[0].
+const OBST = new Set((process.env.OBST_LEVELS
+  || "203,227,229,231,234,236,237,251,266,276,286,287,298,307,321,339,347,358,371,374")
+  .split(",").map(Number).filter(Boolean));
+const OBST_BAND = (process.env.OBST_BAND || "30-60").split("-").map(Number);
+
+// THỬ THÁCH HẰNG NGÀY, dải riêng 9001-9010 ngoài tiến trình chính (src/game/daily.ts).
+// User 2026-08-15: "build lại mấy level daily challenge, tăng độ khó lên, winrate target 10-20%"
+// — siết lại từ mốc "<30%" nói lúc đầu.
+//
+// ⚠ KHÔNG CÓ DÒNG NÀY thì chúng rơi vào luật ÷5 của game chính: 9005/9010 được dải 26-43 còn
+// tám bàn kia được 60-100, tức tune xong sẽ DỄ ĐI chứ không khó thêm. Số level nằm ngoài mọi
+// dải cứng nên không có gì tự nhận ra chúng là bàn thử thách.
+//
+// lays = [0, 40]: 10-20% là dải rất thấp, thấp hơn mọi dải khác trong file này. Nấc ít xe nhất
+// mà không có lớp-2 có thể vẫn chưa đủ khó — cho thang thử cả hai chiều rồi chọn.
+const DAILY = new Set((process.env.DAILY_LEVELS
+  || "9001,9002,9003,9004,9005,9006,9007,9008,9009,9010").split(",").map(Number).filter(Boolean));
+const DAILY_BAND = (process.env.DAILY_BAND || "10-20").split("-").map(Number);
+
 export function cfg(n) {
   const five = n % 5 === 0;
   const f = FORCE.get(n);
   if (f) return { lo: f.lo, hi: f.hi, lays: [0], hid: 0 };
   const harder = five && n >= FIVE_FROM;
+  if (DAILY.has(n)) return { lo: DAILY_BAND[0], hi: DAILY_BAND[1], lays: [0, 40], hid: 0 };
+  if (OBST.has(n)) return { lo: OBST_BAND[0], hi: OBST_BAND[1], lays: [0, 40], hid: 0 };
   if (ROCKS.has(n)) return { lo: 40, hi: 100, lays: [0], hid: 0 };
   if (inSmall(n)) {
     // lays = [0, 40]: thang phải có CẢ HAI CHIỀU. Bàn 25×25 chỉ còn ~480 ô (so với ~890 của
