@@ -62,6 +62,16 @@ const SMALL = (process.env.SMALL_RANGE || "470-500").split("-").map(Number);
 const SMALL_BAND = (process.env.SMALL_BAND || "40-50").split("-").map(Number);
 const inSmall = (n) => n >= SMALL[0] && n <= SMALL[1];
 
+// Ép dải cho TỪNG level, dạng "26:90-100,31:60-90". Dùng khi một ô cần mốc riêng mà không đáng
+// đẻ thêm một dải cứng trong file — vd user 2026-08-14 muốn L26 "winrate rất dễ 90-100%" sau khi
+// tráo tranh cá chép vào đó. Ưu tiên CAO NHẤT, đè mọi luật bên dưới.
+const FORCE = new Map((process.env.FORCE || "").split(",").filter(Boolean).map((s) => {
+  const [lv, band] = s.split(":");
+  const [lo, hi] = band.split("-").map(Number);
+  return [Number(lv), { lo, hi }];
+}));
+
+
 // Level vừa được RẢI ĐÁ (user 2026-08-14). Sàn 40, trần thả — user: "để winrate >40%", không
 // phải một dải. Đá chỉ làm khó thêm, nên chỉ cần chặn đáy là đủ; trần rộng còn giúp bộ tune
 // dừng sớm ở nấc ít xe nhất.
@@ -69,6 +79,8 @@ const ROCKS = new Set((process.env.ROCK_LEVELS || "68,73,117,174").split(",").ma
 
 export function cfg(n) {
   const five = n % 5 === 0;
+  const f = FORCE.get(n);
+  if (f) return { lo: f.lo, hi: f.hi, lays: [0], hid: 0 };
   const harder = five && n >= FIVE_FROM;
   if (ROCKS.has(n)) return { lo: 40, hi: 100, lays: [0], hid: 0 };
   if (inSmall(n)) {

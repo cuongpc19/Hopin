@@ -19,8 +19,12 @@ import os from "node:os";
 
 const NSHARD = Number(process.env.NSHARD || Math.max(1, Math.min(12, os.cpus().length - 4)));
 const OUT = process.env.OUT || "scripts/_scan";
+// Chỉ để IN RA cho biết lượt này chạy với mốc gì — mọi biến môi trường đều được truyền xuống
+// tiến trình con dù có nằm trong danh sách này hay không. Thiếu tên ở đây thì lệnh vẫn đúng,
+// chỉ là dòng log không nhắc tới nó và dễ tưởng bị bỏ qua.
 const PASS = ["RANGE", "ONLY", "FIVESONLY", "N_B", "HITS", "CAPS", "WAVES", "MINCAR_LADDER",
-  "FIVE_FROM", "FIVE_BAND", "CHOCO_RANGE", "CHOCO_BAND"];
+  "FIVE_FROM", "FIVE_BAND", "CHOCO_RANGE", "CHOCO_BAND", "SMALL_RANGE", "SMALL_BAND",
+  "ROCK_LEVELS", "FORCE"];
 
 for (const f of fs.readdirSync("scripts"))
   if (f.startsWith(OUT.split("/").pop()) && (f.endsWith(".json") || f.endsWith(".err")))

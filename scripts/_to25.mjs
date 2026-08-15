@@ -16,20 +16,23 @@ import fs from "node:fs";
 import { readD, writeD, isC } from "./genlib.mjs";
 
 const D = "public/art/level art/emoji";
+// SIZE=25|31|35 — cỡ bàn đích. Mặc định 25 vì đó là lần chạy đầu; user 2026-08-14 xem xong bảo
+// "mấy level 25x25 này xấu quá, có level 31x31 k" nên dải L470-500 chuyển tiếp sang 31.
+const SIZE = Number(process.env.SIZE || 25);
 const map = JSON.parse(fs.readFileSync(process.env.MAP || "scripts/_l470map.json", "utf8"));
 const d = readD();
 
-const at25 = {};
+const at25 = {}; // chủ thể → board ở cỡ SIZE
 for (const f of fs.readdirSync(D)) {
   if (!f.startsWith("pool") || !f.endsWith(".json") || f.includes("-pick")) continue;
   for (const v of Object.values(JSON.parse(fs.readFileSync(`${D}/${f}`, "utf8"))))
-    if (v.size === 25 && !at25[v.name]) at25[v.name] = v.level;
+    if (v.size === SIZE && !at25[v.name]) at25[v.name] = v.level;
 }
 
 const rows = [], skip = [];
 for (const [lv, name] of Object.entries(map)) {
   const L = d[lv], src = at25[name];
-  if (!src) { skip.push(`L${lv}:${name} (chua co ban 25)`); continue; }
+  if (!src) { skip.push(`L${lv}:${name} (chua co ban ${SIZE})`); continue; }
   if (L.boxes?.length) { skip.push(`L${lv}: co hop socola — doi co ban se lam hop lech, bo qua`); continue; }
   const cells = (b) => b.filter(isC).length;
   rows.push({ lv: Number(lv), name, from: `${L.cols}x${L.rows}`, oldCells: cells(L.board), newCells: cells(src.board),

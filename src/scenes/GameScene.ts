@@ -194,6 +194,9 @@ const TILE_CAP_FIT = 1.3;
 const VOXEL_TILES = true;
 // Ô bàn cờ dùng khối của HỘP SOCOLA thay cho drawVoxelCube. Tắt = về bản voxel cũ.
 const CHOCO_STYLE_TILES = true;
+// Kiểu ô bàn cờ: "bead" = hạt nhựa bóng (ảnh mẫu user 2026-08-14) · "block" = khối 2.5D của
+// hộp socola · "" = voxel cũ. Đổi một chữ là đổi cả bàn.
+const TILE_STYLE: "bead" | "block" | "" = "bead";
 // Do day THAN o (mat truoc). 0.2 = look "puffy" goc cua playbook, cao hon = khoi day hon.
 const VOXEL_BODY = 0.34;
 // Fixed car size — the SAME on every level (independent of the grid's cell size,
@@ -624,7 +627,8 @@ export class GameScene extends Phaser.Scene {
       // Không cần file PNG, và ô luôn khớp palette.ts — đổi màu trong palette là ô đổi theo.
       // CHOCO_STYLE_TILES: ô bàn cờ vẽ bằng ĐÚNG khối của hộp socola (user 2026-08-14 chốt
       // "lấy cách vẽ khối socola làm chuẩn"). Tắt cờ này là quay lại drawVoxelCube như cũ.
-      if (CHOCO_STYLE_TILES) { this.makeChocoStyleTile(`tile-${i}`, COLORS[i]); continue; }
+      if (TILE_STYLE === "bead") { this.makeBeadTile(`tile-${i}`, COLORS[i]); continue; }
+      if (TILE_STYLE === "block" && CHOCO_STYLE_TILES) { this.makeChocoStyleTile(`tile-${i}`, COLORS[i]); continue; }
       if (VOXEL_TILES) { this.makeVoxelTileTexture(`tile-${i}`, COLORS[i]); continue; }
       const t = this.textures.exists(`tile-${i}`) ? this.textures.get(`tile-${i}`) : null;
       const ok = t && t.getSourceImage() && (t.getSourceImage() as HTMLImageElement).width >= 8;
@@ -2075,6 +2079,67 @@ export class GameScene extends Phaser.Scene {
     // Khe sẫm giữa nắp và mặt trước — chính nó làm mắt đọc ra "nắp cao hơn", không phải bóng đổ.
     ctx.fillStyle = "rgba(0,0,0,0.34)";
     ctx.fillRect(x + rr * 0.4, y + lidH - lidH * 0.018, w - rr * 0.8, lidH * 0.018);
+  }
+
+  /**
+   * Ô BÀN CỜ kiểu HẠT NHỰA BÓNG (user 2026-08-14 gửi ảnh game mẫu: "trông nét như kiểu này").
+   *
+   * ⚠ ĐÃ THỬ VÀ ĐÃ BỊ BỎ MỘT LẦN. CLAUDE.md ghi: 2026-08-01 thử 3 bản tile "3D jelly/bead" theo
+   * game mẫu, cả ba đều NHIỄU Ở CỠ Ô NHỎ, user quyết quay về bản phẳng. Lần này user tự yêu cầu
+   * lại nên làm tiếp, nhưng nguyên nhân cũ chưa mất:
+   *
+   *   game mẫu   bàn ~15 ô ngang trên màn 590px  →  ô ~39px
+   *   bàn ở đây  25-39 ô ngang trên khung 480px  →  ô 11-17px
+   *
+   * Viền đậm + chấm sáng ở 17px thì đọc được; ở 11px (bàn 39×39) thì viền nuốt mất ruột ô.
+   * Nên mọi số đo dưới đây là TỈ LỆ của cạnh ô, và viền có TRẦN THEO PIXEL để bàn to không bị
+   * viền ăn hết. Phải nhìn ở CẢ bàn 25×25 lẫn 39×39 trước khi chốt.
+   */
+  private makeBeadTile(key: string, col: number, size = 128) {
+    if (this.textures.exists(key)) this.textures.remove(key);
+    const tex = this.textures.createCanvas(key, size, size);
+    const ctx = tex?.getContext();
+    if (!tex || !ctx) { this.makeChocoStyleTile(key, col, size); return; }
+    const R = GameScene.roundPath;
+    const hx = (c: number) => `#${c.toString(16).padStart(6, "0")}`;
+    const m = size * 0.04;                       // khe giữa hai ô
+    const w = size - m * 2;
+    // THÂN 2.5D: nắp cao lidH, mặt trước chiếm phần còn lại — cùng tỉ lệ 1/(1+VOXEL_BODY) mà ô
+    // voxel vẫn dùng, nên cỡ ô không đổi một pixel. Bản bead đầu tiên bỏ mất phần này và ra ô
+    // dẹt (user 2026-08-14: "bỏ phần thân kiểu 2D à").
+    const lidH = w / (1 + VOXEL_BODY);
+    const rr = w * 0.24;                         // bo góc mạnh → ra dáng hạt
+    // Viền sẫm dày theo tỉ lệ, có SÀN 1px: bàn 39×39 chỉ có ô ~11px, viền mảnh hơn 1px thì mất
+    // hẳn nét, mà dày quá thì nuốt ruột ô.
+    const bw = Math.max(size * 0.03, 1);
+
+    // 1) cả khối (nắp + mặt trước) tô bằng tông SẪM NHẤT — chỗ còn lộ ra chính là viền
+    R(ctx, m, m, w, w, rr); ctx.fillStyle = hx(shade(col, 0.26)); ctx.fill();
+    // 2) mặt trước: sẫm hơn nắp, sáng dần lên phía nắp
+    const fg = ctx.createLinearGradient(0, m + lidH, 0, m + w);
+    fg.addColorStop(0, hx(shade(col, 0.62)));
+    fg.addColorStop(1, hx(shade(col, 0.42)));
+    R(ctx, m + bw, m + lidH - rr, w - bw * 2, w - lidH - bw + rr, rr * 0.9);
+    ctx.fillStyle = fg; ctx.fill();
+    // 3) nắp = mặt hạt, màu thật
+    R(ctx, m + bw, m + bw, w - bw * 2, lidH - bw, rr * 0.9);
+    ctx.fillStyle = hx(col); ctx.fill();
+
+    // 4) khối cầu trên mặt nắp + chấm sáng — thứ làm mắt đọc ra "hạt nhựa bóng"
+    ctx.save(); R(ctx, m + bw, m + bw, w - bw * 2, lidH - bw, rr * 0.9); ctx.clip();
+    const g = ctx.createLinearGradient(m, m, m + w, m + lidH);
+    g.addColorStop(0, "rgba(255,255,255,0.36)");
+    g.addColorStop(0.55, "rgba(255,255,255,0.02)");
+    g.addColorStop(1, "rgba(0,0,0,0.22)");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, size, size);
+    ctx.beginPath();
+    ctx.ellipse(m + w * 0.33, m + lidH * 0.32, w * 0.18, lidH * 0.16, -0.7, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255,255,255,0.72)"; ctx.fill();
+    ctx.restore();
+    // 5) khe sẫm giữa nắp và mặt trước — chính nó làm nắp đọc ra là cao hơn
+    ctx.fillStyle = "rgba(0,0,0,0.30)";
+    ctx.fillRect(m + rr * 0.5, m + lidH - Math.max(size * 0.012, 0.6), w - rr, Math.max(size * 0.012, 0.6));
+    tex.refresh();
   }
 
   /**

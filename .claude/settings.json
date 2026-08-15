@@ -6,6 +6,7 @@
       "Bash(npx --yes firebase-tools@13 database:get *)",
 
       "Bash(node scripts/check-seats.mjs)",
+      "Bash(node scripts/level-report.mjs)",
       "Bash(node scripts/check-choco.mjs)",
       "Bash(node scripts/scan-shards.mjs)",
 
