@@ -261,10 +261,17 @@ const cls = (v, lo, hi) => (v < lo ? "bad" : v < hi ? "warn" : "good");
 // ⚠ ĐÁNH ĐỔI: màu ở đây là TƯƠNG ĐỐI, không phải phán xét. Kể cả khi mọi level đều đúng dải,
 // một phần tư vẫn hiện đỏ — đỏ nghĩa là "thấp nhất trong bảng này", không phải "hỏng". Tooltip
 // ghi rõ percentile để đọc đúng nghĩa.
+// ⚠ PHẢI XỬ LÝ GIÁ TRỊ BẰNG NHAU. Bản đầu tính percentile = "bao nhiêu hàng NHỎ HƠN ô này", và
+// nó sai ngay ở ca thường gặp nhất: rất nhiều level cùng winrate 100%, nên với ô 100% thì số
+// hàng nhỏ hơn chỉ khoảng 60% → ô cao nhất bảng lại hiện VÀNG (user 2026-08-16). Dùng thứ hạng
+// TRUNG BÌNH của cụm bằng nhau: trung điểm giữa "nhỏ hơn" và "nhỏ hơn hoặc bằng". Nhờ vậy cụm
+// 100% nằm giữa 60% và 100% → 80 → xanh, còn khi CẢ BẢNG bằng nhau thì mọi ô ra 50 → vàng hết,
+// đúng nghĩa "không ô nào nổi bật".
 const pctl = (v, all) => {
   if (all.length < 4) return { c: "", t: "" };            // quá ít hàng thì percentile vô nghĩa
   const s = [...all].sort((a, b) => a - b);
-  const r = s.filter((x) => x < v).length / s.length;
+  const lo = s.filter((x) => x < v).length, hi = s.filter((x) => x <= v).length;
+  const r = (lo + hi) / 2 / s.length;
   return { c: r < 0.25 ? "bad" : r < 0.75 ? "warn" : "good", t: `percentile ${Math.round(r * 100)} trong ${s.length} hàng` };
 };
 const median = (a) => {
