@@ -136,6 +136,10 @@
   <p class="sub" style="margin:0 0 8px">
     Winrate/ván = số ván thắng ÷ tổng số ván. Winrate/người = số người cuối cùng qua được ÷ số người đã thử.
     Bỏ đi = số người bắt đầu level này nhưng không bao giờ bắt đầu level sau.
+    <b>Ván sạch</b> = ván không dùng booster và không hồi sinh lần nào; <b>Winrate sạch</b> là winrate
+    của riêng những ván ấy — đây mới là thước đo độ khó thật của level, vì winrate thường đã có
+    trợ giúp trộn vào. <b>Nhờ trợ giúp</b> = winrate thường trừ winrate sạch, tức level đang được
+    booster và hồi sinh đỡ bao nhiêu điểm.
     <b>Hồi sinh/người</b> và <b>Booster/người</b> chia cho số người BẮT ĐẦU level, không phải số ván —
     một người thua đi thua lại rồi hồi sinh năm lần vẫn là một người gặp khó ở đây.
     <br>⚠ Màu của hai cột winrate là <b>percentile trong chính bảng này</b>, không phải mốc cố định:
@@ -274,6 +278,11 @@ const pctl = (v, all) => {
   const r = (lo + hi) / 2 / s.length;
   return { c: r < 0.25 ? "bad" : r < 0.75 ? "warn" : "good", t: `percentile ${Math.round(r * 100)} trong ${s.length} hàng` };
 };
+// VÁN SẠCH = tự chơi tự thắng: không hồi sinh lần nào, không dùng booster nào.
+// Winrate chung trộn lẫn ván có trợ giúp vào, nên nó đo "người chơi qua được không" chứ không đo
+// "level khó tới đâu". Hai con số tách ra mới đọc được: chênh lệch giữa chúng chính là phần
+// level đang phải dựa vào booster và hồi sinh để cho qua.
+const clean = (r) => !(r.revives > 0) && !(r.boost && Object.keys(r.boost).length);
 const median = (a) => {
   if (!a.length) return 0;
   const s = [...a].sort((x, y) => x - y), m = s.length >> 1;
@@ -393,10 +402,13 @@ function render() {
   const rev = g.reduce((s, r) => s + (r.revives || 0), 0);
   const boosts = g.reduce((s, r) => s + Object.values(r.boost || {}).reduce((a, b) => a + b, 0), 0);
   const ret = [...devAll].filter((x) => new Set(g.filter((r) => r.dev === x).map((r) => day(r.at))).size > 1).length;
+  const cleanG = g.filter(clean);
+  const cleanW = cleanG.filter((r) => r.result === "win").length;
   $("cards").innerHTML = [
     [devAll.size, "người chơi", hourly ? `${t.devs.size} lúc ${today}` : `${t.devs.size} trong ngày ${today}`],
     [g.length, "ván", `${(g.length / devAll.size).toFixed(1)} ván/người`],
     [pct(wins, g.length) + "%", "winrate/ván", `${wins} ván thắng`],
+    [pct(cleanW, cleanG.length) + "%", "winrate ván sạch", `${cleanG.length} ván không booster, không hồi sinh`],
     [pct(ret, devAll.size) + "%", "quay lại", `${ret} người chơi từ 2 ngày trở lên`],
     [rev, "lượt hồi sinh", `${pct(g.filter((r) => r.revives).length, g.length)}% số ván`],
     [boosts, "lượt dùng booster", `${pct(g.filter((r) => r.boost).length, g.length)}% số ván`],
@@ -405,9 +417,10 @@ function render() {
   // ---- theo level
   const lv = new Map();
   for (const r of g) {
-    if (!lv.has(r.lvl)) lv.set(r.lvl, { devs: new Set(), pass: new Set(), n: 0, w: 0, rev: 0, boost: {}, ms: 0, sigs: new Set() });
+    if (!lv.has(r.lvl)) lv.set(r.lvl, { devs: new Set(), pass: new Set(), n: 0, w: 0, rev: 0, boost: {}, ms: 0, sigs: new Set(), cn: 0, cw: 0 });
     const o = lv.get(r.lvl);
     o.devs.add(r.dev); o.n++; o.ms += r.ms || 0; o.rev += r.revives || 0;
+    if (clean(r)) { o.cn++; if (r.result === "win") o.cw++; }
     if (r.sig) o.sigs.add(r.sig);
     if (r.result === "win") { o.w++; o.pass.add(r.dev); }
     for (const [k, v] of Object.entries(r.boost || {})) o.boost[k] = (o.boost[k] || 0) + v;
@@ -417,17 +430,25 @@ function render() {
   // Dãy để chấm percentile — phải gom TRƯỚC khi dựng hàng, vì mỗi ô cần biết cả cột.
   const wrAll = nums.map((n) => pct(lv.get(n).w, lv.get(n).n));
   const wrDevAll = nums.map((n) => pct(lv.get(n).pass.size, lv.get(n).devs.size));
+  const wrCleanAll = nums.filter((n) => lv.get(n).cn).map((n) => pct(lv.get(n).cw, lv.get(n).cn));
   const lvRows = nums.map((n) => {
     const o = lv.get(n), nx = lv.get(n + 1);
     const drop = nx ? 100 - pct(nx.devs.size, o.devs.size) : null;
     const bs = Object.entries(o.boost).map(([k, v]) => `${k}×${v}`).join(" ") || "";
     const wr = pct(o.w, o.n), wrDev = pct(o.pass.size, o.devs.size);
     const p1 = pctl(wr, wrAll), p2 = pctl(wrDev, wrDevAll);
+    const cwr = o.cn ? pct(o.cw, o.cn) : null;
+    const p3 = cwr == null ? { c: "", t: "" } : pctl(cwr, wrCleanAll);
+    // Chênh lệch winrate chung − winrate sạch = phần level đang được booster/hồi sinh đỡ.
+    const lift = cwr == null ? null : wr - cwr;
     // Chia cho SỐ NGƯỜI BẮT ĐẦU level, không phải số ván: một người thua đi thua lại rồi hồi
     // sinh năm lần vẫn là MỘT người gặp khó ở đây. Chia theo ván sẽ pha loãng đúng cái đó.
     return `<tr><td>L${n}</td><td>${o.devs.size}</td><td>${o.n}</td>
       <td class="${p1.c}" title="${p1.t}">${wr}%</td>
       <td class="${p2.c}" title="${p2.t}">${wrDev}%</td>
+      <td>${o.cn}</td>
+      <td class="${p3.c}" title="${p3.t}">${cwr == null ? "—" : cwr + "%"}</td>
+      <td class="${lift == null ? "" : lift >= 10 ? "bad" : lift >= 4 ? "warn" : ""}">${lift == null ? "—" : (lift > 0 ? "+" : "") + lift}</td>
       <td>${(o.n / o.devs.size).toFixed(1)}</td>
       <td class="${drop == null ? "" : drop > 40 ? "bad" : drop > 20 ? "warn" : ""}">${drop == null ? "—" : drop + "%"}</td>
       <td>${Math.round(o.ms / o.n / 1000)}s</td>
@@ -437,7 +458,8 @@ function render() {
       <td class="${o.sigs.size > 1 ? "warn" : ""}" style="text-align:left">${[...o.sigs].join(" ")}</td></tr>`;
   }).join("");
   $("tLv").innerHTML = `<thead><tr><th>Level</th><th>Người</th><th>Ván</th><th>Winrate/ván</th>
-    <th>Winrate/người</th><th>Ván/người</th><th>Bỏ đi</th><th>Thời gian</th>
+    <th>Winrate/người</th><th>Ván sạch</th><th>Winrate sạch</th><th>Nhờ trợ giúp</th>
+    <th>Ván/người</th><th>Bỏ đi</th><th>Thời gian</th>
     <th>Hồi sinh</th><th>Hồi sinh/người</th><th>Booster</th><th>Booster/người</th>
     <th style="text-align:left">Loại booster</th><th style="text-align:left">Vân tay bản</th></tr></thead><tbody>${lvRows}</tbody>`;
 
