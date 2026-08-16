@@ -136,6 +136,11 @@
   <p class="sub" style="margin:0 0 8px">
     Winrate/ván = số ván thắng ÷ tổng số ván. Winrate/người = số người cuối cùng qua được ÷ số người đã thử.
     Bỏ đi = số người bắt đầu level này nhưng không bao giờ bắt đầu level sau.
+    <b>Hồi sinh/người</b> và <b>Booster/người</b> chia cho số người BẮT ĐẦU level, không phải số ván —
+    một người thua đi thua lại rồi hồi sinh năm lần vẫn là một người gặp khó ở đây.
+    <br>⚠ Màu của hai cột winrate là <b>percentile trong chính bảng này</b>, không phải mốc cố định:
+    đỏ nghĩa là “thấp nhất một phần tư bảng”, không phải “hỏng”. Kể cả khi mọi level đều đúng thiết kế
+    thì vẫn có một phần tư hiện đỏ. Rê chuột vào ô để xem percentile.
   </p>
   <div class="scroll" style="max-height:70vh"><table id="tLv"></table></div>
 
@@ -248,6 +253,20 @@ const VN = 7 * 3600e3; // giữ tên cũ cho chỗ chia theo GIỜ bên dưới
 const day = (ms) => new Date(ms + tzNow()).toISOString().slice(0, 10);
 const pct = (a, b) => (b ? Math.round((100 * a) / b) : 0);
 const cls = (v, lo, hi) => (v < lo ? "bad" : v < hi ? "warn" : "good");
+// Tô màu winrate theo PERCENTILE trong chính bảng đang xem, thay cho mốc cứng.
+// Vì sao đổi: mốc cứng phải đoán trước "bao nhiêu là thấp", mà con số ấy trôi theo từng đợt
+// tune và theo từng dải level — mốc 25/50 của bảng level từng làm cả một dải mới hiện đỏ rực
+// dù chúng đúng thiết kế. Percentile thì tự so với phần còn lại của bảng.
+//
+// ⚠ ĐÁNH ĐỔI: màu ở đây là TƯƠNG ĐỐI, không phải phán xét. Kể cả khi mọi level đều đúng dải,
+// một phần tư vẫn hiện đỏ — đỏ nghĩa là "thấp nhất trong bảng này", không phải "hỏng". Tooltip
+// ghi rõ percentile để đọc đúng nghĩa.
+const pctl = (v, all) => {
+  if (all.length < 4) return { c: "", t: "" };            // quá ít hàng thì percentile vô nghĩa
+  const s = [...all].sort((a, b) => a - b);
+  const r = s.filter((x) => x < v).length / s.length;
+  return { c: r < 0.25 ? "bad" : r < 0.75 ? "warn" : "good", t: `percentile ${Math.round(r * 100)} trong ${s.length} hàng` };
+};
 const median = (a) => {
   if (!a.length) return 0;
   const s = [...a].sort((x, y) => x - y), m = s.length >> 1;
@@ -331,6 +350,7 @@ function render() {
     // đều hiện "2%", tức hai ngày khác nhau đọc ra giống hệt nhau. Hai chữ số tách được chúng.
     return { n: cohort.length, back, p: pct(back, cohort.length), p2: ((100 * back) / cohort.length).toFixed(2) };
   };
+  const wrDays = days.map((d) => pct(byDay.get(d).w, byDay.get(d).n));
   const dayRows = days.map((d) => {
     const o = byDay.get(d);
     const nw = [...o.devs].filter((x) => bucket(first.get(x)) === d).length;
@@ -341,7 +361,7 @@ function render() {
       <td title="${r1 ? `${r1.back}/${r1.n} người mới của ngày này quay lại hôm sau` : ""}">${r1 ? `${r1.back}/${r1.n}` : "—"}</td>
       <td class="${r1 ? cls(r1.p, 3, 8) : ""}">${r1 ? r1.p2 + "%" : "—"}</td>
       <td>${o.n}</td><td>${(o.n / o.devs.size).toFixed(1)}</td>
-      <td class="${cls(pct(o.w, o.n), 55, 70)}">${pct(o.w, o.n)}%</td>
+      <td class="${pctl(pct(o.w, o.n), wrDays).c}" title="${pctl(pct(o.w, o.n), wrDays).t}">${pct(o.w, o.n)}%</td>
       <td>${Math.round(o.ms / o.n / 1000)}s</td>
       <td>${mmss(median([...o.perDev.values()]))}</td>
       <td>${mmss(o.ms / o.devs.size)}</td>
@@ -386,21 +406,33 @@ function render() {
     for (const [k, v] of Object.entries(r.boost || {})) o.boost[k] = (o.boost[k] || 0) + v;
   }
   const nums = [...lv.keys()].sort((a, b) => a - b);
+  const bTot = (o) => Object.values(o.boost).reduce((a, b) => a + b, 0);
+  // Dãy để chấm percentile — phải gom TRƯỚC khi dựng hàng, vì mỗi ô cần biết cả cột.
+  const wrAll = nums.map((n) => pct(lv.get(n).w, lv.get(n).n));
+  const wrDevAll = nums.map((n) => pct(lv.get(n).pass.size, lv.get(n).devs.size));
   const lvRows = nums.map((n) => {
     const o = lv.get(n), nx = lv.get(n + 1);
     const drop = nx ? 100 - pct(nx.devs.size, o.devs.size) : null;
     const bs = Object.entries(o.boost).map(([k, v]) => `${k}×${v}`).join(" ") || "";
+    const wr = pct(o.w, o.n), wrDev = pct(o.pass.size, o.devs.size);
+    const p1 = pctl(wr, wrAll), p2 = pctl(wrDev, wrDevAll);
+    // Chia cho SỐ NGƯỜI BẮT ĐẦU level, không phải số ván: một người thua đi thua lại rồi hồi
+    // sinh năm lần vẫn là MỘT người gặp khó ở đây. Chia theo ván sẽ pha loãng đúng cái đó.
     return `<tr><td>L${n}</td><td>${o.devs.size}</td><td>${o.n}</td>
-      <td class="${cls(pct(o.w, o.n), 25, 50)}">${pct(o.w, o.n)}%</td>
-      <td class="${cls(pct(o.pass.size, o.devs.size), 50, 80)}">${pct(o.pass.size, o.devs.size)}%</td>
+      <td class="${p1.c}" title="${p1.t}">${wr}%</td>
+      <td class="${p2.c}" title="${p2.t}">${wrDev}%</td>
       <td>${(o.n / o.devs.size).toFixed(1)}</td>
       <td class="${drop == null ? "" : drop > 40 ? "bad" : drop > 20 ? "warn" : ""}">${drop == null ? "—" : drop + "%"}</td>
-      <td>${Math.round(o.ms / o.n / 1000)}s</td><td>${o.rev || ""}</td><td style="text-align:left">${bs}</td>
+      <td>${Math.round(o.ms / o.n / 1000)}s</td>
+      <td>${o.rev || ""}</td><td>${(o.rev / o.devs.size).toFixed(2)}</td>
+      <td>${bTot(o) || ""}</td><td>${(bTot(o) / o.devs.size).toFixed(2)}</td>
+      <td style="text-align:left">${bs}</td>
       <td class="${o.sigs.size > 1 ? "warn" : ""}" style="text-align:left">${[...o.sigs].join(" ")}</td></tr>`;
   }).join("");
   $("tLv").innerHTML = `<thead><tr><th>Level</th><th>Người</th><th>Ván</th><th>Winrate/ván</th>
-    <th>Winrate/người</th><th>Ván/người</th><th>Bỏ đi</th><th>Thời gian</th><th>Hồi sinh</th>
-    <th style="text-align:left">Booster</th><th style="text-align:left">Vân tay bản</th></tr></thead><tbody>${lvRows}</tbody>`;
+    <th>Winrate/người</th><th>Ván/người</th><th>Bỏ đi</th><th>Thời gian</th>
+    <th>Hồi sinh</th><th>Hồi sinh/người</th><th>Booster</th><th>Booster/người</th>
+    <th style="text-align:left">Loại booster</th><th style="text-align:left">Vân tay bản</th></tr></thead><tbody>${lvRows}</tbody>`;
 
   // ---- DAILY CHALLENGE ------------------------------------------------------------------
   // Nhận biết bằng trường `daily` (bậc trong dãy, 0-based), KHÔNG bằng số level: bàn thử thách
@@ -429,11 +461,14 @@ function render() {
     // PHỄU: bậc 0 có bao nhiêu người thì tính phần trăm còn lại theo con số ấy. Đây mới là thứ
     // đáng nhìn nhất ở một chế độ hằng ngày — người chơi rụng ở bậc nào.
     const base = st.get(steps[0])?.devs.size || 0;
+    const wrSteps = steps.map((k) => pct(st.get(k).w, st.get(k).n));
+    const wrDevSteps = steps.map((k) => pct(st.get(k).won.size, st.get(k).devs.size));
     const rowsH = steps.map((k) => {
       const o = st.get(k);
       const wr = pct(o.w, o.n), wrDev = pct(o.won.size, o.devs.size), keep = pct(o.devs.size, base);
+      const q1 = pctl(wr, wrSteps), q2 = pctl(wrDev, wrDevSteps);
       return `<tr><td>${k}</td><td>${[...o.lvls].join(", ")}</td><td>${o.devs.size}</td><td>${o.n}</td>
-        <td class="${cls(wr, 20, 45)}">${wr}%</td><td class="${cls(wrDev, 25, 55)}">${wrDev}%</td>
+        <td class="${q1.c}" title="${q1.t}">${wr}%</td><td class="${q2.c}" title="${q2.t}">${wrDev}%</td>
         <td class="${cls(keep, 30, 60)}">${keep}%</td>
         <td>${o.n ? Math.round(o.ms / o.n / 1000) : 0}s</td></tr>`;
     }).join("");
