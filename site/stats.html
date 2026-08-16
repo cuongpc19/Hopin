@@ -248,6 +248,14 @@ const VN = 7 * 3600e3; // giữ tên cũ cho chỗ chia theo GIỜ bên dưới
 const day = (ms) => new Date(ms + tzNow()).toISOString().slice(0, 10);
 const pct = (a, b) => (b ? Math.round((100 * a) / b) : 0);
 const cls = (v, lo, hi) => (v < lo ? "bad" : v < hi ? "warn" : "good");
+const median = (a) => {
+  if (!a.length) return 0;
+  const s = [...a].sort((x, y) => x - y), m = s.length >> 1;
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+};
+// mm:ss — thời lượng một người chơi trong một ngày nằm ở khoảng vài phút, để bằng giây thì phải
+// nhẩm còn để bằng phút lẻ thì mất phần giây đúng ở chỗ nó có nghĩa.
+const mmss = (ms) => `${Math.floor(ms / 60000)}:${String(Math.round((ms % 60000) / 1000)).padStart(2, "0")}`;
 
 function filtered() {
   const ex = $("excl").checked, b = $("build").value;
@@ -291,9 +299,15 @@ function render() {
   const byDay = new Map();
   for (const r of g) {
     const d = bucket(r.at);
-    if (!byDay.has(d)) byDay.set(d, { devs: new Set(), n: 0, w: 0, ms: 0 });
+    if (!byDay.has(d)) byDay.set(d, { devs: new Set(), n: 0, w: 0, ms: 0, perDev: new Map() });
     const o = byDay.get(d);
     o.devs.add(r.dev); o.n++; if (r.result === "win") o.w++; o.ms += r.ms || 0;
+    // Cộng riêng theo TỪNG MÁY để tính được trung vị — trung bình thì chỉ cần tổng, còn trung
+    // vị bắt buộc phải giữ cả dãy. Hai con số này nói hai chuyện khác nhau ở đây: đo 2026-08-16
+    // trên dữ liệu thật ra trung vị 2:54 mà trung bình 13:20, lệch hơn bốn lần, vì một nhóm nhỏ
+    // chơi rất lâu kéo trung bình lên. Nhìn trung bình một mình sẽ tưởng người chơi gắn bó hơn
+    // thực tế nhiều.
+    o.perDev.set(r.dev, (o.perDev.get(r.dev) || 0) + (r.ms || 0));
   }
   const days = [...byDay.keys()].sort();
   const maxDev = Math.max(...days.map((d) => byDay.get(d).devs.size));
@@ -329,11 +343,15 @@ function render() {
       <td>${o.n}</td><td>${(o.n / o.devs.size).toFixed(1)}</td>
       <td class="${cls(pct(o.w, o.n), 55, 70)}">${pct(o.w, o.n)}%</td>
       <td>${Math.round(o.ms / o.n / 1000)}s</td>
+      <td>${mmss(median([...o.perDev.values()]))}</td>
+      <td>${mmss(o.ms / o.devs.size)}</td>
       <td style="text-align:left"><span class="spark" style="width:${w(nw)}px"></span><span class="spark n2" style="width:${w(o.devs.size - nw)}px"></span></td></tr>`;
   }).reverse().join("");
   $("tDay").innerHTML = `<thead><tr><th>${hourly ? "Giờ" : "Ngày"}</th><th>Người chơi</th><th>Mới</th><th>Quay lại</th><th>% quay lại</th>
     <th>Quay lại D1</th><th>D1</th>
-    <th>Ván</th><th>Ván/người</th><th>Winrate</th><th>Thời gian/ván</th><th style="text-align:left">mới ▏quay lại</th></tr></thead><tbody>${dayRows}</tbody>`;
+    <th>Ván</th><th>Ván/người</th><th>Winrate</th><th>Thời gian/ván</th>
+    <th>Trung vị/người</th><th>Trung bình/người</th>
+    <th style="text-align:left">mới ▏quay lại</th></tr></thead><tbody>${dayRows}</tbody>`;
   $("hDay").innerHTML =
     "<b>D1</b> = trong số người chơi LẦN ĐẦU vào ngày đó, bao nhiêu % quay lại đúng hôm sau — đây là con số so được với bảng CrazyGames. "
     + "<b>% quay lại</b> là thứ khác: phần người chơi trong ngày đó đã từng chơi trước đây, không cần liền ngày. "
