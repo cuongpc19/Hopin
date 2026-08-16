@@ -312,7 +312,10 @@ function render() {
     const cohort = [...first.entries()].filter(([, t]) => day(t) === d).map(([dev]) => dev);
     if (!cohort.length || nextDay(d) > lastDay) return null;
     const back = cohort.filter((x) => dayOf.get(x).has(nextDay(d))).length;
-    return { n: cohort.length, back, p: pct(back, cohort.length) };
+    // p2 = HAI CHỮ SỐ THẬP PHÂN. Làm tròn về số nguyên như các cột khác là hỏng đúng ở cột này:
+    // D1 của game này đang ở mức 2-10%, mà nhóm một ngày chỉ vài trăm người — 5/247 và 6/247
+    // đều hiện "2%", tức hai ngày khác nhau đọc ra giống hệt nhau. Hai chữ số tách được chúng.
+    return { n: cohort.length, back, p: pct(back, cohort.length), p2: ((100 * back) / cohort.length).toFixed(2) };
   };
   const dayRows = days.map((d) => {
     const o = byDay.get(d);
@@ -321,13 +324,15 @@ function render() {
     const r1 = d1Of(d);
     return `<tr><td>${d}</td><td>${o.devs.size}</td><td>${nw}</td><td>${o.devs.size - nw}</td>
       <td class="${cls(pct(o.devs.size - nw, o.devs.size), 5, 15)}">${pct(o.devs.size - nw, o.devs.size)}%</td>
-      <td class="${r1 ? cls(r1.p, 3, 8) : ""}" title="${r1 ? `${r1.back}/${r1.n} người mới của ngày này quay lại hôm sau` : ""}">${r1 ? r1.p + "%" : "—"}</td>
+      <td title="${r1 ? `${r1.back}/${r1.n} người mới của ngày này quay lại hôm sau` : ""}">${r1 ? `${r1.back}/${r1.n}` : "—"}</td>
+      <td class="${r1 ? cls(r1.p, 3, 8) : ""}">${r1 ? r1.p2 + "%" : "—"}</td>
       <td>${o.n}</td><td>${(o.n / o.devs.size).toFixed(1)}</td>
       <td class="${cls(pct(o.w, o.n), 55, 70)}">${pct(o.w, o.n)}%</td>
       <td>${Math.round(o.ms / o.n / 1000)}s</td>
       <td style="text-align:left"><span class="spark" style="width:${w(nw)}px"></span><span class="spark n2" style="width:${w(o.devs.size - nw)}px"></span></td></tr>`;
   }).reverse().join("");
-  $("tDay").innerHTML = `<thead><tr><th>${hourly ? "Giờ" : "Ngày"}</th><th>Người chơi</th><th>Mới</th><th>Quay lại</th><th>% quay lại</th><th>D1</th>
+  $("tDay").innerHTML = `<thead><tr><th>${hourly ? "Giờ" : "Ngày"}</th><th>Người chơi</th><th>Mới</th><th>Quay lại</th><th>% quay lại</th>
+    <th>Quay lại D1</th><th>D1</th>
     <th>Ván</th><th>Ván/người</th><th>Winrate</th><th>Thời gian/ván</th><th style="text-align:left">mới ▏quay lại</th></tr></thead><tbody>${dayRows}</tbody>`;
   $("hDay").innerHTML =
     "<b>D1</b> = trong số người chơi LẦN ĐẦU vào ngày đó, bao nhiêu % quay lại đúng hôm sau — đây là con số so được với bảng CrazyGames. "
