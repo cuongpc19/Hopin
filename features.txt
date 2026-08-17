@@ -1467,6 +1467,54 @@ B tụt 100 → 0. `remaining` vẫn đếm ô dưới hộp nên không thể t
 trước khi bàn kịp chật. Ruy băng MỘT MÀU đắt hơn hẳn vì bắt người chơi đi tìm đúng một màu
 hiếm. Hai luật ruy băng là hai MỨC KHÓ khác nhau, không phải hai kiểu trang trí.
 
+40) PHÉP THỬ A/B 15 MÀN ĐẦU: BẢN LAUNCH vs BẢN HIỆN TẠI (user 2026-08-17)
+
+CÂU HỎI: bộ 15 bàn mở đầu đã sửa từ hôm ra mắt có thật sự giữ người chơi tốt hơn không. Trước
+nay mọi lần đổi level đều thay thẳng bản cũ, nên số liệu sau đó vừa mang ảnh hưởng của thiết
+kế mới vừa mang ảnh hưởng của việc lượng người chơi đổi theo ngày — không tách được.
+
+CHIA NHÁNH (src/game/ab.ts, khoá `pf_ab`): 50/50 và CHỈ CHO NGƯỜI CHƠI MỚI. Người đã có tiến
+độ mang nhãn "-" (ngoài phép thử) vì họ đã đi qua 15 bàn ấy rồi. Gán ĐÚNG MỘT LẦN, trong
+`SplashScene.go()`, và chỉ khi `storageReady` — lưới an toàn 3 giây có thể gọi `go()` lúc kho
+CrazyGames chưa nạp, và ở đó một người chơi cũ trông y hệt người mới. `?ab=A` / `?ab=B` để tự
+kiểm.
+
+  A = 15 bàn của bản launch, chụp ở commit bc74c85 (2026-08-13 18:21, bản đã gửi CrazyGames)
+  B = bản hiện tại
+
+⚠ CHỈ ĐỔI DỮ LIỆU LEVEL, KHÔNG ĐỔI LUẬT CHƠI (user chốt). Nhánh A vẫn chạy `BURIED_FROM_LEVEL`
+của bản mới, dù bản launch có xe "?" ngay từ L2. Đúng MỘT biến thay đổi thì A thua mới quy được
+về thiết kế bàn.
+
+⚠ CHỈ 5/15 BÀN THẬT SỰ KHÁC NHAU: L2, L7, L9, L11, L15 (L11 nhẹ hẳn 961 ô/15 xe → 506 ô/7 xe,
+L15 gọn xe 22 → 17). Mười bàn còn lại giống hệt cả tranh lẫn hàng xe, nên chênh lệch đo ở chúng
+là nhiễu. Dù vậy `src/levels/ab-legacy.json` chép CẢ 15 BÀN: chép mỗi phần khác nhau thì đợt
+tune sau chạm vào L3 sẽ lặng lẽ đổi luôn nhánh A và phép thử mất đối chứng giữa chừng mà không
+có gì báo. Giá: +4.31 KB gzip (đo: bundle 572.16 → 576.47 KB).
+
+ĐO — hai nguồn, và nguồn thứ hai là nguồn mới:
+  /runs     mỗi ván mang thêm trường `ab`. Winrate, phễu từng bàn, D1 tính được từ đây.
+  /sessions NODE MỚI, ba dòng mỗi phiên: `start` (mở game) · `min1` (còn sống sau 60 giây) ·
+            `end` (rời trang, kèm thời gian và số màn đã mở).
+⚠ VÌ SAO PHẢI CÓ /sessions: /runs chỉ nhận dòng khi một ván KẾT THÚC, nên người mở game rồi bỏ
+đi giữa màn đầu không để lại dấu vết nào — mà đó đúng là nhóm "tỉ lệ chơi quá 1 phút" nói về.
+Đo bằng /runs là đo trên tập đã sống sót. Node RIÊNG chứ không thêm `ev` vào /runs vì stats.html,
+level-stats.mjs và pull-runs.mjs đều coi mọi dòng trong /runs là một ván có `lvl`.
+⚠ "> 1 phút" đếm bằng dòng `min1`, KHÔNG suy từ `ms` của dòng `end`: dòng `end` là dòng dễ mất
+nhất (đóng tab, khoá máy, iOS đình chỉ tab) và mất đúng ở nhóm rời sớm, nên mọi tỉ lệ tính từ nó
+đều lạc quan hơn thực tế.
+
+ĐỌC SỐ: mục "A/B — 15 màn đầu" trong site/stats.html, hoặc `node scripts/ab-report.mjs`. Cả hai
+in kèm p (kiểm định hai tỉ lệ) cạnh mọi chênh lệch — với vài chục người mỗi nhánh, lệch 5-10
+điểm là chuyện thường của may rủi.
+
+KIỂM: `node scripts/check-ab.mjs` — bất biến ghế=ô cho bộ level nhánh A (check-seats.mjs chỉ
+soi designed.json nên bộ này chưa từng đi qua nó), bàn nào đang thật sự khác nhau, và vân tay
+`sig` của cả hai nhánh. Nhãn `ab` sai thì vân tay vẫn đúng vì nó tính từ chính nội dung bàn.
+
+TRIỂN KHAI: luật /sessions phải deploy riêng — `firebase deploy --only database` — không thì
+dashboard báo lỗi 401 ở mục A/B và mọi cột về phiên để trống.
+
 ────────────────────────────────────────────────────────────────────────────
 GHI CHÚ CHUNG
 ────────────────────────────────────────────────────────────────────────────
@@ -1476,4 +1524,5 @@ GHI CHÚ CHUNG
 • Đóng gói APK:        npm run apk
 • Level đặc biệt test obstacle: mở ?level=999
 • Level đặc biệt test HỘP SOCOLA: mở ?level=998   (kiểm luật đặt: node scripts/check-choco.mjs)
+• Xem nhánh A/B của 15 màn đầu: mở ?ab=A hoặc ?ab=B   (kiểm: node scripts/check-ab.mjs)
 ================================================================================

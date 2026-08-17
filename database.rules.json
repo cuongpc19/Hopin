@@ -22,6 +22,16 @@
       ".write": true,
       ".read": "auth != null && auth.uid === 'ZcMwJpI87DPVtkgQGZLECEnPbUC2'",
       ".indexOn": ["at"]
+    },
+
+    // PHIÊN CHƠI — cùng luật với /runs (ghi mở, đọc khoá, có chỉ mục theo thời gian).
+    //
+    // Node RIÊNG chứ không trộn vào /runs: mọi công cụ đang đọc /runs đều coi một dòng là một
+    // ván có `lvl`. Ba dòng mỗi phiên (start / min1 / end) nên node này nhẹ hơn /runs nhiều.
+    "sessions": {
+      ".write": true,
+      ".read": "auth != null && auth.uid === 'ZcMwJpI87DPVtkgQGZLECEnPbUC2'",
+      ".indexOn": ["at"]
     }
   }
 }

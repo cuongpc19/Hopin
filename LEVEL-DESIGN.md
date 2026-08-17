@@ -48,6 +48,12 @@ level tới 37%, con gấu L2 mất mặt, con hổ L23 loang lổ. Tệ hơn: t
 lên**, vì tôi so bản đã sửa với bản đã sửa trên một tấm contact sheet 3px/ô, chứ không so với
 nguồn. Bài học: muốn đánh giá tranh thì render đúng cỡ và so với `git show <commit>:file`.
 
+⚠ **L1-15 ĐANG CÓ BẢN SONG SINH.** Từ 2026-08-17 một nửa người chơi mới nhận 15 bàn của bản
+launch, chép đông cứng ở `src/levels/ab-legacy.json` (FEATURES §40). Sửa L1-15 trong
+`designed.json` là chỉ sửa **nhánh B** — nhánh A giữ nguyên bản cũ và phép thử vẫn chạy tiếp
+với đối chứng đã lỗi thời. Chạy `node scripts/check-ab.mjs` sau mỗi lần đụng vào dải này để
+biết hai nhánh còn khác nhau ở đâu, và cân nhắc dừng phép thử trước khi tune tiếp.
+
 **0.2 — BẤT BIẾN GHẾ = Ô.** Với mỗi màu: tổng sức chứa xe phải **bằng đúng** số ô của màu đó
 trên board, tính cả ô lớp 2. Xe chỉ rời bay khi đầy 100%, nên lệch một ô là level không thể
 thắng. Chạy sau mỗi lần ghi:

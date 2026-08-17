@@ -3,6 +3,8 @@ import { GAME_W, GAME_H, setPageBackground } from "./GameScene";
 import { Audio } from "../game/audio";
 import { t as tr, applyHostLang } from "../game/i18n";
 import { platform } from "../platform";
+import { abAssign, abApplyUrlOverride } from "../game/ab";
+import { startSession } from "../game/telemetry";
 
 // Fade out and remove the pre-boot loading screen baked into index.html.
 function hideBootScreen() {
@@ -30,6 +32,10 @@ export class SplashScene extends Phaser.Scene {
     // The instant HTML boot screen (index.html #boot) has done its job now that
     // the engine is up and the poster is decoded — fade it out.
     hideBootScreen();
+
+    // `?ab=` phải chạy TRƯỚC lối tắt ?level bên dưới — lối tắt đó bỏ qua toàn bộ phần còn lại
+    // của hàm này, tức bỏ qua cả chỗ gán nhánh. Xem chú thích ở abApplyUrlOverride().
+    abApplyUrlOverride();
 
     // Dev convenience: ?level=N jumps straight into the game, skipping the splash.
     if (new URLSearchParams(location.search).has("level")) {
@@ -176,6 +182,16 @@ export class SplashScene extends Phaser.Scene {
       prog.v = 1; drawBar(); // đầy 100% trước khi chuyển
       platform.loadingStop();
       const straightToPlay = isNewPlayer();
+      // PHÉP THỬ A/B 15 màn đầu (src/game/ab.ts). Gán ĐÚNG MỘT LẦN cho mỗi máy, ngay tại đây
+      // vì đây là chỗ duy nhất biết chắc "người này mới hay cũ".
+      //
+      // ⚠ CHỈ GÁN KHI ĐỌC ĐƯỢC KHO. `go()` còn được gọi bởi lưới an toàn 3 giây, và lúc đó
+      // `platform.init()` có thể chưa xong — kho của CrazyGames chưa nạp, một người chơi cũ
+      // trông y hệt người mới. Gán trong tình huống ấy là ném họ vào phép thử và đổi luôn 15
+      // bàn đầu của họ. Không gán thì lần mở sau gán, chẳng mất gì.
+      if (storageReady) abAssign(straightToPlay);
+      // Mở phiên SAU khi gán, để dòng `start` mang đúng nhãn nhánh (xem chú thích ở startSession).
+      startSession();
       this.cameras.main.fadeOut(350, 244, 239, 224);
       this.cameras.main.once("camerafadeoutcomplete", () =>
         straightToPlay ? this.scene.start("game", { level: 1 }) : this.scene.start("select"));
