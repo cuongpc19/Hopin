@@ -25,7 +25,7 @@ import { getLives, spendLife, showHeartsModal, canEnterLevel, graceMsLeft } from
 import { platform } from "../platform";
 import { dailyRunning, dailyNoteWin, dailyClearRun, dailyLevel, dailyIndex, dailyDone, dailyEnter, dailyResetFromUrl } from "../game/daily";
 import { saveRun, groupRuns, exportJsonl, clearRuns, deviceId, copyToClipboard } from "../game/playlog";
-import { sendRun, openPrivacyPolicy } from "../game/telemetry";
+import { sendRun, openPrivacyPolicy, noteSessionLevel } from "../game/telemetry";
 import { startAnalytics, track, gaLoaded } from "../game/analytics";
 import {
   awardClovers,
@@ -912,6 +912,7 @@ export class GameScene extends Phaser.Scene {
     // mạng đã rảnh. Lần gọi thứ hai trở đi không làm gì.
     startAnalytics();
     track("level_start", { level: levelNum, tier: levelDifficulty(levelNum) });
+    noteSessionLevel(levelNum); // để dòng `end` của phiên biết đã đi tới đâu — xem telemetry.ts
     if (levelNum === 1) this.startTutorial(); // gentle intro guidance
     else if (this.maybeShowChocoIntro()) { /* first chocolate level → 3-step walkthrough */ }
     else if (this.maybeShowHardRockIntro()) { /* first hard-rock level → explain the rock */ }

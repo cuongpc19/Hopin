@@ -1,5 +1,7 @@
 import { COLOR_COUNT } from "./palette";
 import { DESIGNED_LEVELS } from "../levels/designed";
+import { AB_LEGACY_LEVELS } from "../levels/abLegacy";
+import { abUseLegacy } from "./ab";
 
 // A "chest" collects keys of its own color. `count` = how many keys it needs.
 // `kind` picks what it can collect: "color" (default) grabs same-colour slimes,
@@ -279,7 +281,12 @@ export function makeLevel(levelNum = 1): Level {
 
   // Hand-designed level for this number takes priority; otherwise fall back to
   // the procedurally-generated placeholder so the game still has infinite levels.
-  const designed = DESIGNED_LEVELS[levelNum];
+  //
+  // PHÉP THỬ A/B (src/game/ab.ts): máy ở nhánh A lấy 15 bàn đầu của bản launch. Đặt Ở ĐÂY vì
+  // đây là cửa duy nhất mọi màn chơi đi qua — `levelFingerprint` chốt ngay sau đó nên mỗi
+  // nhánh tự mang một vân tay riêng, và bảng winrate tách được hai bản mà không cần tin vào
+  // nhãn nào cả.
+  const designed = (abUseLegacy(levelNum) ? AB_LEGACY_LEVELS[levelNum] : null) ?? DESIGNED_LEVELS[levelNum];
   if (designed) {
     // Defensive copies so the scene can mutate freely without touching the source.
     return {

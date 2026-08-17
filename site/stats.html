@@ -139,6 +139,12 @@
   </p>
   <div class="scroll" style="max-height:70vh"><table id="tLv"></table></div>
 
+  <h2>A/B — 15 màn đầu</h2>
+  <p class="sub" id="hAb" style="margin:0 0 8px"></p>
+  <div class="scroll"><table id="tAb"></table></div>
+  <div class="scroll" style="margin-top:12px"><table id="tAbLv"></table></div>
+  <p class="note" id="abNote"></p>
+
   <h2>Daily Challenge</h2>
   <p class="sub" id="hDaily" style="margin:0 0 8px"></p>
   <div class="scroll"><table id="tDaily"></table></div>
@@ -204,6 +210,8 @@ function windowMs() {
 }
 
 let rows = [];
+let sess = [];
+let sessErr = "";
 async function load() {
   if (!user) return;
   const { since, until } = windowMs();
@@ -212,16 +220,28 @@ async function load() {
   const q = since || until < Infinity
     ? `&orderBy="at"${since ? `&startAt=${since}` : ""}${until < Infinity ? `&endAt=${until}` : ""}`
     : "";
-  const get = async (force) => {
+  const get = async (node, force) => {
     const t = await user.getIdToken(force);
-    return fetch(`${DB}/runs.json?auth=${encodeURIComponent(t)}${q}`);
+    return fetch(`${DB}/${node}.json?auth=${encodeURIComponent(t)}${q}`);
   };
-  let res = await get(false);
+  let res = await get("runs", false);
   // 401 vẫn có thể xảy ra khi token vừa hết hạn đúng lúc — ép làm mới rồi thử lại ĐÚNG MỘT lần.
-  if (res.status === 401) res = await get(true);
+  if (res.status === 401) res = await get("runs", true);
   if (!res.ok) { $("status").textContent = `lỗi ${res.status} — ${await res.text()}`; return; }
   const j = await res.json();
   rows = Object.values(j || {}).filter((r) => r && r.at && r.lvl != null);
+
+  // PHIÊN CHƠI — node riêng, và nó ĐƯỢC PHÉP VẮNG MẶT. Luật `sessions` phải deploy riêng
+  // (`firebase deploy --only database`); trước lúc đó node này trả 401 và cả trang sẽ trắng
+  // nếu ta để lỗi ấy thoát ra. Mọi bảng khác không phụ thuộc vào nó, nên nuốt lỗi rồi ghi
+  // một dòng nhắc ở mục A/B là đủ.
+  sess = []; sessErr = "";
+  try {
+    let rs = await get("sessions", false);
+    if (rs.status === 401) rs = await get("sessions", true);
+    if (rs.ok) sess = Object.values((await rs.json()) || {}).filter((r) => r && r.at && r.ev);
+    else sessErr = `không đọc được /sessions (lỗi ${rs.status}) — đã chạy \`firebase deploy --only database\` chưa?`;
+  } catch (e) { sessErr = "không đọc được /sessions: " + e.message; }
   const builds = [...new Set(rows.map((r) => r.build).filter(Boolean))].sort();
   const sel = $("build"), keep = sel.value;
   sel.innerHTML = '<option value="">tất cả</option>' + builds.map((b) => `<option>${b}</option>`).join("");
@@ -276,7 +296,16 @@ function games(list) {
 function render() {
   const list = filtered();
   const g = games(list);
-  if (!g.length) { $("cards").innerHTML = "<div class='card'><div class='n'>0</div><div class='k'>không có dữ liệu</div></div>"; $("tDay").innerHTML = ""; $("tLv").innerHTML = ""; return; }
+  if (!g.length) {
+    $("cards").innerHTML = "<div class='card'><div class='n'>0</div><div class='k'>không có dữ liệu</div></div>";
+    $("tDay").innerHTML = ""; $("tLv").innerHTML = ""; $("tAb").innerHTML = ""; $("tAbLv").innerHTML = "";
+    // Có phiên mà không có ván là chuyện CÓ THẬT và đáng chú ý: ai cũng mở game rồi bỏ đi
+    // trước khi xong bàn nào. Nói ra chứ đừng để trang trông như mất dữ liệu.
+    $("hAb").textContent = sess.length
+      ? `${sess.filter((r) => r.ev === "start").length} phiên mở ra nhưng KHÔNG ván nào kết thúc trong khoảng này.`
+      : "";
+    return;
+  }
 
   const at = g.map((r) => r.at);
   $("range").textContent = `${day(Math.min(...at))} → ${day(Math.max(...at))}`;
@@ -378,6 +407,133 @@ function render() {
   $("tLv").innerHTML = `<thead><tr><th>Level</th><th>Người</th><th>Ván</th><th>Winrate/ván</th>
     <th>Winrate/người</th><th>Ván/người</th><th>Bỏ đi</th><th>Thời gian</th><th>Hồi sinh</th>
     <th style="text-align:left">Booster</th><th style="text-align:left">Vân tay bản</th></tr></thead><tbody>${lvRows}</tbody>`;
+
+  // ---- A/B — 15 MÀN ĐẦU ------------------------------------------------------------------
+  // Nhánh A = 15 bàn của bản launch (2026-08-13), nhánh B = bản hiện tại. Chia đôi CHỈ cho
+  // người chơi mới, nên "-" (người cũ + ai gán trước khi có phép thử) không nằm trong bảng này.
+  //
+  // ⚠ ĐỌC THEO NHÃN `ab`, và đối chiếu bằng VÂN TAY khi nghi ngờ. `node scripts/check-ab.mjs`
+  // in sig của cả hai nhánh cho từng level; bảng "Từng level" bên trên có cột vân tay. Nhãn
+  // sai thì vân tay vẫn đúng, vì nó tính từ chính nội dung bàn người chơi nhìn thấy.
+  const exA = $("excl").checked, bA = $("build").value;
+  const sg = sess.filter((r) => {
+    if (exA && (r.host === "web" || /^localhost|^127\./.test(r.from || ""))) return false;
+    if (bA && r.build !== bA) return false;
+    if (r.at > Date.now() + 36e5) return false;
+    return true;
+  });
+
+  // Kiểm định hai tỉ lệ (z-test). Không có nó thì mọi chênh lệch đều trông như tín hiệu: với
+  // 40 người mỗi nhánh, D1 8% so với 15% là chuyện xảy ra thường xuyên do may rủi.
+  const zTest = (a, na, b, nb) => {
+    if (!na || !nb) return null;
+    const p = (a + b) / (na + nb), se = Math.sqrt(p * (1 - p) * (1 / na + 1 / nb));
+    if (!se) return null;
+    const z = (a / na - b / nb) / se, x = Math.abs(z) / Math.SQRT2, t = 1 / (1 + 0.3275911 * x);
+    const erf = 1 - ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x);
+    return { z, p: 1 - erf }; // p hai phía
+  };
+  const pTag = (r) => r == null ? "" : r.p < 0.05 ? ` <span class="tag good">p=${r.p.toFixed(3)}</span>`
+    : ` <span class="tag" style="color:var(--faint)">p=${r.p.toFixed(2)}</span>`;
+
+  // Ngày CUỐI của dữ liệu, tính lại theo LỊCH. Không dùng `lastDay` ở trên: khi khoảng xem ≤24
+  // giờ thì biến ấy là một cái nhãn giờ ("23:00"), và so chuỗi ngày với nó ra kết quả vô nghĩa
+  // — cả cohort sẽ được coi là "đã đủ một ngày sau", tức D1 bị chia cho mẫu số quá lớn.
+  const lastCal = day(Math.max(...[...g, ...sg].map((r) => r.at)));
+
+  const stat = (v) => {
+    const runsV = g.filter((r) => r.ab === v);
+    const sesV = sg.filter((r) => r.ab === v);
+    const early = runsV.filter((r) => r.lvl <= 15 && r.daily == null); // phép thử chỉ phủ L1-15
+    const devs = new Set([...runsV.map((r) => r.dev), ...sesV.map((r) => r.dev)]);
+    const starts = sesV.filter((r) => r.ev === "start").length;
+    const min1 = sesV.filter((r) => r.ev === "min1").length;
+    const ends = sesV.filter((r) => r.ev === "end" && r.ms > 0);
+    // NGÀY HOẠT ĐỘNG lấy từ CẢ hai node: người mở game rồi bỏ đi không có dòng ván nào, mà
+    // chính họ là nhóm phép thử này muốn nhìn.
+    const dayOfV = new Map();
+    for (const r of [...runsV, ...sesV]) {
+      if (!dayOfV.has(r.dev)) dayOfV.set(r.dev, new Set());
+      dayOfV.get(r.dev).add(day(r.at));
+    }
+    const firstV = new Map();
+    for (const r of [...runsV, ...sesV]) if (!firstV.has(r.dev) || r.at < firstV.get(r.dev)) firstV.set(r.dev, r.at);
+    let coh = 0, back = 0;
+    for (const [dev, t0] of firstV) {
+      const d0 = day(t0);
+      if (nextDay(d0) > lastCal) continue;              // chưa đủ một ngày sau → chưa tính được
+      coh++;
+      if (dayOfV.get(dev).has(nextDay(d0))) back++;
+    }
+    const wins = early.filter((r) => r.result === "win").length;
+    const passed15 = new Set(early.filter((r) => r.lvl === 15 && r.result === "win").map((r) => r.dev)).size;
+    return {
+      v, devs: devs.size, starts, min1, ends,
+      msAvg: ends.length ? Math.round(ends.reduce((s, r) => s + r.ms, 0) / ends.length / 1000) : null,
+      runs: early.length, wins, coh, back, passed15,
+      playedDevs: new Set(early.map((r) => r.dev)).size,
+    };
+  };
+  const A = stat("A"), B = stat("B");
+  const inExp = A.devs + B.devs;
+
+  if (!inExp) {
+    $("hAb").textContent = "chưa có người chơi nào được chia nhánh trong khoảng này.";
+    $("tAb").innerHTML = ""; $("tAbLv").innerHTML = "";
+  } else {
+    const tMin = zTest(A.min1, A.starts, B.min1, B.starts);
+    const tD1 = zTest(A.back, A.coh, B.back, B.coh);
+    const tWin = zTest(A.wins, A.runs, B.wins, B.runs);
+    const row = (s, name) => `<tr><td>${name}</td><td>${s.devs}</td><td>${s.starts}</td>
+      <td class="${s.starts ? cls(pct(s.min1, s.starts), 30, 50) : ""}">${s.starts ? pct(s.min1, s.starts) + "%" : "—"}</td>
+      <td>${s.msAvg == null ? "—" : s.msAvg + "s"}</td>
+      <td>${s.runs}</td>
+      <td class="${s.runs ? cls(pct(s.wins, s.runs), 55, 70) : ""}">${s.runs ? pct(s.wins, s.runs) + "%" : "—"}</td>
+      <td class="${s.coh ? cls(pct(s.back, s.coh), 3, 8) : ""}" title="${s.back}/${s.coh}">${s.coh ? pct(s.back, s.coh) + "%" : "—"}</td>
+      <td>${s.passed15}</td></tr>`;
+    $("tAb").innerHTML = `<thead><tr><th>Nhánh</th><th>Người chơi</th><th>Phiên</th><th>&gt; 1 phút</th>
+      <th>Thời gian/phiên</th><th>Ván L1-15</th><th>Winrate/ván</th><th>D1</th><th>Qua được L15</th></tr></thead>
+      <tbody>${row(A, "A — bản launch")}${row(B, "B — bản hiện tại")}</tbody>`;
+    $("hAb").innerHTML = `${inExp} người trong phép thử (A ${A.devs} · B ${B.devs})`
+      + ` · &gt;1 phút${pTag(tMin)} · D1${pTag(tD1)} · winrate${pTag(tWin)}`;
+
+    // ---- phễu từng bàn, hai nhánh cạnh nhau
+    const per = (v) => {
+      const m = new Map();
+      for (const r of g) {
+        if (r.ab !== v || r.lvl > 15 || r.daily != null) continue;
+        if (!m.has(r.lvl)) m.set(r.lvl, { devs: new Set(), pass: new Set(), n: 0, w: 0 });
+        const o = m.get(r.lvl);
+        o.devs.add(r.dev); o.n++;
+        if (r.result === "win") { o.w++; o.pass.add(r.dev); }
+      }
+      return m;
+    };
+    const mA = per("A"), mB = per("B");
+    const DIFF = new Set([2, 7, 9, 11, 15]); // 5 bàn thật sự khác nhau — xem scripts/check-ab.mjs
+    const cell = (m, n) => {
+      const o = m.get(n);
+      if (!o) return "<td>—</td><td>—</td><td>—</td>";
+      const nx = m.get(n + 1);
+      const drop = nx ? 100 - pct(nx.devs.size, o.devs.size) : null;
+      return `<td>${o.devs.size}</td>
+        <td class="${cls(pct(o.pass.size, o.devs.size), 50, 80)}">${pct(o.pass.size, o.devs.size)}%</td>
+        <td class="${drop == null ? "" : drop > 40 ? "bad" : drop > 20 ? "warn" : ""}">${drop == null ? "—" : drop + "%"}</td>`;
+    };
+    $("tAbLv").innerHTML = `<thead><tr><th>Level</th>
+      <th colspan="3" style="text-align:right">A — bản launch</th>
+      <th colspan="3" style="text-align:right">B — bản hiện tại</th></tr>
+      <tr><th></th><th>Người</th><th>Qua được</th><th>Bỏ đi</th><th>Người</th><th>Qua được</th><th>Bỏ đi</th></tr></thead>
+      <tbody>${Array.from({ length: 15 }, (_, i) => i + 1).map((n) =>
+        `<tr><td>L${n}${DIFF.has(n) ? ' <span class="tag" style="color:var(--accent)">khác</span>' : ""}</td>${cell(mA, n)}${cell(mB, n)}</tr>`).join("")}</tbody>`;
+    $("abNote").innerHTML =
+      "<b>Chỉ 5 bàn khác nhau</b> (L2, L7, L9, L11, L15 — gắn nhãn <i>khác</i>); mười bàn còn lại hai nhánh chơi y hệt, "
+      + "nên chênh lệch ở chúng là nhiễu chứ không phải hiệu ứng. "
+      + "<b>&gt;1 phút</b> = số phiên còn sống sau 60 giây ÷ số phiên mở ra, đếm bằng node <code>/sessions</code> nên tính cả người thoát trước khi xong ván nào. "
+      + "<b>Thời gian/phiên</b> chỉ tính được từ dòng <code>end</code>, mà dòng ấy dễ mất nhất đúng ở nhóm rời sớm — nó lạc quan hơn thực tế, đừng dùng làm chỉ số chính. "
+      + "<b>p</b> là kiểm định hai tỉ lệ; p ≥ 0.05 nghĩa là chênh lệch nằm trong khoảng may rủi, KHÔNG kết luận được gì. "
+      + (sessErr ? `<br><span class="bad">${sessErr}</span>` : "");
+  }
 
   // ---- DAILY CHALLENGE ------------------------------------------------------------------
   // Nhận biết bằng trường `daily` (bậc trong dãy, 0-based), KHÔNG bằng số level: bàn thử thách

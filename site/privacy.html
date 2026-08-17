@@ -99,7 +99,16 @@
           <tr><td>Boosters used, and whether you revived</td><td>which of the four power-ups the attempt needed, so we can tell a level that is hard from one that is unplayable without help</td></tr>
           <tr><td>Random device code</td><td>a random string created by your browser, so repeated attempts from one device can be counted once</td></tr>
           <tr><td>Platform and game version</td><td>e.g. web build, and which release you played</td></tr>
+          <tr><td>Test group</td><td>a letter (A or B) saying which version of the first fifteen puzzles you were shown, so the two can be compared</td></tr>
         </table>
+        <p>
+          The game also records the <strong>session</strong> itself: one record when you open it,
+          one if you are still playing after a minute, and one when you leave, carrying how long
+          you stayed and how many levels you opened. This is how we tell "the opening levels are
+          too hard" from "nobody stays long enough to reach them" — a player who leaves before
+          finishing a level leaves no other trace. It contains the same random device code and
+          nothing more about you.
+        </p>
         <p>
           The device code is <strong>generated at random</strong> and is not derived from anything
           about you or your device. It is not linked to any identity and cannot be used to contact
@@ -176,7 +185,15 @@
           Mỗi khi kết thúc một màn, game gửi một bản ghi ngắn để chúng tôi biết màn nào quá khó
           hoặc quá dễ mà cân bằng lại. Bản ghi gồm: số màn và phiên bản của màn đó, thắng hay
           thua, thời gian chơi, số lượt đi và số ô chờ đã dùng, những booster đã dùng và bạn có
-          hồi sinh hay không, một mã thiết bị ngẫu nhiên, nền tảng và phiên bản game.
+          hồi sinh hay không, một mã thiết bị ngẫu nhiên, nền tảng và phiên bản game, và một chữ
+          cái (A hoặc B) cho biết bạn được xem bản nào của 15 màn đầu để chúng tôi so hai bản.
+        </p>
+        <p>
+          Game còn ghi lại chính <strong>phiên chơi</strong>: một bản ghi lúc bạn mở game, một bản
+          nếu sau một phút bạn vẫn đang chơi, và một bản lúc bạn rời đi, kèm thời gian bạn ở lại và
+          số màn đã mở. Đây là cách phân biệt "mấy màn đầu quá khó" với "không ai ở lại đủ lâu để
+          tới đó" — người rời đi trước khi xong màn nào không để lại dấu vết nào khác. Nó mang đúng
+          mã thiết bị ngẫu nhiên ấy, không thêm gì về bạn.
         </p>
         <p>
           Mã thiết bị được <strong>sinh ngẫu nhiên</strong>, không suy ra từ bất cứ thông tin nào
