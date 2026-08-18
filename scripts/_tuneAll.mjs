@@ -77,6 +77,9 @@ const inSmall = (n) => n >= SMALL[0] && n <= SMALL[1];
 // Ép dải cho TỪNG level, dạng "26:90-100,31:60-90". Dùng khi một ô cần mốc riêng mà không đáng
 // đẻ thêm một dải cứng trong file — vd user 2026-08-14 muốn L26 "winrate rất dễ 90-100%" sau khi
 // tráo tranh cá chép vào đó. Ưu tiên CAO NHẤT, đè mọi luật bên dưới.
+const FORCE_CARS = process.env.FORCE_CARS
+  ? process.env.FORCE_CARS.split(",").map(Number)
+  : undefined;
 const FORCE = new Map((process.env.FORCE || "").split(",").filter(Boolean).map((s) => {
   const [lv, band] = s.split(":");
   const [lo, hi] = band.split("-").map(Number);
@@ -118,7 +121,75 @@ const DAILY = new Set((process.env.DAILY_LEVELS
   || "9001,9002,9003,9004,9005,9006,9007,9008,9009,9010").split(",").map(Number).filter(Boolean));
 const DAILY_BAND = (process.env.DAILY_BAND || "10-20").split("-").map(Number);
 
+// PHƯƠNG ÁN C — bộ 33 level mở đầu ở dải 9101-9133 (xem scripts/_buildC.mjs). Mỗi ô có target
+// RIÊNG, lấy từ Manythings/level-config.csv theo SLOT nó sẽ chiếm, chứ không phải một dải chung:
+// user 2026-08-18 muốn "winrate theo target winrate bản cũ", mà bản cũ đặt từng level một —
+// 90 cho phần lớn, 60-85 cho L2-L9, rồi 25 ở slot 15 và 10 ở slot 30.
+const SETC = (() => {
+  try { return JSON.parse(fs.readFileSync("scripts/_setC.json", "utf8")); } catch { return []; }
+})();
+const CMAP = new Map(SETC.map((r) => [r.to, r.target]));
+const CROW = new Map(SETC.map((r) => [r.to, r]));
+const C_BAND = Number(process.env.C_BAND || 5); // nửa bề rộng dải quanh target
+
+// SỐ XE lấy theo NHÁNH A (user 2026-08-18: "số xe của phương án A khá tốt rồi, cứ lấy sát sát
+// số xe theo đó"). Slot 2-15 đọc từ ab-legacy.json (bộ launch), slot 16-34 đọc từ game hiện tại
+// vì hai nhánh giống hệt nhau ở đoạn đó.
+//
+// ⚠ SỐ XE CỦA A GẮN VỚI CỠ BÀN CỦA A. A có cả bàn 35×35 và 39×39, bộ C chỉ có 25×25 và 31×31 —
+// slot 24 chẳng hạn, A dùng 50 xe trên bàn 1369 ô, mà bộ C ở đó là bàn ~500 ô, tức 10 ô một xe.
+// Nên đây là CỬA SỔ ±3 quanh số của A, và là ƯU TIÊN chứ không phải chặn: bàn nào không có nấc
+// nào rơi vào cửa sổ thì pickOne tự quay về thang đầy đủ.
+const C_CAR_SPREAD = Number(process.env.C_CAR_SPREAD || 3);
+const C_CARS = (() => {
+  const m = new Map();
+  try {
+    const leg = JSON.parse(fs.readFileSync("src/levels/ab-legacy.json", "utf8"));
+    for (const r of SETC) {
+      const ref = (r.s <= 15 && leg[r.s]) ? leg[r.s] : d[r.s];
+      const n = ref?.chests?.length;
+      if (n) m.set(r.s, [Math.max(6, n - C_CAR_SPREAD), n + C_CAR_SPREAD]);
+    }
+  } catch { /* thiếu file thì để rỗng, cfg trả undefined và pickOne dùng thang đầy đủ */ }
+  return m;
+})();
+
 export function cfg(n) {
+  // ⚠ FORCE ĐỨNG ĐẦU. Chú thích của nó ghi "ưu tiên CAO NHẤT, đè mọi luật bên dưới", nhưng khối
+  // dải C từng đặt trên nó nên `FORCE=9134:90-100` im lặng không có tác dụng — đúng thứ user cần
+  // để đè target của một ô lẻ (2026-08-18). Một cờ ghi đè mà bị luật khác nuốt thì tệ hơn là
+  // không có cờ, vì nó chạy xong mà chẳng báo gì.
+  {
+    const f = FORCE.get(n);
+    // FORCE_CARS="16,40" — ép luôn CỬA SỔ SỐ XE cho những level đang bị FORCE. Trước đây FORCE
+    // chỉ đè được dải winrate, nên muốn "ít nhất 16 xe" thì không có cách nào nói ra
+    // (user 2026-08-18). Lọc theo số xe cũng cắt bớt phép đo, xem chú thích ở pickOne.
+    if (f) return { lo: f.lo, hi: f.hi, lays: [0], hid: 0, cars: FORCE_CARS };
+  }
+  // Dải C xét trước các luật còn lại — số 9101-9148 không dính dải cứng nào nhưng 9105/9110/…
+  // chia hết cho 5, và luật ÷5 sẽ cướp mất chúng.
+  if (CMAP.has(n)) {
+    const r = CROW.get(n);
+    // LEVEL KHÓ giữ đúng target của bản cũ, dải hẹp ±5 — đó là chỗ đường cong độ khó nằm.
+    if (r.tier !== "easy") {
+      const t = r.target;
+      return { lo: Math.max(0, t - C_BAND), hi: Math.min(100, t + C_BAND), lays: [0, 40], hid: 0, cars: [10, 26] };
+    }
+    // LEVEL DỄ nới rộng hẳn (user 2026-08-18: "mấy level dễ để target rộng ra đi, 70-100% cho
+    // level dễ trên level 10, dưới level 10 thì 100%").
+    //
+    // ⚠ TRẦN THẬT LÀ ~94, KHÔNG PHẢI 100. Thước đo bão hoà ở đó (xem chú thích SPEC trong
+    // gen-design.mjs), nên đặt sàn 100 là không bàn nào đạt được. Sàn 90 chính là "dễ hết mức
+    // đo được".
+    //
+    // SỐ XE cũng do user chốt: dưới level 10 thì 12-18 xe, trên thì nhiều hơn. Lọc theo số xe
+    // TRƯỚC KHI ĐO là chỗ tiết kiệm lớn nhất — thang xếp theo số xe tăng dần, mà không lọc thì
+    // mỗi bàn target-dễ phải lê gần hết 160 nấc mới chạm dải.
+    const w = C_CARS.get(r.s);
+    return r.s < 10
+      ? { lo: 90, hi: 100, lays: [0], hid: 0, cars: w }
+      : { lo: 70, hi: 100, lays: [0], hid: 0, cars: w };
+  }
   const five = n % 5 === 0;
   const f = FORCE.get(n);
   if (f) return { lo: f.lo, hi: f.hi, lays: [0], hid: 0 };
@@ -225,7 +296,21 @@ function pickOne(n) {
   // 6 xe, và lúc đó lọc cứng làm thang rỗng → `nearest` null → cả shard chết giữa chừng và mất
   // luôn 13 level phía sau. Đúng bài học §8.1: đừng biến ưu tiên thành chặn.
   const big = built.filter((x) => x.L.chests.length >= 6);
-  const rungs = big.length ? big : built;
+  let rungs = big.length ? big : built;
+  // CỬA SỔ SỐ XE (cfg().cars) — lọc TRƯỚC KHI ĐO, không phải lọc kết quả.
+  //
+  // Hai cái lợi, và cái thứ hai mới là lý do chính:
+  //   1. đúng ý thiết kế — user 2026-08-18 chốt số xe theo slot (dưới level 10 thì 12-18 xe,
+  //      trên thì nhiều hơn), chứ không để thang muốn ra bao nhiêu cũng được;
+  //   2. NHANH HƠN HẲN — thang xếp theo số xe tăng dần nên bàn có target DỄ phải lê gần hết
+  //      160 nấc mới chạm dải. Cắt xuống còn khoảng số xe cần thì bỏ qua phần lớn phép đo.
+  //
+  // Ưu tiên chứ KHÔNG chặn: lọc xong mà rỗng thì quay về thang đầy đủ. Bàn ít màu có thể không
+  // có nấc nào rơi vào cửa sổ, và biến ưu tiên thành chặn cứng chính là lỗi §8.1 đã mắc một lần.
+  if (c.cars) {
+    const inWin = rungs.filter((x) => x.L.chests.length >= c.cars[0] && x.L.chests.length <= c.cars[1]);
+    if (inWin.length) rungs = inWin;
+  }
   rungs.sort((a, b) => a.L.chests.length - b.L.chests.length);
   const hits = [];
   let measured = 0;

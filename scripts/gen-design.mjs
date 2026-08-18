@@ -46,10 +46,27 @@ const EASY_RUN = { from: 3, to: 9, target: 90 };
 // Đè target cho level không có trong CSV (L47+):  TGT="187:88,190:94,…"
 const TGT = Object.fromEntries((process.env.TGT || "").split(",").filter(Boolean)
   .map((s) => s.split(":").map(Number)));
+// PHƯƠNG ÁN C (dải 9101-9133) — mọi thứ tra theo SLOT nó sẽ chiếm, không theo số bàn.
+//
+// ⚠ ĐÂY LÀ CÁI BẪY. `SPEC` tra theo số level, mà 9101-9133 không có trong CSV nên nó rơi vào
+// giá trị dự phòng `{target:20, maxCol:12, minCar:16, twins:2}` — tức MỌI ô của bộ C nhận 2
+// cặp xe đôi, kể cả slot 2-7, trong khi user 2026-08-18 muốn xe đôi chỉ từ level 8. Lượt quét
+// đầu đã chạy sai vì đúng chỗ này; phải tra qua slot thì spec, xe đôi và số xe tối thiểu mới
+// đúng với chỗ level sẽ đứng.
+const CSLOT = (() => {
+  try {
+    const m = new Map();
+    for (const r of JSON.parse(fs.readFileSync("scripts/_setC.json", "utf8"))) m.set(r.to, r.s);
+    return m;
+  } catch { return new Map(); }
+})();
+const slotOf = (n) => CSLOT.get(n) ?? n;
+
 const spec = (n) => {
-  const s = SPEC[n] || { target: 20, maxCol: 12, minCar: 16, twins: 2 };
+  const k = slotOf(n);
+  const s = SPEC[k] || { target: 20, maxCol: 12, minCar: 16, twins: 2 };
   if (TGT[n] != null) return { ...s, target: TGT[n] };
-  return n >= EASY_RUN.from && n <= EASY_RUN.to ? { ...s, target: EASY_RUN.target } : s;
+  return k >= EASY_RUN.from && k <= EASY_RUN.to ? { ...s, target: EASY_RUN.target } : s;
 };
 
 // ---- target trên THANG THÔ:  RAWTGT="15:40,20:40,25:40" ----------------------------------
@@ -99,7 +116,13 @@ const CAPS = (process.env.CAPS || "50,38,30,24,18,13,9").split(",").map(Number);
 //     L8 trở đi, để cơ chế xuất hiện đều chứ không biến mất cả chục level.
 //   • Xe "?": sim BỎ QUA cờ buried (guide §0 gọi đúng nó là "lever giả"), nên thêm bao nhiêu
 //     cũng không đổi winrate đo được — thuần tuý là đòn tâm lý. Rắc theo độ khó.
-const twinCount = (n, sp) => (sp.twins > 0 ? sp.twins : (n >= 8 && n % 2 === 0 ? 1 : 0));
+// Xe đôi tính theo SLOT: bộ C nằm ở 9101+, mà `n >= 8` thì số nào cũng thoả, nên nếu lấy số
+// bàn thì slot 2-7 cũng mọc xe đôi (user: xe đôi sau level 8).
+const TWIN_VERTICAL_ONLY = process.env.TWIN_VERTICAL_ONLY !== "0";
+const twinCount = (n, sp) => {
+  const k = slotOf(n);
+  return sp.twins > 0 ? sp.twins : (k >= 8 && k % 2 === 0 ? 1 : 0);
+};
 const buriedCount = (t) => (t >= 85 ? 2 : t >= 60 ? 3 : 5);
 
 // ---- thang độ khó: áp lực (xe lệch pha ở hồi thắt) × lớp-2 --------------------------------
@@ -111,11 +134,36 @@ function twinsInCrunch(L, nPairs, cdep, seed) {
   if (!nPairs) return 0;
   const rng = mkRng(seed);
   const N = L.chests.length;
-  const lo = Math.max(4, Math.round(N * 0.22)), hi = Math.round(N * 0.62);  // chỉ trong hồi thắt
+  // Cửa sổ "hồi thắt". NỚI RA THEO SỐ CẶP: bản gốc cố định 22%-62% tức chỉ ~9 xe khi hàng có
+  // 22 chiếc — ba cặp không có cách nào giãn ra trong đó, nên chúng chồng lấn và tạo thành một
+  // khối 6 xe liền nhau đều bị buộc (user 2026-08-18: "xe đang hơi sát nhau quá"). Mỗi cặp
+  // thêm thì nới trần ra 10% hàng xe, đủ chỗ để rải mà vẫn giữ trọng tâm ở hồi giữa.
+  const lo = Math.max(4, Math.round(N * 0.22));
+  // ⚠ CỬA SỔ PHẢI ĐỦ RỘNG CHO MỘT CẶP DỌC. Cặp dọc (i, i+LANES) là hình an toàn nhất — hai xe
+  // luôn cùng cột nên dây luôn ngắn và thẳng, dù cột vơi tới đâu. Cửa sổ hẹp thì không có cặp
+  // (i, i+LANES) nào lọt vào, và thuật toán buộc phải lấy hình có XE CHEN GIỮA — hình mà
+  // `twinShape` gọi là "chỉ dùng khi không còn chỗ".
+  // Đo trên L9134: cửa sổ 4-8 chỉ còn hai lựa chọn, cả hai đều có xe chen giữa; nới ra thì
+  // (6,10) là cặp dọc hợp lệ (user 2026-08-18: "xe đôi nằm ở 2 hàng cách nhau 1 hàng ở giữa").
+  const wantHi = Math.round(N * (0.62 + 0.10 * Math.max(0, nPairs - 1)));
+  // Sàn = lo + 2*LANES, KHÔNG phải lo + LANES + 2. Vòng lặp dưới chạy `j < hi`, nên muốn cặp
+  // dọc (i, i+LANES) lọt vào thì cần hi > i + LANES với vài giá trị i khác nhau — chừa vừa khít
+  // một cái là chỉ có đúng một ứng viên, mà ứng viên đó rất dễ bị loại vì trùng màu hoặc vì xe
+  // quá nhỏ (<12 ô). Đo trên L9134: sàn lo+LANES+2 cho cửa sổ 4-9, cặp dọc duy nhất (4,8) trùng
+  // màu → lại rơi về hình có xe chen giữa. Sàn 2*LANES cho 4-11, và (6,10) hợp lệ.
+  const hi = Math.min(N - 1, Math.max(wantHi, lo + 2 * LANES));
   const cand = [];
   // user 2026-08-05: ĐƯỢC khác hàng, miễn tối đa 2 xe chen giữa và hai hàng sát nhau
   for (let i = lo; i < hi; i++) for (let j = i + 1; j < Math.min(hi, i + LANES + 1); j++) {
-    if (!twinGapOk(i, j, LANES)) continue;
+    // CHỈ NHẬN HÌNH DỌC: cùng cột, hai hàng kề (j - i === LANES). Hàng chờ tiêu thụ THEO CỘT
+    // nên hai xe cùng cột luôn dính nhau dù cột vơi tới đâu, dây luôn là đoạn dọc ngắn.
+    //
+    // Mọi hình khác đều bị user chê ba lần liên tiếp (2026-08-18): "xe đôi nằm ở 2 hàng cách
+    // nhau 1 hàng ở giữa", "lại thành xe đôi cách nhau tận 2 hàng". Chúng hợp luật `twinGapOk`
+    // nhưng nhìn thì dây kéo chéo hoặc vắt ngang cả hàng. Thà ĐẶT ÍT CẶP HƠN còn hơn đặt cặp xấu
+    // — số cặp là con số thiết kế, còn cái dây là thứ người chơi nhìn thấy suốt ván.
+    if (TWIN_VERTICAL_ONLY) { if (j - i !== LANES) continue; }
+    else if (!twinGapOk(i, j, LANES)) continue;
     const a = L.chests[i], b = L.chests[j];
     if (a.color === b.color || a.color === 12 || b.color === 12) continue;  // §2b: cấm navy-12
     if (a.count < 12 || b.count < 12) continue;       // §1①: màu quá hiếm → deadlock
@@ -123,12 +171,32 @@ function twinsInCrunch(L, nPairs, cdep, seed) {
     cand.push({ i, j, shape: twinShape(i, j, LANES), gap: Math.abs((cdep[a.color] || 0) - (cdep[b.color] || 0)) + rng() * 0.4 });
   }
   cand.sort((x, y) => y.shape - x.shape || y.gap - x.gap);
-  const used = new Set(); let made = 0;
+  const used = new Set();
+  // ⚠ GIÃN CÁC CẶP RA. `used` một mình chỉ chặn đúng hai chỗ đã lấy, nên cặp sau đặt sát ngay
+  // sau cặp trước vẫn hợp lệ — và vì bảng ứng viên xếp theo hình an toàn, chúng dồn hết vào
+  // cùng một khúc. Đo được: slot 10 ra xe 6,7,8,10,11,12 và slot 24 ra 6,7,8,9, tức nửa hàng
+  // xe bị buộc dính nhau (user 2026-08-18: "mấy level xe đang hơi sát nhau quá").
+  const SPREAD = Number(process.env.TWIN_SPREAD || 3);
+  const blocked = new Set();
+  const place = (g, id) => {
+    L.chests[g.i].pairId = id; L.chests[g.j].pairId = id;
+    used.add(g.i); used.add(g.j);
+    for (let k = g.i - SPREAD; k <= g.j + SPREAD; k++) blocked.add(k);
+  };
+  let made = 0;
   for (const g of cand) {
     if (made >= nPairs) break;
     if (used.has(g.i) || used.has(g.j)) continue;
-    L.chests[g.i].pairId = made; L.chests[g.j].pairId = made;
-    used.add(g.i); used.add(g.j); made++;
+    if (blocked.has(g.i) || blocked.has(g.j)) continue;
+    place(g, made); made++;
+  }
+  // Nhánh dự phòng: hết chỗ giãn thì cho đặt sát nhau. VẪN chỉ trong danh sách ứng viên đã lọc
+  // ở trên, nên khi TWIN_VERTICAL_ONLY bật thì nó cũng chỉ đặt được hình dọc — đặt sát nhau về
+  // vị trí trong hàng, chứ không quay lại hình xấu.
+  for (const g of cand) {
+    if (made >= nPairs) break;
+    if (used.has(g.i) || used.has(g.j)) continue;
+    place(g, made); made++;
   }
   return made;
 }

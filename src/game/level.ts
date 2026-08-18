@@ -1,6 +1,7 @@
 import { COLOR_COUNT } from "./palette";
 import { DESIGNED_LEVELS } from "../levels/designed";
 import { AB_LEGACY_LEVELS } from "../levels/abLegacy";
+import { planCLevel, planCHard } from "./planC";
 import { abUseLegacy } from "./ab";
 
 // A "chest" collects keys of its own color. `count` = how many keys it needs.
@@ -150,6 +151,9 @@ const SUPER_GATES = new Set([35]);
 // mang nhãn nào — đúng cái mà chú thích SUPER_GATES bên trên gọi là "người chơi đọc thành game
 // hỏng chứ không phải level khó".
 export function levelDifficulty(n: number): Difficulty {
+  // Phương án C dựng đường cong khác: L5 và L10 ở đó nhận bàn khó thật, nên chúng phải có nhãn.
+  // Chỉ khi cờ `?planc=1` bật — luật bên dưới giữ nguyên cho bản thường.
+  if (planCHard(n)) return "hard";
   if (SUPER_GATES.has(n)) return "superhard";
   if (n % 15 === 0) return "superhard";
   // "chia hết cho 5, TRÊN level 15" (user 2026-08-13) — L5 và L10 nằm trong khúc mở đầu,
@@ -286,7 +290,16 @@ export function makeLevel(levelNum = 1): Level {
   // đây là cửa duy nhất mọi màn chơi đi qua — `levelFingerprint` chốt ngay sau đó nên mỗi
   // nhánh tự mang một vân tay riêng, và bảng winrate tách được hai bản mà không cần tin vào
   // nhãn nào cả.
-  const designed = (abUseLegacy(levelNum) ? AB_LEGACY_LEVELS[levelNum] : null) ?? DESIGNED_LEVELS[levelNum];
+  // CHỈ PHƯƠNG ÁN C (user 2026-08-18: "chỉ cần phương án C thôi. Nếu cần thì tôi sẽ dựng phương
+  // án A sau").
+  //
+  // ⚠ NHÁNH A KHÔNG CÒN ĐÈ BÀN NỮA. Mã phép thử A/B vẫn nguyên: máy vẫn được gán nhánh và mỗi
+  // ván vẫn ghi trường `ab` vào log. Nhưng hai nhánh giờ nhận CÙNG một bộ bàn, nên cột `ab`
+  // trong bảng số liệu không còn phân biệt được gì — đừng đọc nó như một phép thử đang chạy.
+  // Bật lại bằng cách đưa `abUseLegacy(...)` trở vào biểu thức dưới đây.
+  const cAlt = planCLevel(levelNum);
+  const designed = (cAlt != null ? DESIGNED_LEVELS[cAlt] : null) ?? DESIGNED_LEVELS[levelNum];
+  void AB_LEGACY_LEVELS; void abUseLegacy; // giữ import sống cho lúc bật lại
   if (designed) {
     // Defensive copies so the scene can mutate freely without touching the source.
     return {

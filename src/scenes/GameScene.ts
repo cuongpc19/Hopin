@@ -17,6 +17,7 @@ import {
   type Level,
   type TrackKind,
 } from "../game/level";
+import { planCSource } from "../game/planC";
 import { drawVoxelCube, voxelFrontOverlap, setVoxelFrontRatio } from "../render/voxelCube";
 import { tileButton } from "../game/ui";
 import { Audio } from "../game/audio";
@@ -247,6 +248,28 @@ const TWIN_SPAWN_GAP = 5; // nodes between a twin pair on the ray (snug but the 
 const BURIED_FROM_LEVEL = 10;
 const BELT_SPEED = 6; // Line belt cleats: nodes per second
 const SHOT_COOLDOWN = 10; // ms between pickups — slam: near frame-rate cap (~1 slime/frame @60fps)
+
+// CƠ CHẾ THU Ô — kiểu "NHẢY RỒI BIẾN MẤT" (user 2026-08-18, kèm video mẫu
+// Manythings/IMG_6604.MP4): bắn trúng ô thì KHÔNG sinh slime chạy về xe, mà chính ô đó nhấc lên
+// một chút rồi tan đi tại chỗ.
+//
+// ⚠ ĐÂY LÀ CƠ CHẾ MẶC ĐỊNH TỪ 2026-08-18 (user: "để chế độ này là default, còn chế độ cũ
+// inactive"). Kiểu cũ — slime mọc chân chạy về xe — vẫn còn nguyên trong mã và gọi lại được
+// bằng `?hop=0`, giữ để đối chiếu chứ không còn ai gặp khi chơi bình thường.
+let HOP_COLLECT = true;
+// Số đo lại bằng cách bám MỘT ĐIỂM ẢNH qua cả 27 khung của video (user 2026-08-18: "hơi nhanh,
+// chậm hơn 1 chút như video"). Ô xanh đặc tới khung 13, LOÉ TRẮNG đúng khung 14, rồi nhạt dần
+// tới khung 21 — tức 7 khung ở 30fps = ~233ms cho cả cú biến mất.
+// ⚠ Lần đầu tôi đọc là 35-70ms và sai: đọc từ ảnh phóng to thô nên nhìn hụt mất đoạn nhạt dần.
+const HOP_UP_MS = 160;   // chặng nhấc lên
+const HOP_OUT_MS = 200;  // chặng thu nhỏ và tan
+const HOP_RISE = 0.34;   // nhấc lên bao nhiêu, tính theo CẠNH Ô
+const BULLET_LEN_RATIO = 0.30; // đạn dài bằng bấy nhiêu lần khoảng cách xe->ô (có chặn hai đầu)
+const BULLET_LEN_MIN = 0.7;    // ngắn nhất, theo CẠNH Ô — bắn sát vẫn phải thấy được viên đạn
+const BULLET_LEN_MAX = 1.9;    // dài nhất, theo CẠNH Ô — quá cái này là thành vệt vắt ngang bàn
+const BULLET_SPEED = 1.6;      // px mỗi ms — tốc độ cố định, không phải thời lượng cố định
+const BULLET_STAGGER_MS = 55;  // hai viên cùng một nhịp lệch nhau bấy nhiêu, cho đọc ra hai cú
+const BULLET_STOP_CELLS = 2.4; // MŨI đạn dừng cách tâm ô bấy nhiêu cạnh ô, khỏi che cú nhảy
 // CẤU HÌNH coin thưởng MỖI ván thắng (user 2026-08-01, theo video mẫu "+40" — mọi ván
 // thắng đều +40, không chỉ first-clear).
 const WIN_GOLD = 40;
@@ -675,6 +698,7 @@ export class GameScene extends Phaser.Scene {
 
     // Level to start: picker choice > ?daily=1 > ?level=N (dev) > level 1.
     const qs = new URLSearchParams(location.search);
+    HOP_COLLECT = qs.get("hop") !== "0"; // mặc định BẬT; `?hop=0` gọi lại kiểu slime chạy cũ
     const q = parseInt(qs.get("level") ?? "", 10);
     const fromUrl = Number.isFinite(q) && q > 0 ? q : undefined;
     // ?daily=1 — vào thẳng ván THỬ THÁCH y như bấm huy hiệu (đóng dấu pf_daily_run, nên tiêu
@@ -794,6 +818,17 @@ export class GameScene extends Phaser.Scene {
     // dung 5 lần trong một ngày — hiệu chuẩn `winrate-cal.mjs --fit` ghép ván cũ với board mới
     // và cho ra hệ số sai. Xem LEVEL-DESIGN.md §2.5.
     this.levelSig = levelFingerprint(this.level);
+    // NHÃN KIỂM TRA, CHỈ Ở DEV. Không có nó thì không cách nào biết bàn đang hiện là của phương
+    // án C, của nhánh A, hay bàn gốc — ba nguồn cùng tranh nhau một số level, và đoán bằng mắt
+    // thì sai (user 2026-08-18: "dùng link này sao bộ level vẫn như cũ nhỉ?" — hoá ra máy đang
+    // bị khoá ở nhánh A). Vân tay in kèm để đối chiếu với scripts/genlib.mjs levelFingerprint.
+    if (import.meta.env.DEV) {
+      const src = planCSource(levelNum);
+      this.add.text(4, GAME_H - 14, `L${levelNum} ${src} ${this.levelSig}`, {
+        fontFamily: "monospace", fontSize: "10px", color: "#ffffff",
+        backgroundColor: "#000000aa", padding: { x: 3, y: 1 },
+      }).setDepth(9999).setScrollFactor(0);
+    }
     // SLAM = chế độ MẶC ĐỊNH cho MỌI level (user 2026-08-01): luôn bật trừ khi level ghi rõ
     // `slam: false` (opt-out cho level đặc biệt). Không cần gắn `slam:true` từng level nữa.
     this.slamMode = this.level.slam !== false; // lock mode (tap bay cars; slot locks while out)
@@ -4132,41 +4167,48 @@ export class GameScene extends Phaser.Scene {
       tg.strokeRoundedRect(tx0, ty - th / 2, tw, th, th / 2);
     }
 
-    // Gold cluster (right): [coin  amount  (+)] — nút "+" nằm TRONG pill gỗ luôn (user 2026-08-02)
-    const plusR = 12;
+    // Ô XU (phải) — CÙNG MÀU VỚI ĐƯỜNG RAY (user 2026-08-18: "ô xu cho màu giống màu ray ấy").
+    //
+    // Dùng ĐÚNG ba tông của `buildRoadLoop`, không phải nâu tự chọn: #A1734A viền tối, #CFA67D
+    // mặt gỗ, #E8C7A5 bắt sáng. Ô gỗ cũ nâu SẪM HƠN HẲN đường ray (#5E3D1E/#9C6A3A/#C79A6B)
+    // nên nó không thật sự thuộc về khung gỗ, chỉ na ná.
+    //
+    // ⚠ CHỮ PHẢI ĐỔI THEO. Số xu trước là kem #FFE9B0 — hợp trên nền gỗ sẫm, nhưng trên mặt gỗ
+    // sáng này thì gần như mất hút. Đổi sang nâu sẫm, cùng tông với viền.
+    //
+    // BỀ RỘNG TÍNH THEO NỘI DUNG. Nút "+" đã tắt từ 2026-08-08 nhưng ô vẫn giữ 124px để chừa
+    // chỗ cho nó, nên mép phải thừa một mảng trống. Đo theo chữ, có sàn cho 4 chữ số để số xu
+    // tăng lên không làm ô nhảy bề rộng giữa chừng.
     const pillRight = GAME_W - 14;
-    const pillLeft = pillRight - 124; // rộng thêm để chứa cả nút "+" bên trong
-    const pw = pillRight - pillLeft;
-    const plusX = pillRight - plusR - 5; // "+" ở sát mép phải BÊN TRONG pill
+    const COIN_W = 26, PAD_L = 9, GAP = 5, PAD_R = 13;
+    // coin — XU SAO (star.png) thống nhất với Home/màn thắng; thiếu art → đĩa vẽ tay cũ
+    this.goldText = this.add
+      .text(0, y, String(this.gold), {
+        fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "17px", color: "#4a2f16",
+      })
+      .setOrigin(0, 0.5)
+      .setDepth(D + 2);
+    const numW = Math.max(this.goldText.width, 40); // sàn ~4 chữ số
+    const pw = PAD_L + COIN_W + GAP + numW + PAD_R;
+    const pillLeft = pillRight - pw;
     const pill = this.add.graphics().setDepth(D);
-    // Pill GỖ như ảnh (user 2026-08-02): đáy tối #A1734A → thân #CFA67D → đỉnh bắt sáng #E8C7A5.
-    pill.fillStyle(0x5e3d1e, 1); // nền gỗ tối (lộ ra ở đáy → chiều sâu)
+    pill.fillStyle(0xa1734a, 1);  // viền/bóng tối của đường ray, lộ ra ở đáy → khối
     pill.fillRoundedRect(pillLeft, y - 15, pw, 30, 15);
-    pill.fillStyle(0x9c6a3a, 1); // mặt gỗ chủ đạo (trầm để số cream nổi), chừa mép tối ở đáy
+    pill.fillStyle(0xcfa67d, 1);  // mặt gỗ chủ đạo của đường ray
     pill.fillRoundedRect(pillLeft + 2, y - 15 + 2, pw - 4, 30 - 5, 13);
-    pill.fillStyle(0xc79a6b, 0.85); // dải bắt sáng ở đỉnh
+    pill.fillStyle(0xe8c7a5, 0.95); // dải bắt sáng, đúng tông bevel của đường ray
     pill.fillRoundedRect(pillLeft + 3, y - 13, pw - 6, 9, 8);
-    pill.lineStyle(2.5, 0x4a2f16, 1); // viền gỗ sẫm
+    pill.lineStyle(2.5, 0x8a5f3a, 1); // viền sẫm hơn một bậc để ô tách khỏi mặt bàn cùng họ màu
     pill.strokeRoundedRect(pillLeft, y - 15, pw, 30, 15);
 
-    // coin — XU SAO (star.png) thống nhất với Home/màn thắng; thiếu art → đĩa vẽ tay cũ
-    const coinX = pillLeft + 16;
+    const coinX = pillLeft + PAD_L + COIN_W / 2;
+    this.goldText.setX(coinX + COIN_W / 2 + GAP);
     if (this.textures.exists("star-icon")) {
       const st = this.add.image(coinX, y, "star-icon").setDepth(D + 1);
       st.setScale(26 / Math.max(st.width, st.height));
     } else {
       this.add.circle(coinX, y, 12, 0xf9c22e).setStrokeStyle(2, 0xc98a10).setDepth(D + 1);
     }
-    // amount (left-aligned, grows toward the plus)
-    this.goldText = this.add
-      .text(coinX + 15, y, String(this.gold), {
-        fontFamily: "Arial, sans-serif",
-        fontStyle: "bold",
-        fontSize: "17px",
-        color: "#ffe9b0",
-      })
-      .setOrigin(0, 0.5)
-      .setDepth(D + 2);
 
     /* ---- buy "+" button: hidden for submission ---------------------------
     // COMMENTED OUT 2026-08-08. This one was LIVE, not decorative like the pill on Home:
@@ -4198,7 +4240,9 @@ export class GameScene extends Phaser.Scene {
       this.buyGold();
     });
     ---- end hidden ------------------------------------------------------- */
-    void [plusX, plusR, this.buyGold]; // keep these compiling while the block above is off
+    // `plusX`/`plusR` biến mất cùng ô gỗ cũ (2026-08-18) — khối "+" bên trên nếu bật lại thì
+    // phải tự dựng lại toạ độ của nó trong ô mới.
+    void this.buyGold; // giữ cho hàm khỏi bị báo là không ai dùng khi khối trên đang tắt
   }
 
   private loadGold(): number {
@@ -5478,6 +5522,10 @@ export class GameScene extends Phaser.Scene {
     // Normal: grab up to TWO nearest slimes in sight per tick (snappier collecting, user
     // 2026-07-29). Boosted (queue empty): grab EVERY matching slime in the 3 lines of sight.
     const targets = this.findLosTargets(a);
+    // ⚠ ĐỪNG HẠ SỐ NÀY ĐỂ "MỖI Ô MỘT TIA". Đã thử và nó sai tầng: bỏ bớt mục tiêu là đổi NHỊP
+    // CHƠI chứ không phải đổi hiệu ứng — tốc độ ăn tụt còn một nửa (10ms cooldown nhỏ hơn một
+    // khung hình, nên thực tế là 2 ô/khung ≈ 120 ô/giây → 60), và mọi level đang tune theo tốc
+    // độ cũ. Muốn từng viên đạn đọc được thì GIÃN NHỊP chúng ở fireTo, đừng bắn ít đi.
     const take = boost ? targets.length : Math.min(2, targets.length);
     let fired = false;
     for (let k = 0; k < take && openSeats > 0; k++) {
@@ -5488,7 +5536,7 @@ export class GameScene extends Phaser.Scene {
       const kind = isObstacle(code) ? obstacleKind(code) : null;
       if (kind === "soft") this.hitSoftRock(a, idx);
       else if (kind === "wood") this.collectWood(a, idx);
-      else this.fire(a, idx);
+      else this.fire(a, idx, k * BULLET_STAGGER_MS);
       openSeats--;
       fired = true;
     }
@@ -6495,8 +6543,8 @@ export class GameScene extends Phaser.Scene {
 
   // ---- Collect: the critter sprouts legs and runs to board its car --------
 
-  private fire(a: ActiveChest, cellIdx: number) {
-    this.fireTo(a.view, cellIdx);
+  private fire(a: ActiveChest, cellIdx: number, delay = 0) {
+    this.fireTo(a.view, cellIdx, delay);
   }
 
   // A hammer car strikes a soft rock: crack on the first hit, shatter on the second.
@@ -6583,7 +6631,7 @@ export class GameScene extends Phaser.Scene {
 
   // Send the slime at cellIdx running to board `view` (a normal car OR the VIP
   // magnet car). Shared by the line-of-sight pickup and the Magnet booster.
-  private fireTo(view: ChestView, cellIdx: number) {
+  private fireTo(view: ChestView, cellIdx: number, delay = 0) {
     const key = this.keys[cellIdx]!;
     // Clear EVERY cell this tile occupies (a 2×2 wood clears all four at once), but
     // it still counts as one collected unit / one seat.
@@ -6622,6 +6670,31 @@ export class GameScene extends Phaser.Scene {
       nk.setScale(0.5);
       this.tweens.add({ targets: nk, scale: 1, duration: 170, ease: "Back.out" });
       this.sparkle(bx, by, COLORS[bottom]);
+    }
+
+    // THỬ NGHIỆM: kiểu "nhảy rồi biến mất". Đặt TRƯỚC nhánh runner-cap bên dưới để nó chi phối
+    // mọi ô, kể cả lúc bàn đang bận — nếu để sau thì những đợt ăn dồn dập lại rơi về zipToCar và
+    // ta không thấy được hiệu ứng ở đúng lúc đáng xem nhất.
+    if (HOP_COLLECT) {
+      view.inFlight -= 1; // không có gì bay về xe, nên trả lại chỗ đã giữ
+      view.chest.count = Math.max(0, view.chest.count - 1);
+      view.countText.setText(String(view.chest.count));
+      Audio.pop();
+      if (view.chest.count <= 0) {
+        Audio.finish();
+        this.finishCar(view);
+      }
+      // Ô chỉ nhảy KHI ĐẠN TỚI NƠI, không nhảy ngay lúc bắn — nếu nhảy ngay thì viên đạn còn
+      // đang bay giữa đường mà đích đã biến mất. Xét thắng cũng dời vào đây vì lý do ấy: bàn
+      // sạch ô nhưng vài viên còn trên đường thì màn thắng đè lên chúng.
+      // Viên thứ hai của cùng một nhịp lùi lại một chút để hai viên đọc thành HAI CÚ BẮN chứ
+      // không thành một loạt. Vị trí xe đọc TRONG callback vì lúc đó xe đã chạy tiếp.
+      const shoot = () => this.shotBullet(view.container.x, view.container.y, key.x, key.y, () => {
+        this.hopAway(key);
+        if (this.keysRemaining <= 0 && this.runners.length === 0) this.win();
+      });
+      if (delay > 0) this.time.delayedCall(delay, shoot); else shoot();
+      return;
     }
 
     // EATING FAST → collect INSTANTLY (no running critter, no beam) with just a light pop.
@@ -6844,6 +6917,63 @@ export class GameScene extends Phaser.Scene {
     this.getSparkEmitter().explode(4, x1, y1);
   }
 
+  /**
+   * THỬ NGHIỆM — LUỒNG HÚT theo đúng video mẫu (user 2026-08-18: "làm hiệu ứng bắn giống video").
+   *
+   * Đo trên IMG_6604.MP4, phóng to bám một ô: thứ nối xe với ô KHÔNG PHẢI tia màu, mà là một
+   * luồng TRẮNG dày, LOE Ở PHÍA Ô và THÓP VỀ PHÍA XE, hơi cong, sống đúng 2 khung ở 30fps
+   * (~65ms) rồi tắt. Trông như ô bị hút xuống xe chứ như xe bắn lên.
+   *
+   * Bản trước tôi làm ngược cả ba điểm: tô theo màu ô, loe ở phía xe, và sống 130ms — nên nó
+   * đọc như một tia laser chứ không như luồng hút.
+   *
+   * Không vẽ vòng loé ở ô: video không có, và thêm vào là ồn đúng lúc ô đang nhảy.
+   */
+  /**
+   * THỬ NGHIỆM — VIÊN ĐẠN bay từ xe tới ô (user 2026-08-18, kèm ảnh chụp: "tia bay từ xe bay
+   * đến ô vuông", "độ dài tia tỷ lệ thuận với khoảng cách").
+   *
+   * ⚠ Hai bản trước tôi dựng SAI BẢN CHẤT: vẽ một dải đứng yên nối xe với ô. Ảnh user gửi cho
+   * thấy nó là vật thể ĐANG BAY — một con nhộng trắng nằm giữa quãng đường, đầu tròn, thân kéo
+   * dài theo hướng bay. Bay chứ không phải nối, nên vẽ dải là sai ngay từ ý.
+   *
+   * Dài theo khoảng cách, có chặn hai đầu: bắn sát thì viên đạn vẫn phải thấy được, bắn xuyên
+   * bàn thì không được dài thành một vệt vắt ngang.
+   *
+   * `onHit` gọi khi đạn tới nơi — ô nổ ở đó, nên cú nhảy khớp với lúc trúng chứ không xảy ra
+   * trước. Mọi thứ về ĐIỂM SỐ đã chốt ở caller rồi, phần này thuần trang trí.
+   */
+  private shotBullet(x0: number, y0: number, x1: number, y1: number, onHit: () => void) {
+    const dx = x1 - x0, dy = y1 - y0;
+    const dist = Math.hypot(dx, dy) || 1;
+    const ux = dx / dist, uy = dy / dist;
+    const back = Math.min(this.cell * 0.45, dist * 0.35);   // ló ra khỏi đầu xe
+    const sx = x0 + ux * back, sy = y0 + uy * back;
+    const len = Math.max(this.cell * BULLET_LEN_MIN, Math.min(this.cell * BULLET_LEN_MAX, dist * BULLET_LEN_RATIO));
+    // ⚠ DỪNG TRƯỚC Ô, và khe hở đo từ MŨI đạn chứ không phải từ tâm nó (user 2026-08-18: "vẫn
+    // đến gần ô vuông quá"). Viên đạn vẽ từ -len/2 tới +len/2 quanh tâm, nên đo từ tâm thì mũi
+    // nhô thêm nửa thân: đặt 1.2 mà thân dài 1.3 thì khe hở thật chỉ còn 0.55 cạnh ô — đúng một
+    // nửa con số ghi trong hằng số. Cộng len/2 vào là hằng số nói đúng thứ mắt nhìn thấy.
+    const stop = Math.min(this.cell * BULLET_STOP_CELLS + len / 2, dist * 0.7);
+    const ex = x1 - ux * stop, ey = y1 - uy * stop;
+    const travel = Math.hypot(ex - sx, ey - sy) || 1;
+    const w = this.cell * 0.42;   // bề ngang chỗ phình nhất
+    // ẢNH DÙNG CHUNG MỘT TEXTURE, không phải Graphics riêng từng viên. Graphics không gộp được
+    // draw call: 30 viên trên màn là 30 lệnh vẽ. Cùng một texture thì Phaser gộp tất cả vào một
+    // lệnh, và mỗi viên chỉ còn là một sprite được xoay + kéo giãn.
+    const g = this.add.image(sx, sy, this.getBulletTexture()).setDepth(DEPTH_RUNNER + 1);
+    g.setDisplaySize(len, w * 1.6);
+    g.setRotation(Math.atan2(dy, dx));
+
+    // Tốc độ CỐ ĐỊNH, không phải thời lượng cố định: thời lượng cố định thì cú bắn gần trông
+    // lừ đừ còn cú bắn xa trông như dịch chuyển tức thời.
+    const ms = Math.max(70, Math.min(260, travel / BULLET_SPEED));
+    this.tweens.add({
+      targets: g, x: ex, y: ey, duration: ms, ease: "Sine.in",
+      onComplete: () => { g.destroy(); onHit(); },
+    });
+  }
+
   // A small dust puff kicked up at a running critter's feet.
   private footDust(x: number, y: number) {
     this.getDustEmitter().explode(1, x, y);
@@ -6853,6 +6983,45 @@ export class GameScene extends Phaser.Scene {
   // runners. The game state was settled by the caller — nothing here touches counts,
   // seats or the win check — so it is safe to interrupt at any point. The path bows to
   // one side and homes on the car's LIVE position, since the car keeps driving.
+  /**
+   * THỬ NGHIỆM — ô tự nhấc lên rồi tan tại chỗ, không chạy về xe (xem HOP_COLLECT).
+   *
+   * Dựng theo video mẫu: ô bật lên kèm một chớp TRẮNG ở mép dưới — trắng chứ không phải màu ô,
+   * vì trong video chớp ấy đọc như bụi bật lên, và tô theo màu ô thì nó chìm vào chính cái ô.
+   *
+   * Ô bị NHẤC KHỎI LƯỚI trước khi tween: nó vẫn nằm trong lưới thì cú nhảy bị các ô bên cạnh
+   * che mất một nửa.
+   */
+  private hopAway(tile: Phaser.GameObjects.Container) {
+    const s = this.cell;
+    tile.setDepth(DEPTH_RUNNER);
+    // KHÔNG có chớp nổ ở chân ô (user 2026-08-18: "k cần hiệu ứng nổ ở gần ô vuông"). Bản đầu
+    // có một puff trắng ở mép dưới, dựng theo video mẫu — nhưng ở đây nó chồng lên đúng lúc ô
+    // đang nhấc lên và làm rối cái chuyển động vốn là thứ đáng xem.
+    // KHÔNG có đốm trắng trên ô (user 2026-08-18: "bỏ cái hiệu ứng màu trắng ở ô vuông khi nó
+    // chuẩn bị ẩn"). Video mẫu CÓ đốm ấy — bản đồ độ sáng cho thấy một vòng tròn trắng đè kín ô
+    // ở khung 14 — nhưng ở game này ô to hơn nhiều nên nó thành một mảng trắng lớn, che mất
+    // chính cú nhảy. Giữ lại ghi chú để lượt sau khỏi "sửa" ngược lại theo video.
+    this.tweens.add({
+      targets: tile,
+      y: tile.y - s * HOP_RISE,
+      scale: tile.scaleX * 1.14,
+      duration: HOP_UP_MS,
+      ease: "Quad.out",
+      onComplete: () => {
+        if (!tile.scene) return;
+        this.tweens.add({
+          targets: tile,
+          scale: 0.15,
+          alpha: 0,
+          duration: HOP_OUT_MS,
+          ease: "Quad.in",
+          onComplete: () => tile.destroy(),
+        });
+      },
+    });
+  }
+
   private zipToCar(tile: Phaser.GameObjects.Container, view: ChestView, color: number) {
     const sx = tile.x;
     const sy = tile.y;
@@ -6918,6 +7087,34 @@ export class GameScene extends Phaser.Scene {
 
   // White rounded-capsule used for every runner's legs. Generated once per scene and
   // scaled/tinted per slime, so all legs share one texture and batch together.
+  /**
+   * Viên đạn hình GIỌT NƯỚC: đầu tròn to ở phía trước, thân thon dần về đuôi (user 2026-08-18:
+   * "cho hình đẹp hơn 1 chút, như ảnh tôi gửi"). Đầu phình là thứ làm mắt đọc ra hướng bay; dày
+   * đều hai đầu thì nhìn như một thanh gạch trôi ngang.
+   *
+   * Vẽ MỘT LẦN vào texture rồi mọi viên dùng chung, nên chúng gộp được vào một draw call.
+   * Dựng bằng một hình tròn ở đầu cộng một tam giác kéo về đuôi, hai lớp: quầng mờ bọc ngoài
+   * cho mép mềm, thân đặc bên trong. Cùng màu nên mối nối không lộ.
+   */
+  private getBulletTexture(): string {
+    const KEY = "bullet-drop";
+    if (!this.textures.exists(KEY)) {
+      const W = 128, H = 40, cy = H / 2;
+      const g = this.make.graphics({ x: 0, y: 0 }, false);
+      const drop = (r: number, a: number) => {
+        const headX = W - r;
+        g.fillStyle(0xffffff, a);
+        g.fillCircle(headX, cy, r);
+        g.fillPoints([{ x: 0, y: cy }, { x: headX, y: cy - r }, { x: headX, y: cy + r }], true);
+      };
+      drop(cy * 0.98, 0.20);   // quầng mờ
+      drop(cy * 0.62, 0.95);   // thân đặc
+      g.generateTexture(KEY, W, H);
+      g.destroy();
+    }
+    return KEY;
+  }
+
   private getLegTexture(): string {
     if (!this.textures.exists("leg")) {
       const g = this.make.graphics({ x: 0, y: 0 }, false);
