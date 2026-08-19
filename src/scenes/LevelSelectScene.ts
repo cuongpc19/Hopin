@@ -16,7 +16,7 @@ import {
   MILESTONES,
   type EventReward,
 } from "../game/cloverEvent";
-import { dailyEnter, dailyDone, dailyNeverPlayed, dailyResetFromUrl } from "../game/daily";
+import { dailyEnter, dailyDone, dailyNeverPlayed, dailyResetFromUrl, DAILY_UNLOCK_LEVEL } from "../game/daily";
 
 
 // Home screen (redesign 2026-08-01, user): BỎ bản đồ dây-level cuộn — nền là bức tranh
@@ -78,8 +78,9 @@ export class LevelSelectScene extends Phaser.Scene {
     this.buildBottomNav();
     if (showEvent) this.buildEventBar();
     // Huy hiệu Thử Thách chỉ hiện SAU KHI qua L20 (user 2026-08-15) — mở khoá dần, và giữ
-    // khúc đầu game gọn cho người mới. `progress` là level cao nhất đã mở, nên "qua L20" là >20.
-    if (progress > 20) this.buildDailyBadge(showEvent);
+    // khúc đầu game gọn cho người mới. `progress` là level cao nhất đã mở, nên "qua L20" là
+    // progress >= 21 = DAILY_UNLOCK_LEVEL (thanh "sắp mở khoá" ở màn thắng đọc chung số này).
+    if (progress >= DAILY_UNLOCK_LEVEL) this.buildDailyBadge(showEvent);
   }
 
   // ---- Daily Challenge: huy hiệu nổi ở mép phải -------------------------------------------

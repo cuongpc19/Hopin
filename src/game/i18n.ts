@@ -221,6 +221,15 @@ const S: Record<string, { vi: string; en: string }> = {
   // ---- win / lose ----
   levelComplete: { vi: "LEVEL COMPLETE!", en: "LEVEL COMPLETE!" },
   claim: { vi: "CLAIM", en: "CLAIM" },
+  // Thanh "sắp mở khoá" ở màn thắng. Tên booster (Add/Grab/Shuffle/Magnet) và
+  // "Lucky Clover" giữ TIẾNG ANH ở cả hai thứ tiếng như mọi chỗ khác trong game.
+  unlockNext: { vi: "TÍNH NĂNG MỚI SẮP MỞ", en: "NEW FEATURE COMING UP" },
+  unlockNextHard: { vi: "SẮP TỚI SUPER HARD", en: "SUPER HARD LEVEL" },
+  unlockIn: { vi: "còn {n} level", en: "{n} levels to go" },
+  unlockIn1: { vi: "còn 1 level", en: "1 level to go" },
+  // Ngắn hết mức: nhãn trái đã dài hơn hẳn từ 2026-08-19, hai chuỗi phải cùng lọt một dòng
+  // rộng 253px. Bản en cũ "UNLOCKS NEXT LEVEL!" đè lên nhãn trái.
+  unlockNow: { vi: "MỞ Ở LEVEL SAU!", en: "NEXT LEVEL!" },
   queueFull: { vi: "HẾT CHỖ RỒI! 😵", en: "QUEUE FULL! 😵" },
   reviveBtn: { vi: "REVIVE   {n} 🪙", en: "REVIVE   {n} 🪙" },
   reviveNeed: { vi: "Cần {n} 🪙 để Revive", en: "Need {n} 🪙 to revive" },

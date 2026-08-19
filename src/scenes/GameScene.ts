@@ -17,14 +17,15 @@ import {
   type Level,
   type TrackKind,
 } from "../game/level";
-import { planCSource } from "../game/planC";
+import { planCSource, planCLevel } from "../game/planC";
+import { DESIGNED_LEVELS } from "../levels/designed";
 import { drawVoxelCube, voxelFrontOverlap, setVoxelFrontRatio } from "../render/voxelCube";
 import { tileButton } from "../game/ui";
 import { Audio } from "../game/audio";
 import { t as tr, tf as trf, getLang, setLang } from "../game/i18n";
 import { getLives, spendLife, showHeartsModal, canEnterLevel, graceMsLeft } from "../game/lives";
 import { platform } from "../platform";
-import { dailyRunning, dailyNoteWin, dailyClearRun, dailyLevel, dailyIndex, dailyDone, dailyEnter, dailyResetFromUrl } from "../game/daily";
+import { dailyRunning, dailyNoteWin, dailyClearRun, dailyLevel, dailyIndex, dailyDone, dailyEnter, dailyResetFromUrl, DAILY_UNLOCK_LEVEL } from "../game/daily";
 import { saveRun, groupRuns, exportJsonl, clearRuns, deviceId, copyToClipboard } from "../game/playlog";
 import { sendRun, openPrivacyPolicy, noteSessionLevel } from "../game/telemetry";
 import { startAnalytics, track, gaLoaded } from "../game/analytics";
@@ -366,6 +367,78 @@ const BOOSTERS: BoosterDef[] = [
 ];
 const FREE_GIFT = 2; // free copies granted the first time you reach a booster's unlock level
 
+// ---- MỐC MỞ KHOÁ TÍNH NĂNG (thanh tiến độ ở màn thắng, theo game mẫu Marble Sort) ----
+// User 2026-08-19 chốt ĐÚNG NĂM mốc: Add booster · level super hard đầu tiên · Thử Thách Ngày ·
+// slime đá · socola. Grab/Shuffle/Magnet và Cỏ May Mắn CỐ TÌNH không có rung — chúng vẫn mở
+// khoá và vẫn có popup hướng dẫn như cũ, chỉ là không được thanh này đếm ngược tới.
+//
+// ⚠ KHÔNG viết cứng mốc nào cả — mọi con số đều lấy từ nơi ĐỊNH NGHĨA nó (BOOSTERS.unlock,
+// DAILY_UNLOCK_LEVEL, levelDifficulty, và với đá/socola là chính dữ liệu bàn). Bảng thứ hai
+// chép tay là thứ sẽ âm thầm cũ đi: đợt phương án C vừa gỡ hết đá & socola khỏi L2-34, một hằng
+// số "đá mở ở L23" sẽ nói dối ngay từ hôm đó.
+interface UnlockDef {
+  level: number; // level đầu tiên có nó
+  name: string; // CHỈ để đọc code — màn thắng hiện ICON chứ không hiện tên
+  img?: string; // texture key; thiếu thì rơi về emoji
+  emoji?: string;
+  caption?: string; // chữ nhỏ DƯỚI icon, khi một mình cái hình chưa nói hết
+  labelKey?: string; // nhãn góc trái; mặc định "tính năng mới sắp mở"
+}
+
+// Level đầu tiên có SLIME ĐÁ / SOCOLA / nhãn SUPER HARD, dò thẳng từ bàn thật (đã qua ánh xạ
+// phương án C). Quét một lần rồi nhớ; chỉ đọc board của vài chục level đã nằm sẵn trong bộ nhớ.
+type FirstOf = { rock: number | null; choco: number | null; superHard: number | null };
+let _contentFirst: FirstOf | null = null;
+function firstContentLevels(): FirstOf {
+  if (_contentFirst) return _contentFirst;
+  const out: FirstOf = { rock: null, choco: null, superHard: null };
+  const done = () => out.rock !== null && out.choco !== null && out.superHard !== null;
+  for (let n = 2; n <= 150 && !done(); n++) {
+    if (out.superHard === null && levelDifficulty(n) === "superhard") out.superHard = n;
+    const L = DESIGNED_LEVELS[planCLevel(n) ?? n] ?? DESIGNED_LEVELS[n];
+    if (!L) continue;
+    if (out.rock === null && (L.board ?? []).some((v) => v >= HARD_ROCK)) out.rock = n;
+    if (out.choco === null && (L.boxes?.length ?? 0) > 0) out.choco = n;
+  }
+  _contentFirst = out;
+  return out;
+}
+
+function unlockLadder(): UnlockDef[] {
+  const c = firstContentLevels();
+  const add = BOOSTERS.find((b) => b.key === "add");
+  const list: UnlockDef[] = [{ level: DAILY_UNLOCK_LEVEL, name: "Daily Challenge", img: "daily-icon" }];
+  if (add) list.push({ level: add.unlock, name: add.label, img: add.img });
+  // 🔥 chứ không phải 💀 (user 2026-08-19): cùng ký hiệu với nhãn HARD trong game nên người chơi đọc
+  // ra ngay là "level khó", và thanh chỉ bao giờ hiện mốc super hard nên không lẫn với tier hard.
+  // Riêng mốc này có chữ dưới icon (user 2026-08-19): 🔥 một mình chỉ nói "khó", không nói khó
+  // tới mức nào. "HARD" giữ tiếng Anh ở cả hai ngôn ngữ, y như nhãn tier trong game.
+  if (c.superHard !== null)
+    list.push({
+      level: c.superHard, name: "level super hard", emoji: "🔥", caption: "HARD",
+      labelKey: "unlockNextHard", // mốc này không phải "tính năng mới" — nó là một bàn khó
+    });
+  // Ô đá dùng chính texture ô đá trong bàn (makeRockTile dựng sẵn ở create, mọi level đều có).
+  if (c.rock !== null) list.push({ level: c.rock, name: "slime đá", img: WALL_TEXTURE, emoji: "🪨" });
+  if (c.choco !== null) list.push({ level: c.choco, name: "socola", emoji: "🍫" });
+  return list.sort((a, b) => a.level - b.level);
+}
+
+// Mốc kế tiếp tính theo TIẾN ĐỘ (level sắp chơi), không theo level vừa thắng — chơi lại
+// level cũ thì thanh phải đứng yên ở chỗ thật, chứ không tụt về.
+//   >= chứ không phải >: thắng L5 xong tiến độ là 6, và Add mở NGAY ở L6, nên màn thắng L5
+//   phải khoe Add đã đầy thanh ("mở ở level sau"), không nhảy sang mốc L11.
+function nextUnlockAt(progress: number): { us: UnlockDef[]; from: number; span: number } | null {
+  const ladder = unlockLadder();
+  const idx = ladder.findIndex((u) => u.level >= progress);
+  if (idx < 0) return null; // đã mở hết — không hiện thanh nữa
+  const level = ladder[idx].level;
+  const us = ladder.filter((u) => u.level === level); // nhiều thứ cùng mở một level → gộp
+  const prev = ladder.filter((u) => u.level < level).pop();
+  const from = prev ? prev.level : 1;
+  return { us, from, span: Math.max(1, level - from) };
+}
+
 // Hoạt cảnh chuyển màn sau ván thắng. Trước là 1500ms, và chú thích ngay cạnh đã tự nhận
 // "level build đồng bộ nên có sẵn ngay" — tức chữ "Loading..." đó là GIẢ, màn kế đã sẵn sàng
 // từ đầu. Rút còn 600ms (user 2026-08-13): đủ để hoạt cảnh đọc được mà không bắt chờ không.
@@ -576,6 +649,7 @@ export class GameScene extends Phaser.Scene {
     this.load.image("out-of-space", "art/outofspace-cropped.png");
     this.load.image("heart-icon", "art/heart.png?v=1"); // hearts panel art (shared with Home)
     this.load.image("car-vip", "art/car-vip.png"); // golden/purple VIP car for the Magnet booster
+    this.load.image("daily-icon", "art/daily-challenge.png"); // icon mốc Thử Thách ở thanh sắp mở khoá
     for (const b of ["add", "hand", "refresh", "magnet"]) {
       this.load.image(`booster-${b}`, `art/booster-${b}.png`);
     }
@@ -660,6 +734,9 @@ export class GameScene extends Phaser.Scene {
       if (!ok) this.makeTileTexture(`tile-${i}`, COLORS[i]);
     }
     this.makeTileTexture("tile-hidden", 0xeef3f8); // white blank for the "?" cover
+    // Ô ĐÁ dựng tại chỗ, ĐÈ LÊN ảnh `art/rock-hard.png` vừa nạp — xem chú thích ở makeRockTile.
+    // Đặt sau vòng sinh ô slime để hai loại chắc chắn cùng một khối.
+    if (TILE_STYLE === "bead") this.makeRockTile(WALL_TEXTURE);
     // Placeholder art for obstacle / special-car textures. NOTE: Vite's dev server
     // returns 200 (index.html) for a missing PNG, so `loaderror` is unreliable —
     // instead detect a missing/broken texture directly and draw a placeholder.
@@ -713,7 +790,9 @@ export class GameScene extends Phaser.Scene {
     // ?win=1 — thắng ngay, CHỈ Ở DEV SERVER. Cố tình khoá sau import.meta.env.DEV chứ không
     // phải sau target: nó không được lọt vào BẤT KỲ bản build nào, kể cả bản web tự host, vì
     // một tham số URL phá xong level là thứ người chơi truyền tay nhau trong một buổi chiều.
-    if (import.meta.env.DEV && qs.get("win") === "1") this.time.delayedCall(400, () => this.win());
+    if (import.meta.env.DEV && qs.get("win") === "1") {
+      this.time.delayedCall(400, () => this.win());
+    }
   }
 
   private startLevel(levelNum: number) {
@@ -2189,6 +2268,67 @@ export class GameScene extends Phaser.Scene {
    * Nên mọi số đo dưới đây là TỈ LỆ của cạnh ô, và viền có TRẦN THEO PIXEL để bàn to không bị
    * viền ăn hết. Phải nhìn ở CẢ bàn 25×25 lẫn 39×39 trước khi chốt.
    */
+  /**
+   * Ô ĐÁ vẽ bằng ĐÚNG khối của ô slime (user 2026-08-18: "design lại ô slime đá theo style như
+   * các slime ô vuông hiện tại, trước là tôi dùng ảnh").
+   *
+   * Trước đây đá là PNG `art/rock-hard.png`, nên nó không ăn nhập gì với ô slime: khác tỉ lệ
+   * nắp/thân, khác độ bo góc, khác kiểu bắt sáng. Dựng tại chỗ thì hai loại ô luôn khớp nhau dù
+   * sau này có đổi `VOXEL_BODY` hay độ bo.
+   *
+   * Ba chỗ CỐ Ý khác ô slime, để mắt đọc ra "đá" chứ không phải "một viên kẹo màu xám":
+   *   • KHÔNG có chấm sáng bóng — thứ làm ô slime trông như hạt nhựa; đá chỉ có một dải sáng mờ.
+   *   • Mặt nắp rắc đốm sẫm/nhạt — vân đá, đủ để thấy ở cỡ ô 11px mà không thành nhiễu.
+   *   • Sắc lạnh hơi ngả xanh, tách khỏi dải nâu-tan của bàn và của mọi màu slime.
+   */
+  private makeRockTile(key: string, size = 128) {
+    if (this.textures.exists(key)) this.textures.remove(key);
+    const tex = this.textures.createCanvas(key, size, size);
+    const ctx = tex?.getContext();
+    if (!tex || !ctx) return;
+    const R = GameScene.roundPath;
+    const hx = (c: number) => `#${c.toString(16).padStart(6, "0")}`;
+    const STONE = 0x9aa0ad;                      // xám ngả xanh
+    const m = size * 0.04;
+    const w = size - m * 2;
+    const lidH = w / (1 + VOXEL_BODY);           // cùng tỉ lệ nắp/thân với ô slime
+    const rr = w * 0.24;                         // cùng độ bo góc
+    const bw = Math.max(size * 0.03, 1);
+
+    R(ctx, m, m, w, w, rr); ctx.fillStyle = hx(shade(STONE, 0.24)); ctx.fill();
+    const fg = ctx.createLinearGradient(0, m + lidH, 0, m + w);
+    fg.addColorStop(0, hx(shade(STONE, 0.58)));
+    fg.addColorStop(1, hx(shade(STONE, 0.38)));
+    R(ctx, m + bw, m + lidH - rr, w - bw * 2, w - lidH - bw + rr, rr * 0.9);
+    ctx.fillStyle = fg; ctx.fill();
+    R(ctx, m + bw, m + bw, w - bw * 2, lidH - bw, rr * 0.9);
+    ctx.fillStyle = hx(STONE); ctx.fill();
+
+    ctx.save(); R(ctx, m + bw, m + bw, w - bw * 2, lidH - bw, rr * 0.9); ctx.clip();
+    // Dải sáng mờ thay cho khối cầu bóng của ô slime.
+    const g = ctx.createLinearGradient(m, m, m + w, m + lidH);
+    g.addColorStop(0, "rgba(255,255,255,0.16)");
+    g.addColorStop(0.6, "rgba(255,255,255,0.01)");
+    g.addColorStop(1, "rgba(0,0,0,0.20)");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, size, size);
+    // Vân đá: đốm cố định (không random) để mọi ô đá trông giống nhau, và để bản dựng lại
+    // luôn ra đúng một hình — ô nhấp nháy giữa các lần tải là lỗi khó truy nhất.
+    const spots: [number, number, number, string][] = [
+      [0.30, 0.34, 0.10, "rgba(0,0,0,0.16)"], [0.62, 0.28, 0.07, "rgba(255,255,255,0.16)"],
+      [0.72, 0.52, 0.09, "rgba(0,0,0,0.13)"], [0.44, 0.60, 0.06, "rgba(255,255,255,0.11)"],
+      [0.22, 0.62, 0.05, "rgba(0,0,0,0.11)"],
+    ];
+    for (const [px, py, pr, fill] of spots) {
+      ctx.beginPath();
+      ctx.ellipse(m + w * px, m + lidH * py, w * pr, lidH * pr * 0.9, 0.4, 0, Math.PI * 2);
+      ctx.fillStyle = fill; ctx.fill();
+    }
+    ctx.restore();
+    ctx.fillStyle = "rgba(0,0,0,0.32)";
+    ctx.fillRect(m + rr * 0.5, m + lidH - Math.max(size * 0.012, 0.6), w - rr, Math.max(size * 0.012, 0.6));
+    tex.refresh();
+  }
+
   private makeBeadTile(key: string, col: number, size = 128) {
     if (this.textures.exists(key)) this.textures.remove(key);
     const tex = this.textures.createCanvas(key, size, size);
@@ -4293,7 +4433,7 @@ export class GameScene extends Phaser.Scene {
 
   private unlockProgress(reached: number) {
     try {
-      const cur = parseInt(platform.storage.getItem("pf_progress") ?? "1", 10) || 1;
+      const cur = this.readProgress();
       if (reached > cur) platform.storage.setItem("pf_progress", String(reached));
     } catch {
       /* storage unavailable — progress just won't persist */
@@ -7767,8 +7907,17 @@ export class GameScene extends Phaser.Scene {
     // dưới thì thắng nó sẽ MỞ KHOÁ tới L512 và Ô LEVEL ở Home nhảy sang "LEVEL 512", tức người
     // chơi đang ở L25 tự nhiên được tặng 487 level. Thử thách là chế độ RIÊNG, tiến độ của nó
     // nằm ở pf_daily_idx.
+    // Mốc neo của thanh "sắp mở khoá" ở màn thắng: CHÍNH LEVEL VỪA THẮNG → level kế.
+    //
+    // ⚠ ĐỪNG đổi lại sang pf_progress. Bản đầu tôi neo vào tiến độ đã lưu, và nó hỏng ở cả hai
+    // đầu (user 2026-08-19 gặp lần lượt cả hai): người đang ở mốc 21 mà thắng lại L1 thì thanh
+    // vẽ trạng thái của mốc 21 — đầy 5 ô kèm "MỞ Ở LEVEL SAU!"; chặn lại bằng "chỉ vẽ khi tiến
+    // độ tăng" thì thắng L1 chẳng thấy thanh đâu nữa. Neo vào level đang chơi thì thắng L1 luôn
+    // ra 1/5 tới mốc Add, đúng cái người chơi nhìn thấy trước mặt.
+    let prog: { before: number; after: number } | null = null;
     if (!dailyRunning()) {
       this.unlockProgress(next); // record on the picker that this level is beaten
+      prog = { before: this.levelNum, after: next };
       // Ô LEVEL ở Home đọc pf_current — thắng xong phải trỏ NGAY sang level kế, kẻo về Home
       // vẫn thấy level vừa thắng (pf_current chỉ được ghi lúc BẮT ĐẦU chơi; user 2026-08-03).
       try { platform.storage.setItem("pf_current", String(next)); } catch { /* storage unavailable */ }
@@ -7784,7 +7933,7 @@ export class GameScene extends Phaser.Scene {
     }
     // Hold a beat on the cleared board, then the WIN SCREEN (redesign theo video mẫu
     // IMG_6489 — hero là animation slime nhảy lên xe LẶP ngay trong màn thắng).
-    this.time.delayedCall(350, () => this.showWinModal(reward, cloverAward));
+    this.time.delayedCall(350, () => this.showWinModal(reward, cloverAward, prog));
   }
 
   // ---- WIN SCREEN (redesign theo video mẫu Manythings/IMG_6489, user 2026-08-01) ----
@@ -7793,7 +7942,11 @@ export class GameScene extends Phaser.Scene {
   // banner LEVEL COMPLETE!; XU VÀNG toả tia + "+N" (art thật: public/art/coin.png — chưa
   // có thì placeholder makeCoinTexture); khối sự kiện Cỏ May Mắn nền tím; nút CLAIM xanh.
   // Tap bất kỳ đâu (hoặc CLAIM) → vào thẳng level tiếp theo như cũ.
-  private showWinModal(reward: number, cloverAward: ReturnType<typeof awardClovers> | undefined) {
+  private showWinModal(
+    reward: number,
+    cloverAward: ReturnType<typeof awardClovers> | undefined,
+    prog: { before: number; after: number } | null
+  ) {
     Audio.victory(); // fanfare chúc mừng (jingle nguyên bản — an toàn bản quyền)
     // Play is over — tell the host before the modal, so this is a legal ad moment.
     platform.gameplayStop();
@@ -8238,22 +8391,36 @@ export class GameScene extends Phaser.Scene {
       }
     };
 
-    // ---- khối sự kiện Cỏ May Mắn (panel tím như "New Feature Unlock" của video) ----
-    let claimY = cy + 262; // 2026-08-01: CLAIM hạ xuống thêm
+    // ---- khối tiến độ: panel Cỏ May Mắn (tím) + thanh SẮP MỞ KHOÁ (xanh đêm) ----
+    // Hai panel xếp chồng, đo chiều cao TRƯỚC rồi mới đặt, vì nút CLAIM nằm dưới cùng.
+    const pw = Math.min(GAME_W - 60, 316);
+    const STACK_GAP = 8;
+    const un = prog ? nextUnlockAt(prog.after) : null; // null ở chế độ thử thách & khi hết mốc
+    const lines: string[] = [];
     if (cloverAward) {
-      const pw = Math.min(GAME_W - 60, 316);
-      const lines: string[] = [`+${cloverAward.gained} ${CLOVER_ICON}  ${EVENT_NAME}`];
+      lines.push(`+${cloverAward.gained} ${CLOVER_ICON}  ${EVENT_NAME}`);
       for (const m of cloverAward.granted) lines.push(`🎉 ${rewardLabel(m.reward)}`);
       const p = cloverAward.progress;
       if (!p.done && p.next) lines.push(`Còn ${p.remaining} ${CLOVER_ICON} → ${rewardLabel(p.next.reward)}`);
       else if (p.done) lines.push(`Hoàn thành sự kiện! 🏆`);
-      const ph = 26 + lines.length * 22;
-      const py = cy + 186;
+    }
+    const cloverH = lines.length ? 26 + lines.length * 22 : 0;
+    const unlockH = un ? 46 : 0;
+    const stackH = cloverH + unlockH + (cloverH && unlockH ? STACK_GAP : 0);
+    let py = cy + 186;
+    // Màn 4:3 (iPad, GAME_H=768) không đủ chỗ cho CẢ hai panel: đẩy cả khối LÊN cho vừa,
+    // thà chồng nhẹ lên mép dưới đồng xu còn hơn để nút CLAIM rơi khỏi màn hình.
+    // ...nhưng không đẩy lên quá đồng xu (sàn coinY+64): trên màn 4:3 mà vừa trúng mốc Cỏ May
+    // Mắt (panel 4 dòng) thì đằng nào cũng thiếu chỗ, thà để nút CLAIM sát mép dưới còn hơn
+    // panel trèo lên che mất đồng xu.
+    if (stackH) py = Math.max(coinY + 64, py - Math.max(0, py + stackH + 56 + 25 + 20 - GAME_H));
+    let claimY = Math.min(stackH ? py + stackH + 56 : cy + 262, GAME_H - 32); // 2026-08-01: CLAIM hạ xuống thêm
+    if (cloverH) {
       const panel = this.add.graphics().setDepth(401);
       panel.fillStyle(0x6b5aa8, 0.95);
-      panel.fillRoundedRect(cx - pw / 2, py, pw, ph, 16);
+      panel.fillRoundedRect(cx - pw / 2, py, pw, cloverH, 16);
       panel.lineStyle(3, 0x8d7cc9, 1);
-      panel.strokeRoundedRect(cx - pw / 2, py, pw, ph, 16);
+      panel.strokeRoundedRect(cx - pw / 2, py, pw, cloverH, 16);
       objs.push(panel);
       lines.forEach((msg, i) => {
         objs.push(
@@ -8268,7 +8435,113 @@ export class GameScene extends Phaser.Scene {
             .setDepth(402)
         );
       });
-      claimY = py + ph + 56;
+    }
+
+    // ---- THANH SẮP MỞ KHOÁ (game mẫu Marble Sort) ---------------------------
+    // Nhãn "SẮP MỞ KHOÁ" + "còn N level" + thanh chia Ô THEO LEVEL: mỗi ô là một level phải
+    // thắng. Ô mới được rót đầy ngay trước mắt người chơi — đó là toàn bộ lý do của tính năng
+    // này, nên đừng vẽ tĩnh ở trạng thái cuối.
+    if (un) {
+      const sy = py + cloverH + (cloverH ? STACK_GAP : 0);
+      const D = 401;
+      const strip = this.add.graphics().setDepth(D);
+      strip.fillStyle(0x2f3357, 0.96);
+      strip.fillRoundedRect(cx - pw / 2, sy, pw, unlockH, 15);
+      strip.lineStyle(3, 0x5a61a0, 1);
+      strip.strokeRoundedRect(cx - pw / 2, sy, pw, unlockH, 15);
+      objs.push(strip);
+
+      // ICON món sắp mở, KHÔNG có tên (user 2026-08-19: "k cần ghi mô tả đó là cái feature gì"
+      // rồi "k có hình feature nào à để user biết là feature nào được mở"). Một cái hình đủ nhận
+      // ra là booster nào / ô đá / socola mà không biến thanh thành một dòng chữ.
+      // Mốc nào có caption thì icon nhỏ lại và nhích lên, chừa chỗ cho dòng chữ bên dưới.
+      const capped = un.us.some((u) => u.caption);
+      const icoS = capped ? 26 : 30;
+      const icoY = sy + (capped ? 19 : 23);
+      un.us.forEach((u, i) => {
+        const ix = cx - pw / 2 + 26 + i * (icoS - 6);
+        if (u.img && this.textures.exists(u.img)) {
+          objs.push(this.add.image(ix, icoY, u.img).setDisplaySize(icoS, icoS).setDepth(D + 1 + i));
+        } else {
+          objs.push(
+            this.add.text(ix, icoY, u.emoji ?? "🎁", { fontSize: `${icoS - 6}px` }).setOrigin(0.5).setDepth(D + 1 + i)
+          );
+        }
+        if (u.caption) {
+          objs.push(
+            this.add
+              .text(ix, sy + 37, u.caption, {
+                fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "9px", color: "#ffd95e",
+              })
+              .setOrigin(0.5)
+              .setDepth(D + 1 + i)
+          );
+        }
+      });
+      const bx = cx - pw / 2 + 26 + (un.us.length - 1) * (icoS - 6) + icoS / 2 + 8;
+      const bxEnd = cx + pw / 2 - 16;
+      objs.push(
+        this.add
+          .text(bx, sy + 15, tr(un.us.find((u) => u.labelKey)?.labelKey ?? "unlockNext"), {
+            fontFamily: "Arial, sans-serif", fontStyle: "bold", fontSize: "9px", color: "#8f96cc",
+          })
+          .setOrigin(0, 0.5)
+          .setLetterSpacing(0.6)
+          .setDepth(D + 1)
+      );
+      const remain = Math.max(0, un.us[0].level - prog!.after);
+      objs.push(
+        this.add
+          .text(bxEnd, sy + 15, remain <= 0 ? tr("unlockNow") : remain === 1 ? tr("unlockIn1") : trf("unlockIn", { n: remain }), {
+            fontFamily: "Arial, sans-serif",
+            fontStyle: "bold",
+            fontSize: remain <= 0 ? "12px" : "13px",
+            color: remain <= 0 ? "#ffd95e" : "#b9bee6",
+          })
+          .setOrigin(1, 0.5)
+          .setDepth(D + 1)
+      );
+
+      const bw2 = bxEnd - bx, by = sy + 30, bh = 10;
+      const track = this.add.graphics().setDepth(D + 1);
+      track.fillStyle(0x171a30, 1);
+      track.fillRoundedRect(bx, by, bw2, bh, bh / 2);
+      objs.push(track);
+      const fill = this.add.graphics().setDepth(D + 2);
+      objs.push(fill);
+      const drawFill = (f: number) => {
+        if (closed) return; // modal đã đóng → graphics đã destroy, đụng vào là nổ
+        fill.clear();
+        if (f <= 0) return;
+        const w = Math.max(bh, bw2 * Math.min(1, f));
+        fill.fillStyle(0xf7b425, 1);
+        fill.fillRoundedRect(bx, by, w, bh, bh / 2);
+        fill.fillStyle(0xffd95e, 0.9); // gloss nửa trên, cùng tông với banner vàng
+        fill.fillRoundedRect(bx + 2, by + 2, Math.max(1, w - 4), bh * 0.36, bh * 0.18);
+      };
+      // Vạch chia nằm TRÊN cả track lẫn fill, nên phần chưa đầy cũng thấy còn mấy ô.
+      // Chỉ chia ô khi quãng NGẮN. Thanh rộng 284px nên 12 ô vẫn còn 23px/ô, đọc được; quãng
+      // L21→L40 dài 19 level thì 19 vạch thành vụn như răng lược — để thanh liền, người chơi
+      // đọc con số bên phải.
+      if (un.span > 1 && un.span <= 12) {
+        const ticks = this.add.graphics().setDepth(D + 3);
+        ticks.fillStyle(0x2f3357, 1);
+        for (let i = 1; i < un.span; i++) ticks.fillRect(bx + (bw2 * i) / un.span - 1.5, by, 3, bh);
+        objs.push(ticks);
+      }
+      const f0 = (prog!.before - un.from) / un.span;
+      const f1 = (prog!.after - un.from) / un.span;
+      drawFill(f0);
+      if (f1 > f0) {
+        const px = { v: f0 };
+        this.tweens.add({
+          targets: px, v: f1, duration: 620, delay: 480, ease: "Cubic.out",
+          onUpdate: () => drawFill(px.v),
+          onComplete: () => {
+            if (!closed && f1 >= 1) Audio.coin(); // thanh đầy = có đồ mới, đánh dấu bằng tiếng sẵn có
+          },
+        });
+      }
     }
 
     // ---- nút CLAIM xanh — BÉ lại như ảnh mẫu (2026-08-01) ----

@@ -29,6 +29,13 @@ import { platform } from "../platform";
 // dài thêm, và lúc ấy hai bộ chồng số nhau mà chẳng có gì báo.
 export const DAILY_LEVELS = [9001, 9002, 9003, 9004, 9005, 9006, 9007, 9008, 9009, 9010];
 
+/**
+ * Level đầu tiên thấy huy hiệu Thử Thách ở Home (user 2026-08-15: "chỉ hiện sau khi qua L20").
+ * Trước là số 20 viết cứng ngay trong LevelSelectScene; tách ra đây vì thanh "sắp mở khoá" ở
+ * màn thắng cũng phải biết mốc này — hai chỗ đọc một số, đổi một lần là xong.
+ */
+export const DAILY_UNLOCK_LEVEL = 21;
+
 const K_IDX = "pf_daily_idx";   // đã đi tới bậc nào trong dãy
 const K_DAY = "pf_daily_day";   // ngày lịch của lần chơi gần nhất — để biết đã sang ngày mới chưa
 const K_RUN = "pf_daily_run";   // ván đang chơi CÓ PHẢI thử thách không (bậc lúc bấm huy hiệu)
